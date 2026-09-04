@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Menu, Tray, ipcMain, desktopCapturer, session } = require('electron')
+const { autoUpdater } = require('electron-updater')
 const path = require('node:path')
 const fs = require('node:fs')
 
@@ -88,7 +89,31 @@ app.whenReady().then(() => {
   tray.on('click', show)
 
   app.on('second-instance', show)
+
+  setupUpdates()
 })
+
+// ── auto-update (AppImage e NSIS; o feed são as Releases do GitHub) ──────
+function setupUpdates () {
+  if (!app.isPackaged) return          // em dev não há feed nem assinatura
+
+  const send = (state, info) =>
+    win?.webContents.send('update', { state, version: info?.version })
+
+  autoUpdater.on('update-available', i => send('available', i))
+  autoUpdater.on('update-downloaded', i => send('ready', i))
+  autoUpdater.on('error', e => send('error', { version: e.message }))
+
+  ipcMain.handle('install-update', () => {
+    quitting = true
+    autoUpdater.quitAndInstall()
+  })
+
+  autoUpdater.checkForUpdates().catch(() => {})
+  // ponytail: intervalo fixo de 6h. Se um dia precisar de release urgente,
+  // trocar por um push do servidor em vez de encurtar o intervalo.
+  setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 6 * 60 * 60 * 1000)
+}
 
 app.on('before-quit', () => { quitting = true })
 

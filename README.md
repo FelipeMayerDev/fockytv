@@ -111,17 +111,44 @@ never appears and the window has no way back.
 ### Packaging
 
 ```bash
-docker run --rm -v "$PWD:/project" -w /project -u "$(id -u):$(id -g)" \
-  -e HOME=/project/.cache electronuserland/builder:latest \
-  npx electron-builder --linux AppImage
+make run        # open the client
+make linux      # AppImage        -> dist/
+make windows    # NSIS installer  -> dist/
+make release    # build both and publish to GitHub Releases (needs GH_TOKEN)
 ```
 
-Output lands in `dist/`. For Windows, swap the image for
-`electronuserland/builder:wine` and `--linux AppImage` for `--win portable`.
+Everything runs in containers — `node_modules` is installed in one too, and is
+only rebuilt when `package.json` changes. The Electron window itself opens on
+your desktop, since a GUI in a container would defeat the point.
 
-Ship `config.json` **next to** the executable — the app looks there before
-falling back to the bundled default. Inside an AppImage the path comes from
-`$APPIMAGE`, because `app.getPath('exe')` points at the temporary mount.
+### Where config.json is read from
+
+First match wins:
+
+1. `<userData>/config.json` — survives updates, so this is the durable override
+   (`~/.config/fockytv/` on Linux, `%APPDATA%\fockytv\` on Windows)
+2. Next to the executable — `$APPIMAGE`'s directory, or the install directory.
+   Note the NSIS installer rewrites its own directory on every update, so an
+   override there is **not** durable on Windows
+3. The bundled default, which is what you set at build time
+
+For a single shared server, setting `serverUrl` before building is enough and
+nobody has to edit anything.
+
+### Updates
+
+The client checks GitHub Releases on launch and every 6 hours. A new version
+downloads in the background and a toast offers a restart; nothing is applied
+mid-broadcast unless you click it. Supported on AppImage and NSIS — the
+`portable` Windows target cannot auto-update, which is why NSIS is the target
+here.
+
+`config.json` lives outside the application bundle, so updates replace the code
+and leave the server URL alone.
+
+To ship a release: bump `version` in `package.json`, then `GH_TOKEN=... make
+release`. electron-builder creates the tag, uploads both artifacts and the
+`latest*.yml` manifests the updater reads.
 
 ---
 
@@ -135,6 +162,7 @@ falling back to the bundled default. Inside an AppImage the path comes from
 | TCP fallback, no toggle | With `NETWORK_TYPES=udp4\|tcp4`, ICE picks on its own. |
 | shadcn without React | Uses shadcn's design tokens and component CSS (dark zinc; Button/Card/Dialog/Select/Switch/Skeleton). The real library would mean React + Tailwind + a bundler for a single-file renderer. |
 | Thumbnails over WHEP | The grid connects hidden, grabs the first frame, disconnects. No new server endpoint. Cheap for 1–5 streams, not for 50. |
+| NSIS over portable on Windows | `electron-updater` cannot update a `portable` .exe. Auto-update was worth more than copy-and-run. |
 | 60 fps ceiling | The limit is Chromium's capture path, not the hardware. Going higher needs native capture (DXGI/WGC on Windows, PipeWire directly on Linux) outside the browser — a different project. |
 
 The stream key **is** the nickname, and the nickname is the publishing
