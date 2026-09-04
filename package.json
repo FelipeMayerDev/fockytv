@@ -1,14 +1,14 @@
 {
   "name": "fockytv",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder"
   },
   "devDependencies": {
-    "electron": "^33.0.0",
-    "electron-builder": "^25.0.0"
+    "electron": "^44.2.0",
+    "electron-builder": "^26.0.0"
   },
   "build": {
     "appId": "tv.focky.client",
