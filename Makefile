@@ -1,6 +1,9 @@
 # Tudo roda em container: nenhum toolchain Node local é necessário.
 # A janela do Electron em si abre no seu desktop (GUI não faz sentido em container).
 
+# Lido do package.json sem toolchain local.
+VERSION = $(shell sed -n 's/.*"version": "\(.*\)".*/\1/p' package.json | head -1)
+
 IN_DOCKER = docker run --rm -v "$(CURDIR)":/project -w /project \
             -u $(shell id -u):$(shell id -g) -e HOME=/project/.cache
 
@@ -37,3 +40,7 @@ release: node_modules
 	@test -n "$$GH_TOKEN" || { echo "defina GH_TOKEN (precisa de escopo 'repo')"; exit 1; }
 	$(IN_DOCKER) -e GH_TOKEN electronuserland/builder:wine \
 	  npx electron-builder --linux AppImage --win nsis --publish always
+	@# O electron-builder cria a release como draft, e o updater nao le draft:
+	@# sem este passo o update falha em silencio, sem erro nenhum.
+	gh release edit v$(VERSION) --draft=false
+	@echo "release v$(VERSION) publicada e visivel pro updater"
