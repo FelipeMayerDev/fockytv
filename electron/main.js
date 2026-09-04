@@ -64,7 +64,11 @@ app.whenReady().then(() => {
     width: 1100, height: 720,
     backgroundColor: '#111',
     icon,
-    webPreferences: { preload: path.join(__dirname, 'preload.js') },
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      // sem isto o Chromium bloqueia o som de abertura (não houve clique ainda)
+      autoplayPolicy: 'no-user-gesture-required',
+    },
   })
   win.loadFile(path.join(__dirname, '..', 'ui', 'index.html'))
 

@@ -184,6 +184,15 @@ dialog .desc { font-size:13px; color:hsl(var(--muted-foreground)); margin-bottom
 #toast.info { border-left-color:hsl(var(--ring)) }
 #toast { display:flex; align-items:center; gap:14px }
 #toast button { height:28px; padding:0 12px; font-size:12px; flex:none }
+/* tremidinha só enquanto toca a abertura */
+@keyframes shake {
+  0%,100% { transform: translate(0,0) rotate(0) }
+  25%     { transform: translate(-1.5px,1px) rotate(-1.5deg) }
+  50%     { transform: translate(1.5px,-1px) rotate(1.5deg) }
+  75%     { transform: translate(-1px,-1.5px) rotate(1deg) }
+}
+body.intro #brand, body.intro button { animation: shake .18s infinite }
+@media (prefers-reduced-motion: reduce) { body.intro #brand, body.intro button { animation: none } }
 </style>
 
 <!-- ── entrada: nick ─────────────────────────────────────────────────── -->
@@ -387,6 +396,27 @@ async function watch (key, videoEl) {
   return pc
 }
 
+// ── sons ────────────────────────────────────────────────────────────────
+// Bipes sintetizados em vez de arquivos: nada pra embalar no build.
+const ac = new AudioContext()
+const beep = (...freqs) => {
+  ac.resume()
+  freqs.forEach((f, i) => {
+    const t = ac.currentTime + i * 0.09
+    const o = ac.createOscillator(), g = ac.createGain()
+    o.frequency.value = f
+    g.gain.setValueAtTime(0.12, t)
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.12)   // sem clique no fim
+    o.connect(g).connect(ac.destination)
+    o.start(t); o.stop(t + 0.13)
+  })
+}
+const sfx = {
+  live:  () => beep(660, 990),   // sobe: entrou no ar
+  watch: () => beep(880),
+  end:   () => beep(660, 440),   // desce: acabou
+}
+
 // ── estado da UI ─────────────────────────────────────────────────────────
 const toast = (msg, action) => {
   const t = $('#toast')
@@ -424,6 +454,7 @@ function showPlayer (key) {
 }
 
 function stop () {
+  if (pc) sfx.end()
   release(pc); pc = null; sender = null
   stream?.getTracks().forEach(t => t.stop()); stream = null
   setLive(false)
@@ -546,6 +577,7 @@ $('#share-go').onclick = async () => {
       stream = await capture(fps, $('#audio').checked)
       pc = await publish(nick, stream, fps, $('#codec').value)
       setLive(true)
+      sfx.live()
     }
     $('#dlg-share').close()
   } catch (e) {
@@ -647,6 +679,7 @@ async function refresh () {
 let viewer = null   // pc de quem assiste, separado do pc de quem publica
 
 function openPlayer (key) {
+  sfx.watch()
   release(viewer); viewer = null
   showPlayer(key)
   watch(key, $('#player-wrap video'))
@@ -655,6 +688,7 @@ function openPlayer (key) {
 }
 
 function closePlayer () {
+  if (viewer) sfx.end()
   release(viewer); viewer = null
   $('#player-wrap video').srcObject = null
   showPlayer(null)
@@ -696,6 +730,11 @@ $('#fs').onclick = () => (document.fullscreenElement
   : $('#player-wrap').requestFullscreen()).catch(e => toast(e.message))
 
 // ── boot ─────────────────────────────────────────────────────────────────
+const intro = new Audio('du-bist-gut-genug.mp3')
+document.body.classList.add('intro')
+intro.onended = intro.onerror = () => document.body.classList.remove('intro')
+intro.play().catch(() => document.body.classList.remove('intro'))
+
 focky.config().then(c => {
   cfg = c
   for (const m of new Set(RTCRtpSender.getCapabilities('video').codecs
