@@ -77,7 +77,7 @@ button.icon { width:36px; padding:0 }
 
 /* header apertado: cai por etapas em vez de estourar */
 @media (max-width:1000px) {
-  #live-stats, .pill .sep { display:none }
+  #live-stats, #net-stats, .pill .sep { display:none }
 }
 @media (max-width:780px) {
   .pill span:not(.dot) { display:none }   /* sobra a bolinha piscando */
@@ -103,6 +103,7 @@ button.icon { width:36px; padding:0 }
 .pill .sep { width:1px; height:12px; background:hsl(var(--border)) }
 .dot { width:7px; height:7px; border-radius:50%; background:hsl(var(--destructive));
        animation:pulse 2s infinite }
+#net-dot { animation:none }   /* qualidade não pisca: a cor já diz tudo */
 @keyframes pulse { 50% { opacity:.25 } }
 .user {
   background:transparent; border:1px solid hsl(var(--border)); color:hsl(var(--foreground));
@@ -226,6 +227,10 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
   <div class="spacer"></div>
 
   <div class="player-ctl" id="player-ctl" hidden>
+    <div class="pill" id="net" title="Qualidade da conexão">
+      <span class="dot" id="net-dot"></span>
+      <span class="muted" id="net-stats">—</span>
+    </div>
     <button class="ghost icon" id="mute" title="Mudo" aria-label="Mudo">
       <svg viewBox="0 0 24 24" id="ico-vol"><path d="M11 5 6 9H2v6h4l5 4z"/>
         <path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
@@ -449,8 +454,16 @@ function showPlayer (key) {
   $('#back').hidden = !key
   $('#player-ctl').hidden = !key
   $('#brand').textContent = key ?? 'FockyTV'
-  if (key) clearInterval(poll)
-  else { clearInterval(poll); poll = setInterval(() => refresh().catch(() => {}), 5000) }
+  clearInterval(poll)
+  poll = setInterval(() => (key ? watchdog(key) : refresh()).catch(() => {}), 5000)
+}
+
+// Quem assiste não recebe sinal quando o host sai: o WHEP continua de pé, só
+// para de chegar mídia. Então o poll da listagem vira vigia enquanto se assiste.
+async function watchdog (key) {
+  if ((await status()).some(st => st.streamKey === key)) return
+  closePlayer()
+  toast(`${key} parou de compartilhar.`)
 }
 
 function stop () {
@@ -591,15 +604,50 @@ $('#share-go').onclick = async () => {
 $('#stop').onclick = stop
 
 setInterval(async () => {
-  if (!pc || $('#live-pill').hidden) return
-  ;(await pc.getStats()).forEach(r => {
+  if (pc && !$('#live-pill').hidden) (await pc.getStats()).forEach(r => {
     if (r.type === 'outbound-rtp' && r.kind === 'video')
       $('#live-stats').textContent =
         `${r.frameWidth}×${r.frameHeight} · ${Math.round(r.framesPerSecond ?? 0)} fps` +
         (r.qualityLimitationReason && r.qualityLimitationReason !== 'none'
           ? ` · limitado por ${r.qualityLimitationReason}` : '')
   })
+  if (viewer) await showNet()
+  else last = null
 }, 2000)
+
+// ── qualidade da conexão de quem assiste ─────────────────────────────────
+// Perda só faz sentido no intervalo: os contadores do RTP são acumulados desde
+// o início, então uma rajada no começo mancharia o indicador pra sempre.
+let last = null
+const grade = (loss, rtt, dead) =>
+  dead || loss > 5 ? ['hsl(0 72% 51%)', 'ruim']
+  : loss > 1 || rtt > 200 ? ['hsl(45 90% 55%)', 'instável']
+  : ['hsl(142 70% 45%)', 'boa']
+
+async function showNet () {
+  let v, rtt = 0
+  ;(await viewer.getStats()).forEach(r => {
+    if (r.type === 'inbound-rtp' && r.kind === 'video') v = r
+    // só o par em uso; os outros candidatos têm RTT velho ou nenhum
+    if (r.type === 'candidate-pair' && r.nominated) rtt = (r.currentRoundTripTime ?? 0) * 1000
+  })
+  if (!v) return
+
+  const now = { lost: v.packetsLost ?? 0, got: v.packetsReceived ?? 0 }
+  const d = last && { lost: now.lost - last.lost, got: now.got - last.got }
+  last = now
+
+  const total = d ? d.lost + d.got : 0
+  const loss = total > 0 ? (100 * d.lost) / total : 0
+  const [color, label] = grade(loss, rtt, !!d && d.got === 0)
+
+  $('#net-dot').style.background = color
+  $('#net').title = `Conexão ${label}`
+  $('#net-stats').textContent =
+    `${v.frameWidth ?? '—'}×${v.frameHeight ?? '—'} · ${Math.round(v.framesPerSecond ?? 0)} fps` +
+    (rtt ? ` · ${Math.round(rtt)} ms` : '') +
+    (loss >= 0.1 ? ` · ${loss.toFixed(1)}% perda` : '')
+}
 
 // ── grade ao vivo (tela padrão) ──────────────────────────────────────────
 // miniatura: conecta escondido, pega o 1º quadro, desliga. Sem endpoint novo.
@@ -630,13 +678,17 @@ const since = iso => {
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`
 
-async function refresh () {
+// Sem videoTracks = sessão sem host. O servidor cria uma sessão a cada WHEP,
+// então uma stream já encerrada volta a aparecer só porque a miniatura se
+// conectou nela — e a miniatura, que nunca carrega, é reaberta a cada refresh.
+// Ignorar o fantasma aqui é o que impede o ciclo de se realimentar.
+async function status () {
   const res = await fetch(cfg.serverUrl + '/api/status')
-  // Sem videoTracks = sessão sem host. O servidor cria uma sessão a cada WHEP,
-  // então uma stream já encerrada volta a aparecer só porque a miniatura se
-  // conectou nela — e a miniatura, que nunca carrega, é reaberta a cada refresh.
-  // Ignorar o fantasma aqui é o que impede o ciclo de se realimentar.
-  const live = ((await res.json()) ?? []).filter(st => st.videoTracks?.length)
+  return ((await res.json()) ?? []).filter(st => st.videoTracks?.length)
+}
+
+async function refresh () {
+  const live = await status()
 
   if (!live.length) {
     thumbs.clear()
@@ -684,6 +736,9 @@ let viewer = null   // pc de quem assiste, separado do pc de quem publica
 
 function openPlayer (key) {
   sfx.watch()
+  last = null
+  $('#net-stats').textContent = '—'
+  $('#net-dot').style.background = ''
   release(viewer); viewer = null
   showPlayer(key)
   watch(key, $('#player-wrap video'))
