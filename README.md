@@ -25,8 +25,8 @@ docker compose up -d
 curl localhost:8080/api/status     # [] or null = up, nobody streaming
 ```
 
-Listens on `localhost:8080`. A measurement bench lives at
-<http://localhost:8080/fase0.html> — it publishes, watches, and reports
+Listens on `localhost:8080`. The measurement interface lives at
+<http://localhost:8080/> — it publishes, watches, and reports
 resolution, fps, bitrate and `qualityLimitationReason` without needing
 `chrome://webrtc-internals`.
 

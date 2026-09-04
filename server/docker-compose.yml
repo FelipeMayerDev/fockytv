@@ -1,4 +1,4 @@
-# Local:  docker compose up   → http://localhost:8180/fase0.html
+# Local:  docker compose up   → http://localhost:8180/
 # Externo: o agente playit lê o secret de ./playit-data/playit.toml
 #          (gerado uma vez com `playit claim generate/exchange`).
 # Passo a passo e as armadilhas: ../README.md
@@ -23,7 +23,7 @@ services:
       # Contorna o gotcha da porta: NAT_1_TO_1_IP reescreve só o IP, nunca a porta.
       - "APPEND_CANDIDATE=a=candidate:playit1 1 udp 1694498815 147.185.221.213 3652 typ host\r\n"
     volumes:
-      - ./fase0.html:/broadcast-box/web/build/fase0.html:ro
+      - ./fase0.html:/broadcast-box/web/build/index.html:ro
 
   playit:
     image: ghcr.io/playit-cloud/playit-agent:0.15
