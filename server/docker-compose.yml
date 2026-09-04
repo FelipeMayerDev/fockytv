@@ -4,7 +4,10 @@
 # Passo a passo e as armadilhas: ../README.md
 services:
   broadcast-box:
-    image: seaduboi/broadcast-box:latest
+    # upstream + server/broadcast-box/viewer-identity.patch: /api/status
+    # informa quem está assistindo (nick no POST do WHEP via ?viewer=)
+    build: ./broadcast-box
+    image: fockytv/broadcast-box:viewer
     container_name: fockytv
     restart: unless-stopped
     ports:

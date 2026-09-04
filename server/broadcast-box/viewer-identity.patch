@@ -1,0 +1,134 @@
+diff --git i/internal/server/handlers/whep.go w/internal/server/handlers/whep.go
+index 1ed4520..a34982b 100644
+--- i/internal/server/handlers/whep.go
++++ w/internal/server/handlers/whep.go
+@@ -7,6 +7,7 @@ import (
+ 	"mime"
+ 	"net/http"
+ 	"os"
++	"regexp"
+ 	"strings"
+ 
+ 	"github.com/glimesh/broadcast-box/internal/environment"
+@@ -16,6 +17,8 @@ import (
+ 	"github.com/glimesh/broadcast-box/internal/webrtc/utils"
+ )
+ 
++var viewerRegex = regexp.MustCompile(`^[\w.-]{1,32}$`)
++
+ func whepHandler(responseWriter http.ResponseWriter, request *http.Request) {
+ 	if request.Method != http.MethodPost && request.Method != http.MethodPatch {
+ 		helpers.LogHTTPError(responseWriter, "Method not allowed", http.StatusMethodNotAllowed)
+@@ -67,7 +70,15 @@ func whepHandler(responseWriter http.ResponseWriter, request *http.Request) {
+ 		}
+ 	}
+ 
+-	whipAnswer, sessionID, err := webrtc.WHEP(string(offer), token)
++	// FockyTV: identidade opcional de quem assiste, para o host listar viewers
++	// em /api/status. Mesmo alfabeto do stream key: vira texto de API, sem
++	// caracteres que precisem de escape em qualquer camada.
++	viewer := request.URL.Query().Get("viewer")
++	if !viewerRegex.MatchString(viewer) {
++		viewer = ""
++	}
++
++	whipAnswer, sessionID, err := webrtc.WHEP(string(offer), token, viewer)
+ 	if err != nil {
+ 		slog.Error("API.WHEP: Setup Error", "err", err)
+ 		helpers.LogHTTPError(responseWriter, err.Error(), http.StatusBadRequest)
+diff --git i/internal/webrtc/sessions/session/session.go w/internal/webrtc/sessions/session/session.go
+index 057cd66..86e9412 100644
+--- i/internal/webrtc/sessions/session/session.go
++++ w/internal/webrtc/sessions/session/session.go
+@@ -26,12 +26,13 @@ func (session *Session) SetOnClose(onClose func()) {
+ }
+ 
+ // Add WHEP viewer session
+-func (s *Session) AddWHEP(whepSessionID string, peerConnection *webrtc.PeerConnection, audioTrack *codecs.TrackMultiCodec, videoTrack *codecs.TrackMultiCodec, videoRTCPSender *webrtc.RTPSender, pliSender func()) (err error) {
++func (s *Session) AddWHEP(whepSessionID string, viewer string, peerConnection *webrtc.PeerConnection, audioTrack *codecs.TrackMultiCodec, videoTrack *codecs.TrackMultiCodec, videoRTCPSender *webrtc.RTPSender, pliSender func()) (err error) {
+ 	slog.Debug("WHIPSessionManager.WHIPSession.AddWHEPSession")
+ 
+ 	whepSession := whep.CreateNewWHEP(
+ 		whepSessionID,
+ 		s.StreamKey,
++		viewer,
+ 		audioTrack,
+ 		videoTrack,
+ 		peerConnection,
+diff --git i/internal/webrtc/sessions/whep/session_state.go w/internal/webrtc/sessions/whep/session_state.go
+index a62b049..833233d 100644
+--- i/internal/webrtc/sessions/whep/session_state.go
++++ w/internal/webrtc/sessions/whep/session_state.go
+@@ -1,7 +1,8 @@
+ package whep
+ 
+ type SessionState struct {
+-	ID string `json:"id"`
++	ID     string `json:"id"`
++	Viewer string `json:"viewer,omitempty"`
+ 
+ 	AudioLayerCurrent   string `json:"audioLayerCurrent"`
+ 	AudioTimestamp      uint32 `json:"audioTimestamp"`
+diff --git i/internal/webrtc/sessions/whep/types.go w/internal/webrtc/sessions/whep/types.go
+index 025b107..8954f5f 100644
+--- i/internal/webrtc/sessions/whep/types.go
++++ w/internal/webrtc/sessions/whep/types.go
+@@ -13,6 +13,7 @@ type (
+ 	WHEPSession struct {
+ 		SessionID            string
+ 		StreamKey            string
++		Viewer               string
+ 		IsWaitingForKeyframe atomic.Bool
+ 		IsSessionClosed      atomic.Bool
+ 
+diff --git i/internal/webrtc/sessions/whep/whep.go w/internal/webrtc/sessions/whep/whep.go
+index fa3aaec..b9aef59 100644
+--- i/internal/webrtc/sessions/whep/whep.go
++++ w/internal/webrtc/sessions/whep/whep.go
+@@ -12,6 +12,7 @@ import (
+ func CreateNewWHEP(
+ 	whepSessionID string,
+ 	streamKey string,
++	viewer string,
+ 	audioTrack *codecs.TrackMultiCodec,
+ 	videoTrack *codecs.TrackMultiCodec,
+ 	peerConnection *webrtc.PeerConnection,
+@@ -22,6 +23,7 @@ func CreateNewWHEP(
+ 	w = &WHEPSession{
+ 		SessionID:               whepSessionID,
+ 		StreamKey:               streamKey,
++		Viewer:                  viewer,
+ 		AudioTrack:              audioTrack,
+ 		VideoTrack:              videoTrack,
+ 		AudioTimestamp:          5000,
+@@ -83,7 +85,8 @@ func (w *WHEPSession) GetWHEPSessionStatus() (state SessionState) {
+ 	currentVideoLayer := w.VideoLayerCurrent.Load().(string)
+ 
+ 	state = SessionState{
+-		ID: w.SessionID,
++		ID:     w.SessionID,
++		Viewer: w.Viewer,
+ 
+ 		AudioLayerCurrent:   currentAudioLayer,
+ 		AudioTimestamp:      w.AudioTimestamp,
+diff --git i/internal/webrtc/whep.go w/internal/webrtc/whep.go
+index 7ac3f1b..4ca7b4b 100644
+--- i/internal/webrtc/whep.go
++++ w/internal/webrtc/whep.go
+@@ -12,7 +12,7 @@ import (
+ 	"github.com/pion/webrtc/v4"
+ )
+ 
+-func WHEP(offer string, streamKey string) (string, string, error) {
++func WHEP(offer string, streamKey string, viewer string) (string, string, error) {
+ 	utils.DebugOutputOffer(offer)
+ 
+ 	profile := authorization.PublicProfile{
+@@ -62,6 +62,7 @@ func WHEP(offer string, streamKey string) (string, string, error) {
+ 	// TODO: Should this be before gatherComplete to assure registered events are triggered at correct time?
+ 	if err := session.AddWHEP(
+ 		whepSessionID,
++		viewer,
+ 		peerConnection,
+ 		audioTrack,
+ 		videoTrack,

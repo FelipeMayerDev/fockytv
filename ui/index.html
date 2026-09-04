@@ -80,6 +80,10 @@ button.icon { width:36px; padding:0 }
 /* header apertado: cai por etapas em vez de estourar */
 @media (max-width:1000px) {
   #live-stats, #net-stats, .pill .sep { display:none }
+  #viewers-pill { max-width:200px }
+}
+@media (max-width:780px) {
+  #viewers-pill { display:none }
 }
 @media (max-width:780px) {
   .pill span:not(.dot) { display:none }   /* sobra a bolinha piscando */
@@ -103,6 +107,8 @@ button.icon { width:36px; padding:0 }
   border:1px solid hsl(var(--border)); border-radius:999px; font-size:12px;
 }
 .pill .sep { width:1px; height:12px; background:hsl(var(--border)) }
+#viewers-pill { max-width:320px }
+#viewers-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
 .dot { width:7px; height:7px; border-radius:50%; background:hsl(var(--destructive));
        animation:pulse 2s infinite }
 #net-dot { animation:none }   /* qualidade não pisca: a cor já diz tudo */
@@ -234,6 +240,11 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
     <span>No ar</span>
     <span class="sep"></span>
     <span class="muted" id="live-stats">—</span>
+  </div>
+
+  <!-- quem está assistindo, do /api/status (sessions[].viewer) -->
+  <div class="pill" id="viewers-pill" hidden>
+    <span class="muted" id="viewers-label">—</span>
   </div>
 
   <div class="spacer"></div>
@@ -472,12 +483,14 @@ async function publish (key, st, fps, codec) {
   return pc
 }
 
-async function watch (key, videoEl) {
+async function watch (key, videoEl, viewer) {
   const pc = new RTCPeerConnection()
   pc.addTransceiver('video', { direction: 'recvonly' })
   pc.addTransceiver('audio', { direction: 'recvonly' })
   pc.ontrack = e => { videoEl.srcObject = e.streams[0] }
-  await signal('/api/whep', key, pc)
+  // o nick vai junto: é ele que o host vê na listagem de quem está assistindo.
+  // A miniatura não manda — sessão de prévia não é gente.
+  await signal('/api/whep' + (viewer ? `?viewer=${encodeURIComponent(viewer)}` : ''), key, pc)
   return pc
 }
 
@@ -523,6 +536,7 @@ const toast = (msg, action) => {
 
 function setLive (on) {
   $('#live-pill').hidden = !on
+  if (!on) $('#viewers-pill').hidden = true   // some com o resto da transmissão
   $('#swap').hidden = !on
   $('#stop').hidden = !on
   $('#share').hidden = on
@@ -965,8 +979,23 @@ async function status () {
   return ((await res.json()) ?? []).filter(st => st.videoTracks?.length)
 }
 
+// Quem está assistindo de verdade: sessões com nick. As prévias da grade também
+// abrem WHEP (e viram sessões no servidor), mas não mandam viewer — sem isso o
+// "N assistindo" contaria as próprias miniaturas.
+const viewersOf = st => [...new Set((st.sessions ?? []).map(s => s.viewer).filter(Boolean))]
+
 async function refresh () {
   const live = await status()
+
+  // no ar: lista de quem assiste no header, atualizada neste mesmo poll
+  const mine = live.find(st => st.streamKey === nick)
+  const names = mine ? viewersOf(mine) : []
+  if (pc) {
+    $('#viewers-pill').hidden = false
+    $('#viewers-label').textContent =
+      names.length ? `${names.length} assistindo: ${names.join(', ')}` : 'ninguém assistindo'
+    $('#viewers-pill').title = names.join(', ')
+  }
 
   if (!live.length) {
     thumbs.clear()
@@ -991,7 +1020,7 @@ async function refresh () {
     el.querySelector('.title').textContent = st.streamKey +
       (st.streamKey === nick ? ' (você)' : '')
     el.querySelector('.sub').textContent =
-      `${plural(st.sessions?.length ?? 0, 'assistindo', 'assistindo')} · ${since(st.streamStart)}`
+      `${plural(viewersOf(st).length, 'assistindo', 'assistindo')} · ${since(st.streamStart)}`
     el.onclick = () => openPlayer(st.streamKey)
 
     const thumb = el.querySelector('.thumb')
@@ -1019,7 +1048,7 @@ function openPlayer (key) {
   $('#net-dot').style.background = ''
   release(viewer); viewer = null
   showPlayer(key)
-  watch(key, $('#player-wrap video'))
+  watch(key, $('#player-wrap video'), nick)
     .then(p => viewer = p)
     .catch(e => { toast(e.message); closePlayer() })
 }
@@ -1071,7 +1100,11 @@ if (localStorage.getItem('noIntro') !== '1') {
   const intro = new Audio('du-bist-gut-genug.mp3')
   document.body.classList.add('intro')
   intro.onended = intro.onerror = () => document.body.classList.remove('intro')
-  intro.play().catch(() => document.body.classList.remove('intro'))
+  intro.play().catch(() => {
+    document.body.classList.remove('intro')
+    toast('Clique em qualquer lugar para tocar a abertura.')
+    document.addEventListener('pointerdown', () => intro.play().catch(() => {}), { once: true })
+  })
 }
 
 focky.config().then(c => {

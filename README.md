@@ -164,7 +164,7 @@ release`. electron-builder creates the tag, uploads both artifacts and the
 | Decision | Why |
 |---|---|
 | Electron, not Tauri | Tauri's Linux webview is the **system** WebKitGTK — `getDisplayMedia` varies by distro, and the whole app depends on it. Cost: ~104 MB of Chromium in the bundle. |
-| No broadcast-box fork | Deleting code doesn't justify carrying a rebase forever. Fork only to **add** something. |
+| broadcast-box upstream + patch | The image is built by `server/broadcast-box/Dockerfile`: upstream at a pinned ref plus `viewer-identity.patch`, which is **additive only** — the WHEP POST accepts `?viewer=<nick>` and `/api/status` echoes it per session, so the host can list who's watching. A pure-delete fork still wouldn't be worth a rebase. |
 | No TURN | The topology is client-server, not P2P. Peers behind NAT already work: the connection is outbound. |
 | TCP fallback, no toggle | With `NETWORK_TYPES=udp4\|tcp4`, ICE picks on its own. |
 | shadcn without React | Uses shadcn's design tokens and component CSS (dark zinc; Button/Card/Dialog/Select/Switch/Skeleton). The real library would mean React + Tailwind + a bundler for a single-file renderer. |
