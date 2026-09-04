@@ -1,0 +1,45 @@
+{
+  "name": "fockytv",
+  "version": "0.1.0",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "tv.focky.client",
+    "files": [
+      "electron/**",
+      "ui/**",
+      "config.json",
+      "package.json"
+    ],
+    "extraFiles": [
+      "config.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,136 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>FockyTV — Fase 0</title>
+<style>
+  body { font: 14px system-ui; background:#111; color:#eee; margin:0; padding:16px }
+  button { font:inherit; padding:8px 14px; margin-right:8px }
+  input { font:inherit; padding:6px }
+  video { width:100%; max-width:1280px; background:#000; margin-top:12px }
+  pre { background:#000; padding:12px; white-space:pre-wrap }
+  .bad { color:#f66 } .good { color:#6f6 }
+</style>
+
+<h3>FockyTV — Fase 0 (gate)</h3>
+<p>
+  key <input id=key value="focky">
+  codec <select id=codec><option value="">negociar (padrão)</option></select>
+  fps <select id=fps><option>30</option><option selected>60</option><option>90</option><option>120</option></select>
+</p>
+<p>
+  <button id=pub>Share Screen (WHIP)</button>
+  <button id=sub>Watch (WHEP)</button>
+  <button id=stop>Parar</button>
+</p>
+<pre id=stats>—</pre>
+<video id=v autoplay muted playsinline controls></video>
+
+<script>
+const $ = id => document.getElementById(id)
+const fps = () => +$('fps').value
+let pc = null, track = null
+
+// espera ICE completo — broadcast-box quer offer não-trickle (gotcha #3)
+const ice = pc => new Promise(r =>
+  pc.iceGatheringState === 'complete' ? r()
+  : pc.addEventListener('icegatheringstatechange',
+      () => pc.iceGatheringState === 'complete' && r()))
+
+async function signal (path, key, pc) {
+  await pc.setLocalDescription(await pc.createOffer())
+  await ice(pc)
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/sdp', Authorization: `Bearer ${key}` },
+    body: pc.localDescription.sdp,
+  })
+  if (!res.ok) throw new Error(`${path} ${res.status}: ${await res.text()}`)
+  await pc.setRemoteDescription({ type: 'answer', sdp: await res.text() })
+}
+
+async function publish (key, stream) {
+  stream.getVideoTracks()[0].contentHint = 'motion'
+
+  track = stream.getVideoTracks()[0]
+
+  const pc = new RTCPeerConnection()
+  stream.getTracks().forEach(t => pc.addTrack(t, stream))
+
+  const s = pc.getSenders().find(x => x.track?.kind === 'video')
+
+  const want = $('codec').value
+  if (want) {
+    const codecs = RTCRtpSender.getCapabilities('video').codecs
+      .filter(c => c.mimeType.toLowerCase() === want)
+    if (codecs.length) pc.getTransceivers()
+      .find(t => t.sender === s).setCodecPreferences(codecs)
+  }
+
+  // gotcha #2: setParameters SÓ depois de addTrack, senão encodings vem vazio
+  const p = s.getParameters()
+  if (!p.encodings?.length) p.encodings = [{}]
+  p.encodings[0].maxBitrate = 15_000_000
+  p.encodings[0].maxFramerate = fps()
+  p.encodings[0].scaleResolutionDownBy = 1
+  p.degradationPreference = 'maintain-resolution'  // gotcha #6
+  await s.setParameters(p)
+
+  await signal('/api/whip', key, pc)
+  return pc
+}
+
+async function watch (key, videoEl) {
+  const pc = new RTCPeerConnection()
+  pc.addTransceiver('video', { direction: 'recvonly' })
+  pc.addTransceiver('audio', { direction: 'recvonly' })
+  pc.ontrack = e => { videoEl.srcObject = e.streams[0] }
+
+  await signal('/api/whep', key, pc)
+  return pc
+}
+
+// --- stats: os 5 números do critério de aprovação, sem abrir webrtc-internals
+let prev = {}
+setInterval(async () => {
+  if (!pc) return
+  const stats = await pc.getStats()
+  const rows = []
+  stats.forEach(r => {
+    if (r.kind !== 'video') return
+    if (r.type !== 'outbound-rtp' && r.type !== 'inbound-rtp') return
+    const dt = (r.timestamp - (prev[r.id]?.t ?? r.timestamp)) / 1000
+    const bytes = r.bytesSent ?? r.bytesReceived ?? 0
+    const mbps = dt > 0 ? ((bytes - prev[r.id].b) * 8 / dt / 1e6) : 0
+    prev[r.id] = { t: r.timestamp, b: bytes }
+    const codec = stats.get(r.codecId)?.mimeType ?? '?'
+    rows.push(
+      `${r.type}  ${r.frameWidth}x${r.frameHeight} @ ${Math.round(r.framesPerSecond ?? 0)}fps  ${codec}\n` +
+      `medido    ${mbps.toFixed(2)} Mbps` +
+      (r.targetBitrate ? `   target ${(r.targetBitrate / 1e6).toFixed(2)} Mbps` : '') +
+      (r.qualityLimitationReason ? `\nlimitação ${r.qualityLimitationReason}` : ''))
+  })
+  if (track) {
+    const g = track.getSettings()
+    rows.unshift(`captura   ${g.width}x${g.height} @ ${Math.round(g.frameRate ?? 0)}fps (pedido ${fps()})`)
+  }
+  $('stats').textContent = rows.join('\n\n') || 'sem stream de vídeo'
+  $('stats').className = /cpu|bandwidth/.test($('stats').textContent) ? 'bad' : 'good'
+}, 1000)
+
+// popula o seletor com o que este Chrome sabe codificar
+for (const m of new Set(RTCRtpSender.getCapabilities('video').codecs
+    .map(c => c.mimeType.toLowerCase())
+    .filter(m => !/rtx|red|ulpfec|flexfec/.test(m))))
+  $('codec').add(new Option(m, m))
+
+const run = fn => async () => {
+  try { pc?.close(); prev = {}; pc = await fn() }
+  catch (e) { $('stats').textContent = e.message; $('stats').className = 'bad' }
+}
+
+$('pub').onclick = run(async () => publish($('key').value,
+  await navigator.mediaDevices.getDisplayMedia({
+    video: { frameRate: fps(), width: 1920, height: 1080 }, audio: true })))
+
+$('sub').onclick = run(() => watch($('key').value, $('v')))
+$('stop').onclick = () => { pc?.close(); pc = null; track = null; $('stats').textContent = '—' }
+</script>

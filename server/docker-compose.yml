@@ -1,0 +1,31 @@
+# Local:  docker compose up   → http://localhost:8080/fase0.html
+# Externo (playit.gg): descomente o serviço playit abaixo, preencha o .env
+#                      e suba com  docker compose --profile tunnel up -d
+# Passo a passo e as armadilhas: ../README.md
+services:
+  broadcast-box:
+    image: seaduboi/broadcast-box:latest
+    container_name: fockytv-bb
+    restart: unless-stopped
+    ports:
+      - "8080:8080/tcp"
+      - "${UDP_MUX_PORT:-8080}:${UDP_MUX_PORT:-8080}/udp"
+    environment:
+      HTTP_ADDRESS: ":8080"
+      # gotcha #1: tem que ser IGUAL à porta pública UDP que o playit atribuiu.
+      # NAT_1_TO_1_IP reescreve só o IP dos candidatos ICE, nunca a porta.
+      UDP_MUX_PORT: "${UDP_MUX_PORT:-8080}"
+      NAT_1_TO_1_IP: "${NAT_1_TO_1_IP:-127.0.0.1}"
+      NETWORK_TYPES: "udp4|tcp4"   # separador é |, não vírgula
+      NETWORK_TEST_ON_START: "false"
+    volumes:
+      - ./fase0.html:/broadcast-box/web/build/fase0.html:ro
+
+  # playit:
+  #   image: ghcr.io/playit-cloud/playit-agent:0.15
+  #   container_name: fockytv-playit
+  #   restart: unless-stopped
+  #   network_mode: host          # pra alcançar 127.0.0.1:8080 e :UDP_MUX_PORT
+  #   environment:
+  #     SECRET_KEY: "${PLAYIT_SECRET}"
+  #   profiles: ["tunnel"]

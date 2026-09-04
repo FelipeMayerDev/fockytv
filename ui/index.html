@@ -1,0 +1,697 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>FockyTV</title>
+<style>
+/* tokens do shadcn (dark, zinc) */
+:root {
+  --background:240 10% 3.9%; --foreground:0 0% 98%;
+  --card:240 10% 5.5%; --card-foreground:0 0% 98%;
+  --muted:240 3.7% 15.9%; --muted-foreground:240 5% 64.9%;
+  --primary:0 0% 98%; --primary-foreground:240 5.9% 10%;
+  --border:240 3.7% 15.9%; --ring:240 4.9% 83.9%;
+  --destructive:0 72% 51%;
+  --radius:0.5rem;
+}
+* { box-sizing:border-box; margin:0 }
+[hidden] { display:none !important }
+body {
+  font:14px/1.5 ui-sans-serif, system-ui, sans-serif;
+  background:hsl(var(--background)); color:hsl(var(--foreground));
+  height:100vh; overflow:hidden; display:flex; flex-direction:column;
+}
+button {
+  font:inherit; font-weight:500; cursor:pointer; border-radius:var(--radius);
+  border:1px solid transparent; padding:0 16px; height:36px;
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  background:hsl(var(--primary)); color:hsl(var(--primary-foreground));
+  transition:opacity .15s, background .15s;
+}
+button:hover { opacity:.9 }
+button.outline { background:transparent; color:hsl(var(--foreground)); border-color:hsl(var(--border)) }
+button.outline:hover { background:hsl(var(--muted)); opacity:1 }
+button.ghost { background:transparent; color:hsl(var(--muted-foreground)) }
+button.ghost:hover { background:hsl(var(--muted)); color:hsl(var(--foreground)); opacity:1 }
+button.destructive { background:hsl(var(--destructive)); color:#fff }
+button:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px }
+
+input, select {
+  font:inherit; height:36px; padding:0 10px; border-radius:var(--radius);
+  background:hsl(var(--background)); color:hsl(var(--foreground));
+  border:1px solid hsl(var(--border)); width:100%;
+}
+input:focus, select:focus { outline:2px solid hsl(var(--ring)); outline-offset:-1px }
+label { font-size:13px; font-weight:500; color:hsl(var(--muted-foreground)) }
+
+.card {
+  background:hsl(var(--card)); border:1px solid hsl(var(--border));
+  border-radius:calc(var(--radius) + 4px); padding:24px;
+}
+.muted { color:hsl(var(--muted-foreground)) }
+
+/* switch */
+.switch { position:relative; width:40px; height:22px; flex:none; cursor:pointer }
+.switch input { position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer }
+.switch span {
+  position:absolute; inset:0; border-radius:999px; background:hsl(var(--muted));
+  transition:background .15s; pointer-events:none;
+}
+.switch span::after {
+  content:''; position:absolute; top:2px; left:2px; width:18px; height:18px;
+  border-radius:50%; background:hsl(var(--foreground)); transition:transform .15s;
+}
+.switch input:checked + span { background:hsl(0 0% 60%) }
+.switch input:checked + span::after { transform:translateX(18px) }
+
+/* header */
+.bar {
+  display:flex; align-items:center; gap:10px; padding:10px 20px; flex:none;
+  border-bottom:1px solid hsl(var(--border));
+  background:hsl(var(--background)); position:sticky; top:0; z-index:5;
+}
+.bar h1 { font-size:16px; font-weight:600; letter-spacing:-.01em }
+.spacer { flex:1 }
+button svg { width:16px; height:16px; flex:none; fill:none;
+  stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round }
+button.icon { width:36px; padding:0 }
+.player-ctl { display:flex; align-items:center; gap:4px }
+
+/* header apertado: cai por etapas em vez de estourar */
+@media (max-width:1000px) {
+  #live-stats, .pill .sep { display:none }
+}
+@media (max-width:780px) {
+  .pill span:not(.dot) { display:none }   /* sobra a bolinha piscando */
+  .pill { padding:0; width:30px; justify-content:center }
+  #who { display:none }                    /* sobra o avatar da inicial */
+  .user { padding:0; width:36px; justify-content:center }
+  #vol { width:56px }
+}
+#vol {
+  width:80px; height:4px; padding:0; border:0; border-radius:999px;
+  background:hsl(var(--muted)); appearance:none; cursor:pointer;
+}
+#vol::-webkit-slider-thumb {
+  appearance:none; width:12px; height:12px; border-radius:50%;
+  background:hsl(var(--foreground)); cursor:pointer;
+}
+#vol:focus { outline:none }
+#vol:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:4px }
+.pill {
+  display:flex; align-items:center; gap:8px; height:30px; padding:0 12px;
+  border:1px solid hsl(var(--border)); border-radius:999px; font-size:12px;
+}
+.pill .sep { width:1px; height:12px; background:hsl(var(--border)) }
+.dot { width:7px; height:7px; border-radius:50%; background:hsl(var(--destructive));
+       animation:pulse 2s infinite }
+@keyframes pulse { 50% { opacity:.25 } }
+.user {
+  background:transparent; border:1px solid hsl(var(--border)); color:hsl(var(--foreground));
+  height:36px; padding:0 12px 0 6px; gap:8px; font-size:13px; font-weight:500;
+}
+.user:hover { background:hsl(var(--muted)); opacity:1 }
+main { flex:1; overflow:hidden; display:flex; flex-direction:column }
+
+/* grade estilo youtube */
+#grid-live { flex:1; overflow:auto; padding:24px; display:grid; gap:24px 20px;
+             grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); align-content:start }
+.vid { cursor:pointer }
+.vid .thumb {
+  position:relative; aspect-ratio:16/9; border-radius:12px; overflow:hidden;
+  background:hsl(var(--muted)); display:grid; place-items:center;
+}
+.vid .thumb img { width:100%; height:100%; object-fit:cover; display:block }
+.vid:hover .thumb { outline:2px solid hsl(var(--ring)) }
+.vid .badge {
+  position:absolute; left:8px; bottom:8px; background:hsl(var(--destructive));
+  color:#fff; font-size:11px; font-weight:600; padding:2px 6px; border-radius:4px;
+}
+.vid .meta { display:flex; gap:10px; margin-top:10px; align-items:center }
+.avatar.sm { width:24px; height:24px; font-size:11px }
+.avatar {
+  width:36px; height:36px; border-radius:50%; flex:none; display:grid; place-items:center;
+  background:hsl(var(--muted)); font-weight:600; font-size:14px; text-transform:uppercase;
+}
+.vid .title { font-size:14px; font-weight:500 }
+.vid .sub { font-size:12px; color:hsl(var(--muted-foreground)) }
+.empty { grid-column:1/-1; text-align:center; padding:100px 0; color:hsl(var(--muted-foreground)) }
+
+#player-wrap { flex:1; background:#000; display:none; min-height:0 }
+#player-wrap.on { display:block }
+#player-wrap video { width:100%; height:100%; object-fit:contain }
+
+/* dialog */
+dialog {
+  margin:auto;   /* o * { margin:0 } acima mata o padrão que centraliza */
+  border:1px solid hsl(var(--border)); border-radius:calc(var(--radius) + 4px);
+  background:hsl(var(--card)); color:hsl(var(--foreground));
+  padding:24px; width:min(560px, 92vw); max-height:86vh; overflow:auto;
+}
+dialog::backdrop { background:#000c; backdrop-filter:blur(2px) }
+dialog h3 { font-size:17px; font-weight:600; margin-bottom:4px }
+dialog .desc { font-size:13px; color:hsl(var(--muted-foreground)); margin-bottom:20px }
+.field { display:flex; flex-direction:column; gap:6px; margin-bottom:16px }
+.row { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:16px }
+.opts { display:grid; grid-template-columns:1fr 1fr; gap:16px }
+.actions { display:flex; justify-content:flex-end; gap:8px; margin-top:20px }
+
+#sources { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+           gap:10px; margin:16px 0; max-height:230px; overflow:auto }
+#sources figure {
+  cursor:pointer; padding:6px; border-radius:var(--radius);
+  border:2px solid transparent; background:hsl(var(--muted));
+}
+#sources figure:hover, #sources figure.sel { border-color:hsl(var(--ring)) }
+#sources img { width:100%; aspect-ratio:16/10; object-fit:cover; border-radius:4px; background:#000 }
+#sources figcaption { font-size:11px; margin-top:5px; color:hsl(var(--muted-foreground));
+                      white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+.err { color:hsl(var(--destructive)); font-size:13px; min-height:1.2em }
+
+/* skeleton da miniatura */
+.skeleton { position:absolute; inset:0; background:
+  linear-gradient(90deg, hsl(var(--muted)) 25%, hsl(240 4% 22%) 50%, hsl(var(--muted)) 75%);
+  background-size:200% 100%; animation:shimmer 1.4s infinite }
+@keyframes shimmer { to { background-position:-200% 0 } }
+
+/* toast */
+#toast {
+  position:fixed; bottom:20px; left:50%; transform:translate(-50%, 12px);
+  background:hsl(var(--card)); border:1px solid hsl(var(--border));
+  border-left:3px solid hsl(var(--destructive));
+  border-radius:var(--radius); padding:12px 16px; font-size:13px; max-width:min(560px,90vw);
+  opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; z-index:20;
+}
+#toast.on { opacity:1; transform:translate(-50%, 0) }
+</style>
+
+<!-- ── entrada: nick ─────────────────────────────────────────────────── -->
+<dialog id="dlg-nick">
+  <h3>Como você aparece</h3>
+  <p class="desc">Esse nome identifica sua transmissão. Fica salvo pra próxima vez.</p>
+  <div class="field">
+    <label for="nick">Nick</label>
+    <input id="nick" maxlength="32" placeholder="focky" autofocus>
+  </div>
+  <p class="err" id="nick-err"></p>
+  <div class="actions">
+    <button class="outline" id="nick-cancel" hidden>Cancelar</button>
+    <button id="nick-ok">Entrar</button>
+  </div>
+</dialog>
+
+<header class="bar">
+  <button class="ghost icon" id="back" hidden title="Voltar" aria-label="Voltar">
+    <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+  </button>
+  <h1 id="brand">FockyTV</h1>
+
+  <div class="pill" id="live-pill" hidden>
+    <span class="dot"></span>
+    <span>No ar</span>
+    <span class="sep"></span>
+    <span class="muted" id="live-stats">—</span>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="player-ctl" id="player-ctl" hidden>
+    <button class="ghost icon" id="mute" title="Mudo" aria-label="Mudo">
+      <svg viewBox="0 0 24 24" id="ico-vol"><path d="M11 5 6 9H2v6h4l5 4z"/>
+        <path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+    </button>
+    <input type="range" id="vol" min="0" max="1" step="0.05" value="1"
+           title="Volume" aria-label="Volume">
+    <button class="ghost icon" id="pip" title="Picture in picture" aria-label="Picture in picture">
+      <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/>
+        <rect x="12" y="12" width="8" height="6" rx="1"/></svg>
+    </button>
+    <button class="ghost icon" id="fs" title="Tela cheia" aria-label="Tela cheia">
+      <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/>
+        <path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+    </button>
+  </div>
+
+  <button class="outline icon" id="swap" hidden title="Trocar janela" aria-label="Trocar janela">
+    <svg viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M10 20H4v-6"/>
+      <path d="M20 4 13 11"/><path d="M4 20l7-7"/></svg>
+  </button>
+  <button class="destructive icon" id="stop" hidden title="Parar transmissão" aria-label="Parar transmissão">
+    <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>
+  </button>
+  <button id="share">
+    <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/>
+      <path d="M8 21h8"/><path d="M12 17v4"/></svg>
+    Compartilhar tela
+  </button>
+
+  <button class="user" id="change-nick" title="trocar nick">
+    <span class="avatar sm" id="me-avatar"></span>
+    <span id="who"></span>
+  </button>
+</header>
+
+<main>
+  <div id="grid-live"></div>
+  <div id="player-wrap"><video autoplay playsinline></video></div>
+</main>
+
+<div id="toast"></div>
+
+<dialog id="dlg-share">
+  <h3 id="share-title">Compartilhar tela</h3>
+  <p class="desc" id="share-desc">Escolha o que transmitir e ajuste a qualidade.</p>
+
+  <div id="sources"></div>
+  <p class="desc" id="portal-note" hidden>
+    O seletor do sistema vai abrir para você escolher a tela ou janela.
+  </p>
+
+  <div class="opts">
+    <div class="field">
+      <label for="fps">Taxa de quadros</label>
+      <select id="fps">
+        <option value="15">15 fps</option>
+        <option value="30">30 fps</option>
+        <option value="60" selected>60 fps</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="codec">Codec</label>
+      <select id="codec"><option value="">Automático</option></select>
+    </div>
+  </div>
+
+  <div class="row">
+    <div>
+      <label style="color:hsl(var(--foreground))">Compartilhar som</label>
+      <p class="desc" style="margin:2px 0 0">áudio do sistema junto com o vídeo</p>
+    </div>
+    <label class="switch"><input type="checkbox" id="audio"><span></span></label>
+  </div>
+
+  <p class="err" id="share-err"></p>
+  <div class="actions">
+    <button class="outline" id="share-cancel">Cancelar</button>
+    <button id="share-go">Compartilhar</button>
+  </div>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s)
+let cfg, nick, pc = null, sender = null, stream = null, poll = null, swapping = false
+const thumbs = new Map()   // streamKey -> dataURL, pra não regerar a cada refresh
+
+// ── WebRTC (herdado da Fase 0, números já medidos) ───────────────────────
+const ice = pc => new Promise(r =>
+  pc.iceGatheringState === 'complete' ? r()
+  : pc.addEventListener('icegatheringstatechange',
+      () => pc.iceGatheringState === 'complete' && r()))
+
+async function signal (path, key, pc) {
+  await pc.setLocalDescription(await pc.createOffer())
+  await ice(pc)
+  const res = await fetch(cfg.serverUrl + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/sdp', Authorization: `Bearer ${key}` },
+    body: pc.localDescription.sdp,
+  })
+  const body = await res.text()
+  if (!res.ok) throw new Error(body.trim() || `${path} ${res.status}`)
+  await pc.setRemoteDescription({ type: 'answer', sdp: body })
+  // WHIP/WHEP: o recurso da sessão vem no Location e precisa de DELETE ao sair.
+  // Sem isso o servidor só larga a sessão no timeout do ICE e a stream continua
+  // aparecendo na listagem depois de parar.
+  pc.resource = res.headers.get('Location')
+  pc.resourceKey = key           // o DELETE exige o mesmo bearer do POST
+}
+
+// fecha a conexão E avisa o servidor. Todo close passa por aqui.
+function release (pc) {
+  if (!pc) return
+  const { resource, resourceKey } = pc
+  pc.resource = null
+  if (resource) fetch(new URL(resource, cfg.serverUrl), {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${resourceKey}` },
+  }).catch(() => {})
+  pc.close()
+}
+
+function tuneSender (s, fps) {
+  const p = s.getParameters()
+  if (!p.encodings?.length) p.encodings = [{}]
+  p.encodings[0].maxBitrate = 15_000_000
+  p.encodings[0].maxFramerate = fps
+  p.encodings[0].scaleResolutionDownBy = 1
+  p.degradationPreference = 'maintain-resolution'
+  return s.setParameters(p)          // só depois de addTrack, senão some em silêncio
+}
+
+async function capture (fps, withAudio) {
+  return navigator.mediaDevices.getDisplayMedia({
+    video: { frameRate: fps, width: 1920, height: 1080 },
+    audio: withAudio,
+  })
+}
+
+async function publish (key, st, fps, codec) {
+  st.getVideoTracks()[0].contentHint = 'motion'
+
+  const pc = new RTCPeerConnection()
+  st.getTracks().forEach(t => pc.addTrack(t, st))
+
+  sender = pc.getSenders().find(x => x.track?.kind === 'video')
+
+  if (codec) {
+    const list = RTCRtpSender.getCapabilities('video').codecs
+      .filter(c => c.mimeType.toLowerCase() === codec)
+    if (list.length) pc.getTransceivers().find(t => t.sender === sender)
+      .setCodecPreferences(list)
+  }
+
+  await tuneSender(sender, fps)
+  st.getVideoTracks()[0].addEventListener('ended', () => { if (!swapping) stop() })
+
+  await signal('/api/whip', key, pc)
+  return pc
+}
+
+async function watch (key, videoEl) {
+  const pc = new RTCPeerConnection()
+  pc.addTransceiver('video', { direction: 'recvonly' })
+  pc.addTransceiver('audio', { direction: 'recvonly' })
+  pc.ontrack = e => { videoEl.srcObject = e.streams[0] }
+  await signal('/api/whep', key, pc)
+  return pc
+}
+
+// ── estado da UI ─────────────────────────────────────────────────────────
+const toast = msg => {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('on')
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('on'), 5000)
+}
+
+function setLive (on) {
+  $('#live-pill').hidden = !on
+  $('#swap').hidden = !on
+  $('#stop').hidden = !on
+  $('#share').hidden = on
+}
+
+function showPlayer (key) {
+  $('#player-wrap').classList.toggle('on', !!key)
+  $('#grid-live').style.display = key ? 'none' : ''
+  $('#back').hidden = !key
+  $('#player-ctl').hidden = !key
+  $('#brand').textContent = key ?? 'FockyTV'
+  if (key) clearInterval(poll)
+  else { clearInterval(poll); poll = setInterval(() => refresh().catch(() => {}), 5000) }
+}
+
+function stop () {
+  release(pc); pc = null; sender = null
+  stream?.getTracks().forEach(t => t.stop()); stream = null
+  setLive(false)
+  thumbs.delete(nick)        // a miniatura antiga não vale mais
+  showPlayer(null)           // parou: volta pra listagem
+  refresh().catch(() => {})
+}
+
+// ── nick (cache em localStorage; com nick salvo o app já abre direto) ────
+function askNick (first) {
+  $('#nick').value = nick ?? cfg.displayName ?? ''
+  $('#nick-err').textContent = ''
+  $('#nick-cancel').hidden = first
+  $('#dlg-nick').showModal()
+}
+
+const setNick = v => {
+  nick = v
+  localStorage.setItem('nick', v)
+  $('#who').textContent = v
+  $('#me-avatar').textContent = v.slice(0, 1)
+}
+
+$('#nick-ok').onclick = () => {
+  const v = $('#nick').value.trim()
+  // vira stream key e vai num header HTTP: sem espaço nem barra
+  if (!/^[\w.-]{1,32}$/.test(v)) {
+    $('#nick-err').textContent = 'Use 1 a 32 caracteres: letras, números, . _ -'
+    return
+  }
+  setNick(v)
+  $('#dlg-nick').close()
+}
+$('#nick-cancel').onclick = () => $('#dlg-nick').close()
+$('#nick').addEventListener('keydown', e => e.key === 'Enter' && $('#nick-ok').click())
+$('#change-nick').onclick = () => askNick(false)
+
+// ── compartilhar ─────────────────────────────────────────────────────────
+let picked = null
+
+async function openShareDialog (isSwap) {
+  $('#share-err').textContent = ''
+  $('#share-title').textContent = isSwap ? 'Trocar janela' : 'Compartilhar tela'
+  $('#share-desc').textContent = isSwap
+    ? 'A transmissão continua no ar — quem está assistindo não cai.'
+    : 'Escolha o que transmitir e ajuste a qualidade.'
+  $('#share-go').textContent = isSwap ? 'Trocar' : 'Compartilhar'
+  // numa troca a conexão já existe: fps/codec/áudio não mudam sem renegociar
+  $('.opts').hidden = isSwap
+  $('.row').hidden = isSwap
+
+  const sources = await focky.sources()
+  picked = sources[0]?.id ?? null
+
+  // No Wayland o desktopCapturer devolve uma entrada genérica sem nome —
+  // quem escolhe é o portal do sistema, que abre no getDisplayMedia.
+  const listable = sources.length > 1 || !!sources[0]?.name
+  $('#sources').hidden = !listable
+  $('#portal-note').hidden = listable
+
+  if (listable) $('#sources').replaceChildren(...sources.map((src, i) => {
+    const fig = document.createElement('figure')
+    fig.className = i === 0 ? 'sel' : ''
+    fig.innerHTML = `<img src="${src.thumb}"><figcaption></figcaption>`
+    fig.querySelector('figcaption').textContent = src.name
+    fig.onclick = () => {
+      picked = src.id
+      $('#sources').querySelectorAll('figure').forEach(f => f.classList.remove('sel'))
+      fig.classList.add('sel')
+    }
+    return fig
+  }))
+
+  $('#dlg-share').dataset.swap = isSwap ? '1' : ''
+  $('#dlg-share').showModal()
+}
+
+$('#share').onclick = () => openShareDialog(false).catch(e => toast(e.message))
+// replaceTrack troca a fonte sem renegociar: quem assiste não cai
+async function doSwap (id) {
+  swapping = true
+  try {
+    await focky.pick(id)
+    const fresh = await capture(+$('#fps').value, false)
+    await sender.replaceTrack(fresh.getVideoTracks()[0])
+    stream.getVideoTracks().forEach(t => t.stop())
+    fresh.getVideoTracks()[0].addEventListener('ended', () => { if (!swapping) stop() })
+    stream = fresh
+  } finally { swapping = false }
+}
+
+$('#swap').onclick = async () => {
+  // No Wayland o portal recusa uma 2ª sessão com a captura viva — e o capturer
+  // do Chromium segfalta em vez de retornar erro. Solta a fonte antes de pedir
+  // a próxima. A conexão WHIP fica de pé, então quem assiste só vê congelar.
+  if (cfg.wayland) stream?.getVideoTracks().forEach(t => t.stop())
+  try {
+    const sources = await focky.sources()   // no Wayland, isto JÁ é o seletor
+    if (sources.length > 1 || sources[0]?.name) return openShareDialog(true)
+    await doSwap(sources[0]?.id)
+  } catch (e) {
+    toast('Transmissão encerrada: ' + e.message)
+    stop()
+  }
+}
+$('#share-cancel').onclick = () => {
+  const wasSwap = !!$('#dlg-share').dataset.swap
+  $('#dlg-share').close()
+  if (wasSwap && cfg.wayland) { stop(); toast('Transmissão encerrada ao cancelar a troca.') }
+}
+
+$('#share-go').onclick = async () => {
+  const isSwap = !!$('#dlg-share').dataset.swap
+  try {
+    if (isSwap) {
+      await doSwap(picked)
+    } else {
+      await focky.pick(picked)
+      const fps = +$('#fps').value
+      stream = await capture(fps, $('#audio').checked)
+      pc = await publish(nick, stream, fps, $('#codec').value)
+      setLive(true)
+    }
+    $('#dlg-share').close()
+  } catch (e) {
+    swapping = false
+    $('#share-err').textContent = e.message
+    // no Wayland a fonte antiga já foi solta: sem nova, não há o que transmitir
+    if (isSwap && cfg.wayland) { $('#dlg-share').close(); stop(); toast('Transmissão encerrada: ' + e.message) }
+  }
+}
+
+$('#stop').onclick = stop
+
+setInterval(async () => {
+  if (!pc || $('#live-pill').hidden) return
+  ;(await pc.getStats()).forEach(r => {
+    if (r.type === 'outbound-rtp' && r.kind === 'video')
+      $('#live-stats').textContent =
+        `${r.frameWidth}×${r.frameHeight} · ${Math.round(r.framesPerSecond ?? 0)} fps` +
+        (r.qualityLimitationReason && r.qualityLimitationReason !== 'none'
+          ? ` · limitado por ${r.qualityLimitationReason}` : '')
+  })
+}, 2000)
+
+// ── grade ao vivo (tela padrão) ──────────────────────────────────────────
+// miniatura: conecta escondido, pega o 1º quadro, desliga. Sem endpoint novo.
+async function grabThumb (key) {
+  const v = document.createElement('video')
+  v.muted = true; v.autoplay = true; v.playsInline = true
+  let tmp
+  try {
+    tmp = await watch(key, v)
+    await new Promise((res, rej) => {
+      v.onloadeddata = res
+      setTimeout(() => rej(new Error('timeout')), 8000)
+    })
+    const c = document.createElement('canvas')
+    c.width = 480
+    c.height = Math.round(480 * (v.videoHeight / v.videoWidth || 0.5625))
+    c.getContext('2d').drawImage(v, 0, 0, c.width, c.height)
+    return c.toDataURL('image/jpeg', 0.7)
+  } finally {
+    release(tmp); v.srcObject = null
+  }
+}
+
+const since = iso => {
+  const m = Math.floor((Date.now() - new Date(iso)) / 60000)
+  return m < 1 ? 'começou agora' : m < 60 ? `há ${m} min` : `há ${Math.floor(m / 60)} h`
+}
+
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`
+
+async function refresh () {
+  const res = await fetch(cfg.serverUrl + '/api/status')
+  const live = (await res.json()) ?? []
+
+  if (!live.length) {
+    thumbs.clear()
+    $('#grid-live').innerHTML =
+      `<div class="empty">
+         <p style="font-size:15px;color:hsl(var(--foreground))">Ninguém ao vivo agora</p>
+         <p style="margin-top:6px">Clique em <b>Compartilhar tela</b> para ser o primeiro.</p>
+       </div>`
+    return
+  }
+
+  $('#grid-live').replaceChildren(...live.map(st => {
+    const el = document.createElement('div')
+    el.className = 'vid'
+    el.innerHTML =
+      `<div class="thumb"><div class="skeleton"></div><span class="badge">AO VIVO</span></div>
+       <div class="meta"><div class="avatar"></div>
+         <div style="min-width:0">
+           <div class="title"></div><div class="sub"></div>
+         </div></div>`
+    el.querySelector('.avatar').textContent = st.streamKey.slice(0, 1)
+    el.querySelector('.title').textContent = st.streamKey +
+      (st.streamKey === nick ? ' (você)' : '')
+    el.querySelector('.sub').textContent =
+      `${plural(st.sessions?.length ?? 0, 'assistindo', 'assistindo')} · ${since(st.streamStart)}`
+    el.onclick = () => openPlayer(st.streamKey)
+
+    const thumb = el.querySelector('.thumb')
+    const paint = url => {
+      const img = new Image(); img.src = url
+      thumb.replaceChildren(img, Object.assign(document.createElement('span'),
+        { className: 'badge', textContent: 'AO VIVO' }))
+    }
+    if (thumbs.has(st.streamKey)) paint(thumbs.get(st.streamKey))
+    else grabThumb(st.streamKey)
+      .then(url => { thumbs.set(st.streamKey, url); paint(url) })
+      .catch(() => thumb.firstChild.replaceWith(Object.assign(
+        document.createElement('span'), { className: 'muted', textContent: 'sem prévia' })))
+
+    return el
+  }))
+}
+
+let viewer = null   // pc de quem assiste, separado do pc de quem publica
+
+function openPlayer (key) {
+  release(viewer); viewer = null
+  showPlayer(key)
+  watch(key, $('#player-wrap video'))
+    .then(p => viewer = p)
+    .catch(e => { toast(e.message); closePlayer() })
+}
+
+function closePlayer () {
+  release(viewer); viewer = null
+  $('#player-wrap video').srcObject = null
+  showPlayer(null)
+  refresh().catch(() => {})
+}
+
+$('#back').onclick = closePlayer
+
+// ── controles do player (sem play/pause: numa live não há o que pausar) ──
+const vid = $('#player-wrap video')
+
+const drawVolIcon = () => {
+  const off = vid.muted || vid.volume === 0
+  $('#ico-vol').innerHTML = off
+    ? '<path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/>'
+    : '<path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/>'
+  $('#mute').title = off ? 'Reativar som' : 'Mudo'
+}
+
+$('#mute').onclick = () => {
+  vid.muted = !vid.muted
+  if (!vid.muted && vid.volume === 0) vid.volume = 1
+  $('#vol').value = vid.muted ? 0 : vid.volume
+  drawVolIcon()
+}
+
+$('#vol').oninput = e => {
+  vid.volume = +e.target.value
+  vid.muted = vid.volume === 0
+  drawVolIcon()
+}
+
+$('#pip').onclick = () => (document.pictureInPictureElement
+  ? document.exitPictureInPicture()
+  : vid.requestPictureInPicture()).catch(e => toast(e.message))
+
+$('#fs').onclick = () => (document.fullscreenElement
+  ? document.exitFullscreen()
+  : $('#player-wrap').requestFullscreen()).catch(e => toast(e.message))
+
+// ── boot ─────────────────────────────────────────────────────────────────
+focky.config().then(c => {
+  cfg = c
+  for (const m of new Set(RTCRtpSender.getCapabilities('video').codecs
+      .map(x => x.mimeType.toLowerCase())
+      .filter(x => !/rtx|red|ulpfec|flexfec/.test(x))))
+    $('#codec').add(new Option(m.replace('video/', '').toUpperCase(), m))
+
+  const saved = localStorage.getItem('nick')
+  if (saved) setNick(saved)   // já salvo: entra direto
+  else askNick(true)
+
+  refresh().catch(e => toast(e.message))
+  poll = setInterval(() => refresh().catch(() => {}), 5000)
+})
+</script>
