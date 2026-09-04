@@ -372,6 +372,14 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
 </dialog>
 
 <script>
+// No navegador, a própria página é o servidor e o seletor de tela é nativo.
+const focky = window.focky ?? {
+  config: () => Promise.resolve({ serverUrl: location.origin, displayName: 'focky' }),
+  sources: async () => [],
+  pick: async () => {},
+  onUpdate: () => {},
+  installUpdate: () => {},
+}
 const $ = s => document.querySelector(s)
 let cfg, nick, pc = null, sender = null, audioSender = null, stream = null
 let poll = null, swapping = false, camOnly = false

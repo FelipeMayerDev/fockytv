@@ -23,7 +23,8 @@ services:
       # Contorna o gotcha da porta: NAT_1_TO_1_IP reescreve só o IP, nunca a porta.
       - "APPEND_CANDIDATE=a=candidate:playit1 1 udp 1694498815 147.185.221.213 3652 typ host\r\n"
     volumes:
-      - ./fase0.html:/broadcast-box/web/build/index.html:ro
+      - ../ui/index.html:/broadcast-box/web/build/index.html:ro
+      - ../ui/du-bist-gut-genug.mp3:/broadcast-box/web/build/du-bist-gut-genug.mp3:ro
 
   playit:
     image: ghcr.io/playit-cloud/playit-agent:0.15

@@ -25,10 +25,9 @@ docker compose up -d
 curl localhost:8080/api/status     # [] or null = up, nobody streaming
 ```
 
-Listens on `localhost:8080`. The measurement interface lives at
-<http://localhost:8080/> — it publishes, watches, and reports
-resolution, fps, bitrate and `qualityLimitationReason` without needing
-`chrome://webrtc-internals`.
+Listens on `localhost:8080`. The web interface lives at
+<http://localhost:8080/> — the same interface as the desktop app, including
+publishing and watching streams.
 
 ### Exposing it publicly with playit.gg
 
