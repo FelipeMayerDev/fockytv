@@ -60,6 +60,8 @@ label { font-size:13px; font-weight:500; color:hsl(var(--muted-foreground)) }
   border-radius:50%; background:hsl(var(--foreground)); transition:transform .15s;
 }
 .switch input:checked + span { background:hsl(0 0% 60%) }
+.switch input:disabled { cursor:not-allowed }
+.switch input:disabled + span { opacity:.45 }
 .switch input:checked + span::after { transform:translateX(18px) }
 
 /* header */
@@ -135,6 +137,16 @@ main { flex:1; overflow:hidden; display:flex; flex-direction:column }
 .vid .title { font-size:14px; font-weight:500 }
 .vid .sub { font-size:12px; color:hsl(var(--muted-foreground)) }
 .empty { grid-column:1/-1; text-align:center; padding:100px 0; color:hsl(var(--muted-foreground)) }
+
+/* palco: a composição publicada, do jeito que quem assiste vê */
+#stage-wrap { flex:1; display:none; flex-direction:column; align-items:center;
+              justify-content:center; gap:10px; padding:10px; background:#000; min-height:0 }
+#stage-wrap.on { display:flex }
+#stage { max-width:100%; min-height:0; flex:0 1 auto; touch-action:none; cursor:grab }
+#stage.drag { cursor:grabbing }
+#cam-ctl { display:flex; align-items:center; gap:12px; flex:none;
+           font-size:12px; color:hsl(var(--muted-foreground)) }
+#cam-ctl label { display:flex; align-items:center; gap:8px }
 
 #player-wrap { flex:1; background:#000; display:none; min-height:0 }
 #player-wrap.on { display:block }
@@ -260,18 +272,53 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
     Compartilhar tela
   </button>
 
+  <button class="outline icon" id="share-cam" title="Compartilhar WebCam" aria-label="Compartilhar WebCam">
+    <svg viewBox="0 0 24 24"><path d="m22 8-6 4 6 4V8Z"/>
+      <rect x="2" y="6" width="14" height="12" rx="2"/></svg>
+  </button>
+
   <button class="user" id="change-nick" title="trocar nick">
     <span class="avatar sm" id="me-avatar"></span>
     <span id="who"></span>
+  </button>
+
+  <button class="ghost icon" id="cfg" title="Configurações" aria-label="Configurações">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
   </button>
 </header>
 
 <main>
   <div id="grid-live"></div>
   <div id="player-wrap"><video autoplay playsinline></video></div>
+  <div id="stage-wrap">
+    <canvas id="stage"></canvas>
+    <div id="cam-ctl">
+      <label>Tamanho <input type="range" id="cam-size" min="10" max="50" step="1" value="25"></label>
+      <button class="outline" id="cam-mirror">Espelhar</button>
+      <button class="outline" id="cam-mute" hidden>Microfone ligado</button>
+      <button class="outline" id="cam-off">Remover câmera</button>
+    </div>
+  </div>
 </main>
 
 <div id="toast"></div>
+
+<dialog id="dlg-cfg">
+  <h3>Configurações</h3>
+  <p class="desc">Valem só nesta máquina.</p>
+
+  <div class="row" style="margin:16px 0 0">
+    <div>
+      <label style="color:hsl(var(--foreground))">Desativar <i>du bist gut genug</i> ao iniciar</label>
+      <p class="desc" style="margin:2px 0 0">abre o app em silêncio</p>
+    </div>
+    <label class="switch"><input type="checkbox" id="no-intro"><span></span></label>
+  </div>
+
+  <div class="actions">
+    <button id="cfg-close">Fechar</button>
+  </div>
+</dialog>
 
 <dialog id="dlg-share">
   <h3 id="share-title">Compartilhar tela</h3>
@@ -299,10 +346,22 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
 
   <div class="row">
     <div>
-      <label style="color:hsl(var(--foreground))">Compartilhar som</label>
-      <p class="desc" style="margin:2px 0 0">áudio do sistema junto com o vídeo</p>
+      <label style="color:hsl(var(--foreground))" id="audio-label">Compartilhar som</label>
+      <p class="desc" style="margin:2px 0 0" id="audio-desc">áudio do sistema junto com o vídeo</p>
     </div>
     <label class="switch"><input type="checkbox" id="audio"><span></span></label>
+  </div>
+
+  <div class="row" id="cursor-row">
+    <div>
+      <label style="color:hsl(var(--foreground))">Mostrar cursor<span id="cursor-note" hidden
+        title="No Windows o cursor está sempre ativo: o Chromium o compõe no vídeo e não há como desligar."
+        > <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             style="width:14px;height:14px;vertical-align:-2px;color:hsl(var(--muted-foreground))"
+          ><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></span></label>
+      <p class="desc" style="margin:2px 0 0">o ponteiro aparece na transmissão</p>
+    </div>
+    <label class="switch"><input type="checkbox" id="cursor" checked><span></span></label>
   </div>
 
   <p class="err" id="share-err"></p>
@@ -314,7 +373,10 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
 
 <script>
 const $ = s => document.querySelector(s)
-let cfg, nick, pc = null, sender = null, stream = null, poll = null, swapping = false
+let cfg, nick, pc = null, sender = null, audioSender = null, stream = null
+let poll = null, swapping = false, camOnly = false
+let cam = null       // MediaStream da câmera, quando ela entra junto com a tela
+let overlay = null   // composição tela+câmera: { canvas, sv, cv, out, box, timer, gain }
 const thumbs = new Map()   // streamKey -> dataURL, pra não regerar a cada refresh
 
 // ── WebRTC (herdado da Fase 0, números já medidos) ───────────────────────
@@ -363,9 +425,13 @@ function tuneSender (s, fps) {
   return s.setParameters(p)          // só depois de addTrack, senão some em silêncio
 }
 
-async function capture (fps, withAudio) {
+async function capture (fps, withAudio, withCursor) {
   return navigator.mediaDevices.getDisplayMedia({
-    video: { frameRate: fps, width: 1920, height: 1080 },
+    // ponytail: o Blink ignora `cursor` (nem aparece em getSupportedConstraints),
+    // então hoje quem manda é a camada de captura: no Wayland o portal embute o
+    // cursor na tela e não na janela, no Windows o Chromium sempre compõe. Fica
+    // pedido do jeito certo pra valer sozinho quando o Chromium implementar.
+    video: { frameRate: fps, width: 1920, height: 1080, cursor: withCursor ? 'always' : 'never' },
     audio: withAudio,
   })
 }
@@ -377,6 +443,12 @@ async function publish (key, st, fps, codec) {
   st.getTracks().forEach(t => pc.addTrack(t, st))
 
   sender = pc.getSenders().find(x => x.track?.kind === 'video')
+  // Um m-line de áudio sempre, mesmo sem trilha: o WHIP daqui não renegocia,
+  // então sem este transceiver o microfone da câmera não teria por onde entrar
+  // depois. (Medido contra o broadcast-box: aceita o m-line vazio e passa a
+  // receber áudio no replaceTrack.)
+  audioSender = pc.getSenders().find(x => x.track?.kind === 'audio')
+    ?? pc.addTransceiver('audio', { direction: 'sendonly' }).sender
 
   if (codec) {
     const list = RTCRtpSender.getCapabilities('video').codecs
@@ -446,6 +518,9 @@ function setLive (on) {
   $('#swap').hidden = !on
   $('#stop').hidden = !on
   $('#share').hidden = on
+  // transmitindo a tela, a câmera ainda pode entrar por cima; transmitindo só
+  // a câmera, não há o que sobrepor
+  $('#share-cam').hidden = on && camOnly
 }
 
 function showPlayer (key) {
@@ -468,12 +543,156 @@ async function watchdog (key) {
 
 function stop () {
   if (pc) sfx.end()
-  release(pc); pc = null; sender = null
+  dropCam()
+  release(pc); pc = null; sender = null; audioSender = null; camOnly = false
   stream?.getTracks().forEach(t => t.stop()); stream = null
   setLive(false)
   thumbs.delete(nick)        // a miniatura antiga não vale mais
   showPlayer(null)           // parou: volta pra listagem
   refresh().catch(() => {})
+}
+
+// ── tela + câmera (composição num canvas) ────────────────────────────────
+// O canvas vira a fonte publicada: mexer na câmera é só mudar onde o próximo
+// quadro é desenhado — nada de renegociar, quem assiste não cai. O desenho é
+// por timer (não requestAnimationFrame) porque o app vive minimizado na
+// bandeja, e lá rAF não roda.
+const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi)
+
+const hiddenVideo = st => Object.assign(document.createElement('video'),
+  { srcObject: st, muted: true, autoplay: true, playsInline: true })
+
+// caixa da câmera em fração do canvas: sobrevive a uma troca de tela com outra
+// resolução sem recalcular nada
+const camRect = () => {
+  const { box, ratio, canvas } = overlay
+  return { ...box, h: box.w * ratio * (canvas.width / canvas.height) }
+}
+
+async function addCam (withMic) {
+  cam = await navigator.mediaDevices.getUserMedia({
+    video: { width: 1280, height: 720 }, audio: withMic,
+  })
+  const scr = stream.getVideoTracks()[0].getSettings()
+  const set = cam.getVideoTracks()[0].getSettings()
+
+  const canvas = $('#stage')
+  canvas.width = scr.width ?? 1920
+  canvas.height = scr.height ?? 1080
+  const ctx = canvas.getContext('2d')
+  const sv = hiddenVideo(stream), cv = hiddenVideo(cam)
+  await Promise.all([sv.play(), cv.play()].map(p => p.catch(() => {})))
+
+  const box = { x: 0.72, y: 0.68, w: +$('#cam-size').value / 100 }
+  const ratio = (set.height ?? 720) / (set.width ?? 1280)
+  const fps = Math.round(scr.frameRate ?? +$('#fps').value)
+  const draw = () => {
+    ctx.drawImage(sv, 0, 0, canvas.width, canvas.height)
+    const w = box.w * canvas.width, h = w * ratio
+    const x = box.x * canvas.width, y = box.y * canvas.height
+    if (!overlay?.mirror) return ctx.drawImage(cv, x, y, w, h)
+    // espelho: desenha a partir da borda direita da caixa, com o eixo X virado
+    ctx.save()
+    ctx.translate(x + w, y)
+    ctx.scale(-1, 1)
+    ctx.drawImage(cv, 0, 0, w, h)
+    ctx.restore()
+  }
+  const out = canvas.captureStream(fps)
+
+  overlay = { canvas, sv, cv, out, box, ratio, gain: null, mirror: false,
+              timer: setInterval(draw, 1000 / fps) }
+  await sender.replaceTrack(out.getVideoTracks()[0])
+
+  const mic = cam.getAudioTracks()[0]
+  if (mic) {
+    // som do sistema (quando há) + microfone num nó só: mutar é mexer no ganho,
+    // não na conexão
+    ac.resume()
+    const dest = ac.createMediaStreamDestination()
+    const sys = stream.getAudioTracks()[0]
+    if (sys) ac.createMediaStreamSource(new MediaStream([sys])).connect(dest)
+    overlay.gain = ac.createGain()
+    ac.createMediaStreamSource(new MediaStream([mic]))
+      .connect(overlay.gain).connect(dest)
+    await audioSender.replaceTrack(dest.stream.getAudioTracks()[0])
+  }
+  $('#cam-mute').hidden = !mic
+  setMic(true)
+  setMirror(false)
+  cam.getVideoTracks()[0].addEventListener('ended', dropCam)
+  stage(true)
+}
+
+function dropCam () {
+  if (!overlay) return
+  clearInterval(overlay.timer)
+  overlay.out.getTracks().forEach(t => t.stop())
+  overlay.sv.srcObject = overlay.cv.srcObject = null
+  cam?.getTracks().forEach(t => t.stop())
+  cam = null
+  overlay = null
+  stage(false)
+  // a transmissão continua: volta a publicar a tela crua
+  if (pc && stream) {
+    sender?.replaceTrack(stream.getVideoTracks()[0]).catch(() => {})
+    audioSender?.replaceTrack(stream.getAudioTracks()[0] ?? null).catch(() => {})
+  }
+}
+
+function stage (on) {
+  $('#stage-wrap').classList.toggle('on', on)
+  $('#grid-live').style.display = on ? 'none' : ''
+  $('#share-cam').hidden = on          // sair da câmera é pelo botão do palco
+}
+
+function setMic (on) {
+  if (overlay?.gain) overlay.gain.gain.value = on ? 1 : 0
+  $('#cam-mute').textContent = on ? 'Microfone ligado' : 'Microfone mudo'
+  $('#cam-mute').dataset.on = on ? '1' : ''
+}
+
+function setMirror (on) {
+  if (overlay) overlay.mirror = on
+  $('#cam-mirror').textContent = on ? 'Espelhado' : 'Espelhar'
+  $('#cam-mirror').dataset.on = on ? '1' : ''
+}
+
+$('#cam-mirror').onclick = () => setMirror(!$('#cam-mirror').dataset.on)
+$('#cam-mute').onclick = () => setMic(!$('#cam-mute').dataset.on)
+$('#cam-off').onclick = dropCam
+$('#cam-size').oninput = e => {
+  if (!overlay) return
+  overlay.box.w = +e.target.value / 100
+  const r = camRect()
+  overlay.box.x = clamp(overlay.box.x, 0, 1 - r.w)
+  overlay.box.y = clamp(overlay.box.y, 0, 1 - r.h)
+}
+
+// arrastar a câmera direto no palco (o canvas já é o que vai no ar)
+const stagePt = e => {
+  const r = $('#stage').getBoundingClientRect()
+  return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }
+}
+let drag = null
+
+$('#stage').onpointerdown = e => {
+  if (!overlay) return
+  const p = stagePt(e), r = camRect()
+  if (p.x < r.x || p.x > r.x + r.w || p.y < r.y || p.y > r.y + r.h) return
+  drag = { dx: p.x - r.x, dy: p.y - r.y }
+  $('#stage').setPointerCapture(e.pointerId)
+  $('#stage').classList.add('drag')
+}
+$('#stage').onpointermove = e => {
+  if (!drag || !overlay) return
+  const p = stagePt(e), r = camRect()
+  overlay.box.x = clamp(p.x - drag.dx, 0, 1 - r.w)
+  overlay.box.y = clamp(p.y - drag.dy, 0, 1 - r.h)
+}
+$('#stage').onpointerup = $('#stage').onpointercancel = () => {
+  drag = null
+  $('#stage').classList.remove('drag')
 }
 
 // ── nick (cache em localStorage; com nick salvo o app já abre direto) ────
@@ -505,19 +724,49 @@ $('#nick-cancel').onclick = () => $('#dlg-nick').close()
 $('#nick').addEventListener('keydown', e => e.key === 'Enter' && $('#nick-ok').click())
 $('#change-nick').onclick = () => askNick(false)
 
+// ── configurações (só preferências locais; grava no próprio toggle) ──────
+$('#cfg').onclick = () => {
+  $('#no-intro').checked = localStorage.getItem('noIntro') === '1'
+  $('#dlg-cfg').showModal()
+}
+$('#no-intro').onchange = e =>
+  localStorage.setItem('noIntro', e.target.checked ? '1' : '0')
+$('#cfg-close').onclick = () => $('#dlg-cfg').close()
+
 // ── compartilhar ─────────────────────────────────────────────────────────
 let picked = null
 
-async function openShareDialog (isSwap) {
+async function openShareDialog (isSwap, cam) {
   $('#share-err').textContent = ''
-  $('#share-title').textContent = isSwap ? 'Trocar janela' : 'Compartilhar tela'
+  const adding = !!cam && !!pc          // câmera entrando por cima da tela
+  $('#share-title').textContent = isSwap ? 'Trocar janela'
+    : adding ? 'Adicionar WebCam' : cam ? 'Compartilhar WebCam' : 'Compartilhar tela'
   $('#share-desc').textContent = isSwap
     ? 'A transmissão continua no ar — quem está assistindo não cai.'
+    : adding ? 'Ela entra por cima da tela; você posiciona e redimensiona depois.'
+    : cam ? 'Entre no ar com a câmera.'
     : 'Escolha o que transmitir e ajuste a qualidade.'
-  $('#share-go').textContent = isSwap ? 'Trocar' : 'Compartilhar'
-  // numa troca a conexão já existe: fps/codec/áudio não mudam sem renegociar
-  $('.opts').hidden = isSwap
-  $('.row').hidden = isSwap
+  $('#share-go').textContent = isSwap ? 'Trocar' : adding ? 'Adicionar' : 'Compartilhar'
+  // numa troca a conexão já existe: fps/codec/áudio não mudam sem renegociar.
+  // na câmera fps/codec são os da transmissão, não há o que escolher.
+  $('.opts').hidden = isSwap || !!cam
+  document.querySelectorAll('#dlg-share .row').forEach(el => el.hidden = isSwap)
+  // na câmera o áudio é o microfone, e cursor não faz sentido
+  $('#cursor-row').hidden = isSwap || !!cam
+  $('#audio-label').textContent = cam ? 'Compartilhar microfone' : 'Compartilhar som'
+  $('#audio-desc').textContent = cam
+    ? 'sua voz junto com a imagem' : 'áudio do sistema junto com o vídeo'
+  $('#dlg-share').dataset.cam = cam ? '1' : ''
+
+  // A câmera não passa pelo portal: nada de listar fontes (e no Wayland isso
+  // pouparia o seletor do sistema aparecer antes do diálogo).
+  if (cam) {
+    $('#sources').hidden = true
+    $('#portal-note').hidden = true
+    $('#dlg-share').dataset.swap = ''
+    $('#dlg-share').showModal()
+    return
+  }
 
   const sources = await focky.sources()
   picked = sources[0]?.id ?? null
@@ -546,13 +795,23 @@ async function openShareDialog (isSwap) {
 }
 
 $('#share').onclick = () => openShareDialog(false).catch(e => toast(e.message))
+$('#share-cam').onclick = () => openShareDialog(false, true).catch(e => toast(e.message))
 // replaceTrack troca a fonte sem renegociar: quem assiste não cai
 async function doSwap (id) {
   swapping = true
   try {
     await focky.pick(id)
-    const fresh = await capture(+$('#fps').value, false)
-    await sender.replaceTrack(fresh.getVideoTracks()[0])
+    const fresh = await capture(+$('#fps').value, false, $('#cursor').checked)
+    if (overlay) {
+      // o canvas segue no sender; o que muda é o que ele desenha no fundo
+      overlay.sv.srcObject = fresh
+      await overlay.sv.play().catch(() => {})
+      const set = fresh.getVideoTracks()[0].getSettings()
+      overlay.canvas.width = set.width ?? overlay.canvas.width
+      overlay.canvas.height = set.height ?? overlay.canvas.height
+    } else {
+      await sender.replaceTrack(fresh.getVideoTracks()[0])
+    }
     stream.getVideoTracks().forEach(t => t.stop())
     fresh.getVideoTracks()[0].addEventListener('ended', () => { if (!swapping) stop() })
     stream = fresh
@@ -581,14 +840,25 @@ $('#share-cancel').onclick = () => {
 
 $('#share-go').onclick = async () => {
   const isSwap = !!$('#dlg-share').dataset.swap
+  const cam = !!$('#dlg-share').dataset.cam
   try {
     if (isSwap) {
       await doSwap(picked)
+    } else if (cam && pc) {
+      await addCam($('#audio').checked)
     } else {
-      await focky.pick(picked)
       const fps = +$('#fps').value
-      stream = await capture(fps, $('#audio').checked)
+      if (cam) {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { frameRate: fps, width: 1280, height: 720 },
+          audio: $('#audio').checked,
+        })
+      } else {
+        await focky.pick(picked)
+        stream = await capture(fps, $('#audio').checked, $('#cursor').checked)
+      }
       pc = await publish(nick, stream, fps, $('#codec').value)
+      camOnly = !!cam         // só a câmera no ar: não há tela pra sobrepor
       setLive(true)
       sfx.live()
     }
@@ -789,10 +1059,12 @@ $('#fs').onclick = () => (document.fullscreenElement
   : $('#player-wrap').requestFullscreen()).catch(e => toast(e.message))
 
 // ── boot ─────────────────────────────────────────────────────────────────
-const intro = new Audio('du-bist-gut-genug.mp3')
-document.body.classList.add('intro')
-intro.onended = intro.onerror = () => document.body.classList.remove('intro')
-intro.play().catch(() => document.body.classList.remove('intro'))
+if (localStorage.getItem('noIntro') !== '1') {
+  const intro = new Audio('du-bist-gut-genug.mp3')
+  document.body.classList.add('intro')
+  intro.onended = intro.onerror = () => document.body.classList.remove('intro')
+  intro.play().catch(() => document.body.classList.remove('intro'))
+}
 
 focky.config().then(c => {
   cfg = c
@@ -801,20 +1073,47 @@ focky.config().then(c => {
       .filter(x => !/rtx|red|ulpfec|flexfec/.test(x))))
     $('#codec').add(new Option(m.replace('video/', '').toUpperCase(), m))
 
+  if (cfg.win) {
+    $('#cursor').checked = true
+    $('#cursor').disabled = true
+    $('#cursor-note').hidden = false
+  }
+
   const saved = localStorage.getItem('nick')
   if (saved) setNick(saved)   // já salvo: entra direto
   else askNick(true)
 
   refresh().catch(e => toast(e.message))
   poll = setInterval(() => refresh().catch(() => {}), 5000)
+  showNews()
 })
 
 // ── atualização ──────────────────────────────────────────────────────────
-focky.onUpdate(({ state, version }) => {
+// Depois do update o app reinicia: o resumo do que mudou só faz sentido no boot
+// seguinte, então fica guardado até lá.
+function showNews () {
+  const raw = localStorage.getItem('news')
+  if (!raw) return
+  localStorage.removeItem('news')
+  let news
+  try { news = JSON.parse(raw) } catch { return }
+  if (news.version !== cfg.version) return   // não foi esta atualização
+
+  // o corpo da release vem em HTML; o toast é texto
+  const what = new DOMParser().parseFromString(news.notes || '', 'text/html')
+    .body.textContent.trim().replace(/\s*\n\s*/g, ' · ').slice(0, 220)
+  toast(`Atualizado para a versão ${news.version}${what ? ': ' + what : '.'}`,
+    { label: 'Ok', run: () => $('#toast').classList.remove('on') })
+}
+
+focky.onUpdate(({ state, version, notes }) => {
   if (state === 'available') toast(`Baixando a versão ${version}…`)
-  if (state === 'ready') toast(`Versão ${version} pronta para instalar.`, {
-    label: 'Reiniciar', run: () => focky.installUpdate(),
-  })
+  if (state === 'ready') {
+    localStorage.setItem('news', JSON.stringify({ version, notes: notes ?? '' }))
+    toast(`Versão ${version} pronta para instalar.`, {
+      label: 'Reiniciar', run: () => focky.installUpdate(),
+    })
+  }
   // erro de update é silencioso: não vale interromper quem está transmitindo
 })
 </script>

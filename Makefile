@@ -42,5 +42,10 @@ release: node_modules
 	  npx electron-builder --linux AppImage --win nsis --publish always
 	@# O electron-builder cria a release como draft, e o updater nao le draft:
 	@# sem este passo o update falha em silencio, sem erro nenhum.
-	gh release edit v$(VERSION) --draft=false
+	@# As notas sao os assuntos dos commits desde a tag anterior: e delas que
+	@# sai o toast de "o que mudou" no primeiro boot depois de atualizar.
+	git fetch --tags -q
+	prev=$$(git describe --tags --abbrev=0 --exclude=v$(VERSION) 2>/dev/null); \
+	  git log --pretty='- %s' $${prev:+$$prev..}HEAD \
+	  | gh release edit v$(VERSION) --draft=false --notes-file -
 	@echo "release v$(VERSION) publicada e visivel pro updater"

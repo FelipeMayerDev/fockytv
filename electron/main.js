@@ -26,8 +26,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle('config', () => ({
     ...config,
+    version: app.getVersion(),   // o renderer compara com a última atualização vista
     // no Wayland é o getSources que abre o portal — muda o fluxo da troca
     wayland,
+    win: process.platform === 'win32',
   }))
 
   ipcMain.handle('sources', async () => {
@@ -68,6 +70,9 @@ app.whenReady().then(() => {
       preload: path.join(__dirname, 'preload.js'),
       // sem isto o Chromium bloqueia o som de abertura (não houve clique ainda)
       autoplayPolicy: 'no-user-gesture-required',
+      // a composição tela+câmera desenha num canvas por timer: minimizado na
+      // bandeja, o Chromium congelaria o timer e a transmissão pararia.
+      backgroundThrottling: false,
     },
   })
   win.loadFile(path.join(__dirname, '..', 'ui', 'index.html'))
@@ -102,7 +107,10 @@ function setupUpdates () {
   if (!app.isPackaged) return          // em dev não há feed nem assinatura
 
   const send = (state, info) =>
-    win?.webContents.send('update', { state, version: info?.version })
+    // releaseNotes é o corpo da release no GitHub (HTML): vira o resumo que o
+    // app mostra no primeiro boot depois de atualizar
+    win?.webContents.send('update',
+      { state, version: info?.version, notes: info?.releaseNotes })
 
   autoUpdater.on('update-available', i => send('available', i))
   autoUpdater.on('update-downloaded', i => send('ready', i))
@@ -110,7 +118,11 @@ function setupUpdates () {
 
   ipcMain.handle('install-update', () => {
     quitting = true
-    autoUpdater.quitAndInstall()
+    // (isSilent, isForceRunAfter): sem o silent, o NSIS assistido reabre o
+    // wizard inteiro a cada update — com ele o instalador roda com /S, na pasta
+    // que já está no registro, e o --force-run traz o app de volta sozinho.
+    // No Linux o AppImage já se troca sem UI nenhuma.
+    autoUpdater.quitAndInstall(true, true)
   })
 
   autoUpdater.checkForUpdates().catch(() => {})
