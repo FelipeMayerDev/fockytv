@@ -632,7 +632,11 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`
 
 async function refresh () {
   const res = await fetch(cfg.serverUrl + '/api/status')
-  const live = (await res.json()) ?? []
+  // Sem videoTracks = sessão sem host. O servidor cria uma sessão a cada WHEP,
+  // então uma stream já encerrada volta a aparecer só porque a miniatura se
+  // conectou nela — e a miniatura, que nunca carrega, é reaberta a cada refresh.
+  // Ignorar o fantasma aqui é o que impede o ciclo de se realimentar.
+  const live = ((await res.json()) ?? []).filter(st => st.videoTracks?.length)
 
   if (!live.length) {
     thumbs.clear()
