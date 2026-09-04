@@ -1,31 +1,37 @@
-# Local:  docker compose up   → http://localhost:8080/fase0.html
-# Externo (playit.gg): descomente o serviço playit abaixo, preencha o .env
-#                      e suba com  docker compose --profile tunnel up -d
+# Local:  docker compose up   → http://localhost:8180/fase0.html
+# Externo: o agente playit lê o secret de ./playit-data/playit.toml
+#          (gerado uma vez com `playit claim generate/exchange`).
 # Passo a passo e as armadilhas: ../README.md
 services:
   broadcast-box:
     image: seaduboi/broadcast-box:latest
-    container_name: fockytv-bb
+    container_name: fockytv
     restart: unless-stopped
     ports:
-      - "8080:8080/tcp"
-      - "${UDP_MUX_PORT:-8080}:${UDP_MUX_PORT:-8080}/udp"
+      - "8180:8080/tcp"
+      - "8180:8180/udp"
     environment:
-      HTTP_ADDRESS: ":8080"
-      # gotcha #1: tem que ser IGUAL à porta pública UDP que o playit atribuiu.
-      # NAT_1_TO_1_IP reescreve só o IP dos candidatos ICE, nunca a porta.
-      UDP_MUX_PORT: "${UDP_MUX_PORT:-8080}"
-      NAT_1_TO_1_IP: "${NAT_1_TO_1_IP:-127.0.0.1}"
-      NETWORK_TYPES: "udp4|tcp4"   # separador é |, não vírgula
-      NETWORK_TEST_ON_START: "false"
+      # Lista, não mapa: aqui "\r\n" vira CRLF de verdade. Em mapa com aspas
+      # duplas você precisaria escapar, e o SDP receberia os caracteres literais.
+      - HTTP_ADDRESS=:8080
+      - UDP_MUX_PORT=8180
+      - NAT_1_TO_1_IP=192.168.1.129
+      - NETWORK_TYPES=udp4|tcp4
+      # ponytail: self-test morre em hairpin NAT do container; cliente real via LAN funciona
+      - NETWORK_TEST_ON_START=FALSE
+      # ponytail: o playit alocou 3652, não 8180 — anuncia o par público direto no SDP.
+      # Contorna o gotcha da porta: NAT_1_TO_1_IP reescreve só o IP, nunca a porta.
+      - "APPEND_CANDIDATE=a=candidate:playit1 1 udp 1694498815 147.185.221.213 3652 typ host\r\n"
     volumes:
       - ./fase0.html:/broadcast-box/web/build/fase0.html:ro
 
-  # playit:
-  #   image: ghcr.io/playit-cloud/playit-agent:0.15
-  #   container_name: fockytv-playit
-  #   restart: unless-stopped
-  #   network_mode: host          # pra alcançar 127.0.0.1:8080 e :UDP_MUX_PORT
-  #   environment:
-  #     SECRET_KEY: "${PLAYIT_SECRET}"
-  #   profiles: ["tunnel"]
+  playit:
+    image: ghcr.io/playit-cloud/playit-agent:0.15
+    container_name: fockytv-playit
+    restart: unless-stopped
+    # host net pra alcançar 8180/udp direto, sem mapping
+    network_mode: host
+    # o entrypoint padrão exige SECRET_KEY no ambiente; este lê do toml montado
+    entrypoint: playit -s --platform_docker start
+    volumes:
+      - ./playit-data:/etc/playit

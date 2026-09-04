@@ -32,24 +32,32 @@ resolution, fps, bitrate and `qualityLimitationReason` without needing
 
 ### Exposing it publicly with playit.gg
 
-The `playit` service is commented out in `server/docker-compose.yml`. Uncomment
-it and follow **this order** — doing it backwards fails in a way that is hard to
-debug.
+The compose file ships with a `playit` agent alongside broadcast-box. It reads
+its secret from `server/playit-data/playit.toml`, which is gitignored — generate
+it once:
 
-1. In the playit.gg dashboard, create a **UDP** tunnel. It assigns a public
-   port, e.g. `45678`. Point the destination at `127.0.0.1:45678` — **the local
-   port must match the public one.**
-2. Create a **TCP** tunnel for HTTP, destination `127.0.0.1:8080`.
-3. Grab your secret from playit.gg → Account → Secret Key.
-4. Fill in `.env` (copy `.env.example`):
+```bash
+docker run --rm -it -v "$PWD/server/playit-data:/etc/playit" \
+  --entrypoint playit ghcr.io/playit-cloud/playit-agent:0.15 \
+  -s --platform_docker claim generate
+```
 
-   ```ini
-   UDP_MUX_PORT=45678        # = playit's public UDP port
-   NAT_1_TO_1_IP=1.2.3.4     # = playit's public IP
-   PLAYIT_SECRET=...
-   ```
+Then create the tunnels in the playit.gg dashboard: a **UDP** one pointing at
+`127.0.0.1:8180` and a **TCP** one at `127.0.0.1:8180` for HTTP.
 
-5. `docker compose --profile tunnel up -d`
+playit rarely assigns the same public UDP port you listen on, and
+`NAT_1_TO_1_IP` rewrites only the **IP** in ICE candidates, never the port — so
+advertising `NAT_1_TO_1_IP` alone leaves the SDP announcing the wrong port and
+media never connects. `APPEND_CANDIDATE` sidesteps this by injecting the public
+`ip:port` pair straight into the SDP:
+
+```yaml
+- "APPEND_CANDIDATE=a=candidate:playit1 1 udp 1694498815 <public-ip> <public-port> typ host\r\n"
+```
+
+Set it to whatever the dashboard shows. Note the environment block uses **list**
+syntax: there `\r\n` becomes a real CRLF. In mapping syntax you would have to
+escape it, and broadcast-box would splice the literal characters into the SDP.
 
 Verify:
 
@@ -176,9 +184,12 @@ friends. If this ever opens up, separate key from name and sign it server-side.
 These cost real time. Read before debugging.
 
 **playit's port ≠ your local port.** `NAT_1_TO_1_IP` rewrites only the **IP** in
-ICE candidates, never the port. Public `45678` with local `8081` makes the SDP
-advertise `ip:8081` and media never connects. Symptom: signaling fine, ICE stuck
-in `checking` forever, black video.
+ICE candidates, never the port. Symptom: signaling fine, ICE stuck in `checking`
+forever, black video. `APPEND_CANDIDATE` is the way out — see the server
+section.
+
+**`NETWORK_TEST_ON_START` must be off behind the tunnel.** The self-test dies on
+the container's hairpin NAT even though real clients over the LAN work fine.
 
 **`NETWORK_TYPES` is `|`-separated, not comma-separated.**
 
