@@ -15,6 +15,7 @@
     "files": [
       "electron/**",
       "ui/**",
+      "build/icon.png",
       "config.json",
       "package.json"
     ],

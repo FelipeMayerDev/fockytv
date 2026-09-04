@@ -102,6 +102,12 @@ The share dialog offers frame rate (15/30/60), codec, and a system-audio
 toggle. On Wayland the source list comes from the system portal instead of an
 in-app grid — see the pitfalls below.
 
+Closing the window hides the app to the system tray rather than quitting, so a
+broadcast survives getting the window out of the way. Quit from the tray menu.
+On Linux this needs a StatusNotifierItem host (most bars ship one; check with
+`busctl --user list | grep StatusNotifierWatcher`) — without it the icon simply
+never appears and the window has no way back.
+
 ### Packaging
 
 ```bash
