@@ -600,7 +600,7 @@ const thumbs = new Map()   // streamKey -> dataURL, pra não regerar a cada refr
 let discord = false   // true quando rodando como Activity (sem captura de mídia)
 async function bootstrapDiscord () {
   try {
-    const { inDiscord, initDiscord, discordDisplayName, restoreWebRTC } = await import('./discord.js?v=1')
+    const { inDiscord, initDiscord, discordDisplayName, restoreWebRTC } = await import('./discord.js?v=2')
     discord = inDiscord
     if (!inDiscord) return null
     // tem que rodar antes do loop de codecs: getCapabilities também some
