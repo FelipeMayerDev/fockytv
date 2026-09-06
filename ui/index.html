@@ -1770,9 +1770,13 @@ fockyApi.config().then(async c => {
   // do getCapabilities do loop de codecs abaixo
   const discordNick = await bootstrapDiscord()
 
+  // O broadcast-box deste build só negocia VP9/H264/AV1: um offer restrito a
+  // outro codec (VP8, H265…) recebe m=video 0 na resposta e a transmissão
+  // sai só-áudio — tela preta para todo mundo, sem erro nenhum no cliente.
+  const serverCodecs = /vp9|h264|av1/
   for (const m of new Set(RTCRtpSender.getCapabilities('video').codecs
       .map(x => x.mimeType.toLowerCase())
-      .filter(x => !/rtx|red|ulpfec|flexfec/.test(x))))
+      .filter(x => !/rtx|red|ulpfec|flexfec/.test(x) && serverCodecs.test(x))))
     $('#codec').add(new Option(m.replace('video/', '').toUpperCase(), m))
 
   if (cfg.win) {
