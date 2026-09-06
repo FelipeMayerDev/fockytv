@@ -3,6 +3,7 @@
 // ffmpeg transcoda pra H264+Opus e manda RTP em localhost pro werift publicar.
 // Sem viewer por 60 s a stream morre — e a playlist da música zera junto.
 import { spawn } from "node:child_process"
+import { Readable } from "node:stream"
 import { createWriteStream, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs"
 import { open, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -760,7 +761,8 @@ app.get("/api/fixed/img", wrap(async (req, res) => {
     return res.status(502).json({ error: "não é imagem" })
   res.setHeader("content-type", r.headers.get("content-type"))
   res.setHeader("cache-control", "public, max-age=86400")
-  r.body.pipe(res)
+  // fetch devolve web stream; express espera stream do node
+  Readable.fromWeb(r.body).pipe(res)
 }))
 
 app.get("/api/fixed/tv", (req, res) => res.json(tvState()))
