@@ -1227,6 +1227,7 @@ $('#share-go').onclick = async () => {
   const isSwap = !!$('#dlg-share').dataset.swap
   const cam = !!$('#dlg-share').dataset.cam
   let audioOpts = null   // fonte de áudio escolhida (null = som do sistema/sem filtro)
+  let audioFail = null   // filtro pedido mas caiu: vira o toast do fim
   try {
     if (isSwap) {
       await doSwap(picked)
@@ -1256,8 +1257,12 @@ $('#share-go').onclick = async () => {
           try { stream.addTrack(await startFilteredAudio(audioOpts)) }
           catch (e) {
             // sem o filtro, volta pro áudio do sistema (recaptura: a permissão
-            // já foi dada, o handler entrega a mesma fonte)
-            toast('Filtro de áudio falhou (' + e.message + '): som do sistema')
+            // já foi dada, o handler entrega a mesma fonte).
+            // NÃO avisar aqui: o toast do fim do fluxo sobrescrevia este em
+            // milissegundos, e a falha do filtro virava um "Som: sistema
+            // inteiro" indistinguível de ter escolhido isso. Dias de Discord
+            // vazando com o aviso certo sendo apagado antes de ser lido.
+            audioFail = e.message
             audioOpts = null
             stream.getTracks().forEach(t => t.stop())
             stream = await capture(fps, true, $('#cursor').checked)
@@ -1270,7 +1275,9 @@ $('#share-go').onclick = async () => {
       sfx.live()
       // fonte de áudio visível pro host: filtro que falhou em silêncio é a
       // pior falha possível (o Discord entra e ninguém sabe o porquê)
-      if (!cam) toast(audioOpts
+      if (!cam) toast(audioFail
+        ? 'FILTRO DE ÁUDIO FALHOU (' + audioFail + ') — foi o som do sistema, Discord incluso'
+        : audioOpts
         ? (audioOpts.mode === 'window' ? 'Som: só o aplicativo da janela'
            : audioOpts.mode === 'exclude' ? 'Som: sistema sem o Discord'
            : 'Som: todos os aplicativos')
