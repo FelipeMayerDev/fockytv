@@ -597,9 +597,11 @@ const thumbs = new Map()   // streamKey -> dataURL, pra não regerar a cada refr
 
 // ── Discord Activity (só acorda dentro do iframe do Discord) ──────────────
 // Fora dele o import é pulado: o esm.sh nem é requisitado no Electron/navegador.
+let discord = false   // true quando rodando como Activity (sem captura de mídia)
 async function bootstrapDiscord () {
   try {
     const { inDiscord, initDiscord, discordDisplayName } = await import('./discord.js?v=1')
+    discord = inDiscord
     if (!inDiscord) return null
     const sdk = await initDiscord()
     // o username pode chegar após o ready; sem ele, o diálogo normal decide
@@ -984,6 +986,12 @@ $('#cfg-close').onclick = () => $('#dlg-cfg').close()
 let picked = null
 
 async function openShareDialog (isSwap, cam) {
+  // O iframe da Activity não recebe camera/microphone/display-capture do
+  // Discord (permissions policy deles) — transmitir é no desktop/navegador.
+  if (discord) {
+    toast('Transmitir não funciona dentro da Activity — o Discord bloqueia câmera e captura de tela. Use o app desktop ou o navegador; aqui dá pra assistir.')
+    return
+  }
   $('#share-err').textContent = ''
   const adding = !!cam && !!pc          // câmera entrando por cima da tela
   $('#share-title').textContent = isSwap ? 'Trocar janela'
