@@ -18,8 +18,9 @@ help:
 
 # Captura de áudio por aplicativo (Windows): helper WASAPI compilado com
 # mingw dentro do docker — mesmo esquema dos targets de empacotamento.
+# Sem -u: o apt do container precisa de root (o resto dos targets roda 1000:1000).
 audio-helper: electron/audio-helper/capture.cpp
-	$(IN_DOCKER) debian:bookworm bash -c \
+	docker run --rm -v "$(CURDIR)":/project -w /project debian:bookworm bash -c \
 	  "apt-get update -qq && apt-get install -y -qq g++-mingw-w64-x86-64 >/dev/null && \
 	   x86_64-w64-mingw32-g++ -std=c++17 -O2 -static \
 	     -o electron/audio-helper/audio-helper.exe electron/audio-helper/capture.cpp \
