@@ -1181,7 +1181,7 @@ async function doSwap (id) {
     // trocou de janela com filtro ligado: o som tem que seguir a nova janela
     if (filterMode === 'window') {
       const hwnd = hwndOf(id)
-      if (hwnd) fockyApi.audioStart({ mode: 'window', hwnd: +hwnd }).catch(() => {})
+      if (hwnd) fockyApi.audioStart({ mode: 'window', hwnd: hwndNum(hwnd) }).catch(() => {})
     }
     const fresh = await capture(+$('#fps').value, false, $('#cursor').checked)
     if (overlay) {
@@ -1223,6 +1223,7 @@ $('#share-cancel').onclick = () => {
 $('#share-go').onclick = async () => {
   const isSwap = !!$('#dlg-share').dataset.swap
   const cam = !!$('#dlg-share').dataset.cam
+  let audioOpts = null   // fonte de áudio escolhida (null = som do sistema/sem filtro)
   try {
     if (isSwap) {
       await doSwap(picked)
@@ -1241,7 +1242,6 @@ $('#share-go').onclick = async () => {
         // não do getDisplayMedia
         const hwnd = hwndOf(picked)
         const useFilter = cfg.audioFilter && $('#audio').checked && !$('#faudio-row').hidden
-        let audioOpts = null
         if (useFilter && pickedIsWindow && cfg.windowFilter && $('#faudio').checked && hwnd)
           audioOpts = { mode: 'window', hwnd: hwndNum(hwnd) }
         else if (useFilter && $('#faudio').checked)
@@ -1255,6 +1255,7 @@ $('#share-go').onclick = async () => {
             // sem o filtro, volta pro áudio do sistema (recaptura: a permissão
             // já foi dada, o handler entrega a mesma fonte)
             toast('Filtro de áudio falhou (' + e.message + '): som do sistema')
+            audioOpts = null
             stream.getTracks().forEach(t => t.stop())
             stream = await capture(fps, true, $('#cursor').checked)
           }
@@ -1266,7 +1267,7 @@ $('#share-go').onclick = async () => {
       sfx.live()
       // fonte de áudio visível pro host: filtro que falhou em silêncio é a
       // pior falha possível (o Discord entra e ninguém sabe o porquê)
-      toast(audioOpts
+      if (!cam) toast(audioOpts
         ? (audioOpts.mode === 'window' ? 'Som: só o aplicativo da janela'
            : audioOpts.mode === 'exclude' ? 'Som: sistema sem o Discord'
            : 'Som: todos os aplicativos')
