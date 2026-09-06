@@ -595,6 +595,22 @@ let cam = null       // MediaStream da câmera, quando ela entra junto com a tel
 let overlay = null   // composição tela+câmera: { canvas, sv, cv, out, box, timer, gain }
 const thumbs = new Map()   // streamKey -> dataURL, pra não regerar a cada refresh
 
+// ── Discord Activity (só acorda dentro do iframe do Discord) ──────────────
+// Fora dele o import é pulado: o esm.sh nem é requisitado no Electron/navegador.
+async function bootstrapDiscord () {
+  try {
+    const { inDiscord, initDiscord, discordDisplayName } = await import('./discord.js')
+    if (!inDiscord) return null
+    const sdk = await initDiscord()
+    // o username pode chegar após o ready; sem ele, o diálogo normal decide
+    const name = discordDisplayName(null)
+    return sdk && /^[\w.-]{1,32}$/.test(name ?? '') ? name : null
+  } catch (e) {
+    console.warn('[fockytv/discord] init falhou, seguindo sem Activity:', e)
+    return null
+  }
+}
+
 // ── WebRTC (herdado da Fase 0, números já medidos) ───────────────────────
 const ice = pc => new Promise(r =>
   pc.iceGatheringState === 'complete' ? r()
@@ -1747,7 +1763,11 @@ fockyApi.config().then(c => {
 
   const saved = localStorage.getItem('nick')
   if (saved) setNick(saved)   // já salvo: entra direto
-  else askNick(true)
+  else bootstrapDiscord().then(discordNick => {
+    // Activity: o Discord já sabe quem é o usuário — nick vem de lá
+    if (discordNick) setNick(discordNick)
+    else askNick(true)
+  })
 
   refresh().catch(e => toast(e.message))
   poll = setInterval(() => refresh().catch(() => {}), 5000)
