@@ -1146,19 +1146,23 @@ const hwndOf = id => id?.match(/^window:(\d+)/)?.[1]
 
 function updateShareAudio (srcId) {
   pickedIsWindow = !!hwndOf(srcId)
-  if (pickedIsWindow) {
+  const winFilter = pickedIsWindow && cfg?.windowFilter   // modo "só o aplicativo"
+  if (winFilter) {
     $('#faudio-label').textContent = 'Som só do aplicativo'
     $('#faudio-desc').textContent = 'o áudio sai só do programa da janela escolhida'
   } else {
     $('#faudio-label').textContent = 'Remover áudio do Discord'
     $('#faudio-desc').textContent = 'o Discord não entra na transmissão — e continua tocando normal no seu PC'
   }
-  // janela: filtro ligado por padrão; tela: quem pede pra tirar o Discord marca
-  $('#faudio').checked = pickedIsWindow
+  // janela: filtro ligado por padrão; tela: quem quiser tirar o Discord marca.
+  // No Linux a tela sem marcar ainda tem som (PipeWire pega todos os apps) —
+  // no Windows desmarcar cai no loopback de sistema do Chromium.
+  $('#faudio').checked = winFilter
   $('#faudio-row').hidden = !(cfg?.audioFilter && srcId && $('#audio').checked)
   $('#audio-desc').textContent =
-    !pickedIsWindow ? 'áudio do sistema junto com o vídeo'
-    : cfg?.audioFilter ? 'com o filtro abaixo, só o aplicativo escolhido'
+    winFilter ? 'com o filtro abaixo, só o aplicativo escolhido'
+    : !pickedIsWindow ? 'áudio do sistema junto com o vídeo'
+    : cfg?.audioFilter ? 'áudio filtrado do aplicativo escolhido'
     : 'áudio do sistema inteiro — o navegador não separa o som por janela'
 }
 $('#audio').onchange = () => updateShareAudio(picked)
@@ -1229,13 +1233,17 @@ $('#share-go').onclick = async () => {
         })
       } else {
         await fockyApi.pick(picked)
-        // filtro de áudio por app: o som vem do helper, não do getDisplayMedia
+        // filtro de áudio por app: o som vem do helper (WASAPI/PipeWire),
+        // não do getDisplayMedia
         const hwnd = hwndOf(picked)
-        const useFilter = cfg.audioFilter && $('#audio').checked && $('#faudio').checked
-          && !$('#faudio-row').hidden
-        const audioOpts = useFilter && hwnd
-          ? { mode: 'window', hwnd: +hwnd }
-          : useFilter ? { mode: 'exclude', name: 'Discord' } : null
+        const useFilter = cfg.audioFilter && $('#audio').checked && !$('#faudio-row').hidden
+        let audioOpts = null
+        if (useFilter && pickedIsWindow && cfg.windowFilter && $('#faudio').checked && hwnd)
+          audioOpts = { mode: 'window', hwnd: +hwnd }
+        else if (useFilter && $('#faudio').checked)
+          audioOpts = { mode: 'exclude', name: 'Discord' }
+        else if (useFilter && cfg.linux && !pickedIsWindow)
+          audioOpts = { mode: 'screen' }   // Linux: som de tudo via PipeWire
         stream = await capture(fps, $('#audio').checked && !audioOpts, $('#cursor').checked)
         if (audioOpts) {
           try { stream.addTrack(await startFilteredAudio(audioOpts)) }

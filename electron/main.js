@@ -25,14 +25,22 @@ let picked = null   // id escolhido no overlay
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null)   // sem File/Edit/View
 
+const { execFile, execFileSync } = require('node:child_process')
+const hasTool = t => { try { execFileSync('sh', ['-c', `command -v ${t}`], { stdio: 'ignore' }); return true } catch { return false } }
+const linuxAudio = process.platform === 'linux' && hasTool('pw-dump') && hasTool('pw-cat')
+
   ipcMain.handle('config', () => ({
     ...config,
     version: app.getVersion(),   // o renderer compara com a última atualização vista
     // no Wayland é o getSources que abre o portal — muda o fluxo da troca
     wayland,
     win: process.platform === 'win32',
-    // filtro de áudio por app: helper WASAPI (ou seno de teste, pra dev)
-    audioFilter: process.platform === 'win32' || process.env.FOCKY_AUDIO_TEST === '1',
+    linux: process.platform === 'linux',
+    // filtro de áudio por app: helper WASAPI no Windows, PipeWire no Linux
+    // (ou seno de teste, pra dev). windowFilter exige saber o PID da janela:
+    // X11 via wmctrl; no Wayland o portal não conta quem foi escolhido.
+    audioFilter: process.platform === 'win32' || linuxAudio || process.env.FOCKY_AUDIO_TEST === '1',
+    windowFilter: process.platform === 'win32' || (linuxAudio && hasTool('wmctrl') && !wayland),
   }))
 
   ipcMain.handle('sources', async () => {
@@ -131,18 +139,21 @@ async function audioStart (opts) {
     opts.mode === 'test' ? ['--test'] :
     opts.mode === 'window' ? ['--hwnd', String(opts.hwnd)] :
     opts.mode === 'exclude' ? ['--exclude-name', opts.name ?? 'Discord'] : null
-  if (!args) return { ok: false, error: 'modo inválido' }
-  alog('start ' + args.join(' '))
-  if (opts.mode !== 'test' && process.platform !== 'win32') {
+  if (opts.mode !== 'test' && process.platform === 'linux') {
+    // window|exclude|screen: no PipeWire dá pra capturar (e misturar) os
+    // streams de app direto; o modo screen pega todos sem exceção
+    if (linuxAudio) return startLinuxAudio(opts)
     // dev fora do Windows: FOCKY_AUDIO_TEST=1 troca o helper por um seno,
     // para exercitar o pipeline do renderer (a UI nem mostra a opção sem isso)
     if (process.env.FOCKY_AUDIO_TEST === '1') {
       startTestTone()
       return { ok: true, rate: 48000, channels: 2 }
     }
-    alog('fora do windows sem FOCKY_AUDIO_TEST')
-    return { ok: false, error: 'filtro de áudio só no Windows' }
+    alog('sem pw-dump/pw-cat')
+    return { ok: false, error: 'filtro de áudio precisa de PipeWire (pw-cat/pw-dump)' }
   }
+  if (!args) return { ok: false, error: 'modo inválido' }
+  alog('start ' + args.join(' '))
   headerBuf = null
   metaSent = false
   pcmPending = []
@@ -221,8 +232,106 @@ async function audioStart (opts) {
 
 function audioStop () {
   stopTestTone()
+  stopLinuxAudio()
   clearInterval(pcmFlush); pcmFlush = null
   if (audioProc) { const p = audioProc; audioProc = null; alog('stop'); p.kill() }
+}
+
+// ── áudio por aplicativo no Linux (PipeWire) ──────────────────────────────
+// Cada app que toca som é um nó "Stream/Output/Audio" no PipeWire com
+// binary/pid nas props. O supervisor enumera (pw-dump), grava cada nó da
+// seleção (pw-cat --target <serial>, f32 48k estéreo) e mistura em JS.
+// Sem app tocando sai silêncio — o clock do RTP segue andando.
+let linuxPoller = null, linuxMixTimer = null
+const linuxProcs = new Map()   // serial → { proc, bufs: Buffer[] }
+
+function linuxSelect (props, opts) {
+  if (props['media.class'] !== 'Stream/Output/Audio') return false
+  if (opts.mode === 'window') return +props['application.process.pid'] === opts.pid
+  if (opts.mode === 'exclude') return !/^discord/i.test(props['application.process.binary'] ?? '')
+  return true   // tela toda com som
+}
+
+function linuxPidOfHwnd (hwnd) {
+  try {
+    const out = execFileSync('wmctrl', ['-lp'], { encoding: 'utf8' })
+    for (const line of out.split('\n')) {
+      const m = line.match(/^(0x[0-9a-fA-F]+)\s+\S+\s+(\d+)/)
+      if (m && parseInt(m[1], 16) === Number(hwnd)) return +m[2]
+    }
+  } catch {}
+  return 0
+}
+
+function startLinuxAudio (opts) {
+  alog('linux start ' + JSON.stringify(opts))
+  if (opts.mode === 'window') {
+    opts = { ...opts, pid: linuxPidOfHwnd(opts.hwnd) }
+    if (!opts.pid) return { ok: false, error: 'não achei o processo da janela' }
+  }
+  const RATE = 48000, CH = 2, FRAMES = 960   // 20ms por tick
+  win?.webContents.send('audio-meta', { rate: RATE, channels: CH })
+
+  linuxPoller = setInterval(() => {
+    execFile('pw-dump', { maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+      if (err || !linuxPoller) return
+      let nodes
+      try { nodes = JSON.parse(stdout).filter(o => o.type === 'PipeWire:Interface:Node') } catch { return }
+      const wanted = new Set()
+      for (const n of nodes) {
+        const p = n.info?.props ?? {}
+        if (!linuxSelect(p, opts)) continue
+        const serial = +(p['object.serial'] ?? 0)
+        if (!serial || linuxProcs.has(serial)) { if (serial) wanted.add(serial); continue }
+        wanted.add(serial)
+        alog('capturando serial ' + serial + ' (' + (p['application.process.binary'] ?? p['node.name'] ?? '?') + ')')
+        const proc = spawn('pw-cat',
+          ['record', '--raw', '--format', 'f32', '--rate', '48000', '--channels', '2',
+           '--target', String(serial), '-'],
+          { stdio: ['ignore', 'pipe', 'inherit'] })
+        const entry = { proc, bufs: [] }
+        proc.stdout.on('data', d => entry.bufs.push(d))
+        proc.on('exit', () => { linuxProcs.delete(serial); alog('serial ' + serial + ' saiu') })
+        linuxProcs.set(serial, entry)
+      }
+      for (const [serial, e] of linuxProcs)
+        if (!wanted.has(serial)) { alog('largando serial ' + serial); e.proc.kill(); linuxProcs.delete(serial) }
+    })
+  }, 1000)
+  linuxPoller.refresh()   // enumera já, sem esperar 1s
+
+  const mix = Buffer.allocUnsafe(FRAMES * CH * 4)
+  linuxMixTimer = setInterval(() => {
+    mix.fill(0)
+    const out = new Float32Array(mix.buffer, 0, FRAMES * CH)
+    for (const e of linuxProcs.values()) {
+      // consome FRAMES frames da fonte; o que faltar entra como zero
+      let need = FRAMES * CH * 4
+      const src = []
+      while (need > 0 && e.bufs.length) {
+        const b = e.bufs[0]
+        if (b.length <= need) { src.push(b); need -= b.length; e.bufs.shift() }
+        else { src.push(b.subarray(0, need)); e.bufs[0] = b.subarray(need); need = 0 }
+      }
+      let off = 0
+      for (const b of src) {
+        for (let i = 0; i + 4 <= b.length && off < out.length; i += 4, off++)
+          out[off] += b.readFloatLE(i)
+      }
+      if (e.bufs.length > 64) e.bufs.splice(0, e.bufs.length - 64)   // atrasou: descarta
+    }
+    for (let i = 0; i < out.length; i++)
+      if (out[i] > 1) out[i] = 1; else if (out[i] < -1) out[i] = -1
+    win?.webContents.send('audio-pcm', mix)
+  }, 20)
+  return { ok: true, rate: RATE, channels: CH }
+}
+
+function stopLinuxAudio () {
+  clearInterval(linuxPoller); linuxPoller = null
+  clearInterval(linuxMixTimer); linuxMixTimer = null
+  for (const e of linuxProcs.values()) e.proc.kill()
+  linuxProcs.clear()
 }
 
 // ── seno de teste (dev em não-Windows): mesma interface do helper ─────────
