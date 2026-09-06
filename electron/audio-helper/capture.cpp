@@ -235,7 +235,10 @@ int main(int argc, char** argv) {
       return 13;
     }
     IActivateAudioInterfaceAsyncOperation_* op = nullptr;
-    HRESULT hr = activate(L"VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK",
+    // VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK é um MACRO do SDK, e o que estava
+    // aqui era o nome dele em vez do valor. Como caminho de dispositivo isso
+    // não existe: GetActivateResult devolvia 0x80070002 (ERROR_FILE_NOT_FOUND).
+    HRESULT hr = activate(L"VAD\\Process_Loopback",
                           __uuidof(IAudioClient), &pv, &handler, &op);
     if (FAILED(hr)) {
       fwprintf(stderr, L"ActivateAudioInterfaceAsync falhou hr=0x%08lX "
@@ -274,9 +277,12 @@ int main(int argc, char** argv) {
     fmt.wBitsPerSample = 32;
     fmt.nBlockAlign = fmt.nChannels * fmt.wBitsPerSample / 8;
     fmt.nAvgBytesPerSec = fmt.nSamplesPerSec * fmt.nBlockAlign;
+    // Duração do buffer DEVE ser 0 no process loopback (sample oficial da
+    // Microsoft): com 1s a ativação passa, chega um pacote e nada mais —
+    // exatamente o "só 100ms de silêncio" medido na máquina de teste.
     if (FAILED(client->Initialize(AUDCLNT_SHAREMODE_SHARED,
                                   AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-                                  10000000 /*1s*/, 0, &fmt, nullptr)))
+                                  0, 0, &fmt, nullptr)))
       return 10;
 
     HANDLE dataReady = CreateEvent(nullptr, FALSE, FALSE, nullptr);
@@ -297,8 +303,16 @@ int main(int argc, char** argv) {
     // frames. Pular os pacotes silenciosos (o normal quando o app alvo não está
     // tocando nada) encolhia a linha do tempo e picotava tudo depois.
     std::vector<float> zeros;
+    unsigned long long total = 0;
+    int waits = 0;
     for (;;) {
-      WaitForSingleObject(dataReady, 2000);
+      DWORD w = WaitForSingleObject(dataReady, 2000);
+      if (w == WAIT_TIMEOUT) {
+        fwprintf(stderr, L"sem evento: total=%llu frames, %d timeouts\n", total, ++waits);
+        if (waits > 15) return 14;   // 30s sem nada: desiste (log claro)
+        continue;
+      }
+      waits = 0;
       BYTE* data = nullptr; UINT32 frames = 0; DWORD flags = 0;
       while (SUCCEEDED(cap->GetNextPacketSize(&frames)) && frames > 0) {
         if (FAILED(cap->GetBuffer(&data, &frames, &flags, nullptr, nullptr))) break;
@@ -310,6 +324,7 @@ int main(int argc, char** argv) {
         } else {
           ok = write_all(data, bytes);
         }
+        total += frames;
         cap->ReleaseBuffer(frames);
         if (!ok) goto done;
       }
