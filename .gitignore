@@ -5,3 +5,4 @@ server/.env
 server/playit-data/
 cookies.txt
 .zcode/
+electron/audio-helper/audio-helper.exe

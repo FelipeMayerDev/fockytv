@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu, Tray, ipcMain, desktopCapturer, session } = require('electron')
 const { autoUpdater } = require('electron-updater')
+const { spawn } = require('node:child_process')
 const path = require('node:path')
 const fs = require('node:fs')
 
@@ -30,6 +31,8 @@ app.whenReady().then(() => {
     // no Wayland é o getSources que abre o portal — muda o fluxo da troca
     wayland,
     win: process.platform === 'win32',
+    // filtro de áudio por app: helper WASAPI (ou seno de teste, pra dev)
+    audioFilter: process.platform === 'win32' || process.env.FOCKY_AUDIO_TEST === '1',
   }))
 
   ipcMain.handle('sources', async () => {
@@ -59,6 +62,15 @@ app.whenReady().then(() => {
     // gotcha #5: áudio do sistema só no Windows; no Linux depende de PipeWire, fica pra depois
     callback(process.platform === 'win32' ? { video: src, audio: 'loopback' } : { video: src })
   })
+
+  // ── áudio filtrado por aplicativo (Windows) ─────────────────────────────
+  // O loopback do Chromium é sempre do dispositivo inteiro; filtrar por app
+  // (janela escolhida, ou "tudo menos o Discord") é o helper WASAPI, que
+  // escreve PCM em stdout. O renderer transforma isso numa MediaStreamTrack
+  // (audioStart/audioStop + eventos audio-meta/audio-pcm). O Chromium não
+  // renegocia o WHIP, então a track entra no lugar da do getDisplayMedia.
+  ipcMain.handle('audio-start', (_e, opts) => audioStart(opts))
+  ipcMain.handle('audio-stop', () => audioStop())
 
   const icon = path.join(__dirname, '..', 'build', 'icon.png')
 
@@ -102,6 +114,112 @@ app.whenReady().then(() => {
   setupUpdates()
 })
 
+// ── áudio por aplicativo: ciclo de vida do helper ─────────────────────────
+// Dentro do asar não dá para executar: o audio-helper vai em asarUnpacked.
+const helperPath = path.join(__dirname.replace('app.asar', 'app.asar.unpacked'),
+  'audio-helper', 'audio-helper.exe')
+
+let audioProc = null, headerBuf = null, metaSent = false
+
+async function audioStart (opts) {
+  audioStop()
+  const args =
+    opts.mode === 'test' ? ['--test'] :
+    opts.mode === 'window' ? ['--hwnd', String(opts.hwnd)] :
+    opts.mode === 'exclude' ? ['--exclude-name', opts.name ?? 'Discord'] : null
+  if (!args) return { ok: false, error: 'modo inválido' }
+  if (opts.mode !== 'test' && process.platform !== 'win32') {
+    // dev fora do Windows: FOCKY_AUDIO_TEST=1 troca o helper por um seno,
+    // para exercitar o pipeline do renderer (a UI nem mostra a opção sem isso)
+    if (process.env.FOCKY_AUDIO_TEST === '1') {
+      startTestTone()
+      return { ok: true, rate: 48000, channels: 2 }
+    }
+    return { ok: false, error: 'filtro de áudio só no Windows' }
+  }
+  headerBuf = null
+  metaSent = false
+  return new Promise(res => {
+    let settled = false
+    const done = r => { if (!settled) { settled = true; res(r) } }
+
+    if (opts.mode === 'test' && process.platform !== 'win32') {
+      // dev: valida o pipeline do renderer fora do Windows com um seno em JS
+      startTestTone()
+      return done({ ok: true, rate: 48000, channels: 2 })
+    }
+
+    try {
+      audioProc = spawn(helperPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+    } catch (e) {
+      return done({ ok: false, error: 'helper: ' + e.message })
+    }
+    const timer = setTimeout(() => done({ ok: false, error: 'helper não respondeu' }), 10000)
+    audioProc.stdout.on('data', chunk => {
+      // primeiro pedaço traz o header próprio: "FPCM" + rate + channels
+      let buf = chunk
+      if (!metaSent) {
+        headerBuf = headerBuf ?? Buffer.alloc(0)
+        headerBuf = Buffer.concat([headerBuf, buf])
+        if (headerBuf.length < 16) return
+        buf = headerBuf
+        headerBuf = null
+        if (buf.readUInt32BE(0) !== 0x4650434D) {   // "FPCM"
+          audioProc.kill()
+          clearTimeout(timer)
+          return done({ ok: false, error: 'protocolo do helper não reconhecido' })
+        }
+        const rate = buf.readUInt32LE(4), channels = buf.readUInt32LE(8)
+        win?.webContents.send('audio-meta', { rate, channels })
+        metaSent = true
+        clearTimeout(timer)
+        done({ ok: true, rate, channels })
+        buf = buf.subarray(16)
+      }
+      if (buf.length) win?.webContents.send('audio-pcm', buf)
+    })
+    let err = ''
+    audioProc.stderr.on('data', d => { err += d })
+    audioProc.on('error', e => { clearTimeout(timer); done({ ok: false, error: e.message }) })
+    audioProc.on('exit', code => {
+      clearTimeout(timer)
+      if (!settled && code !== 0)
+        return done({ ok: false, error: 'helper saiu (' + code + '): ' + err.trim() })
+      if (settled && code !== 0) {
+        // morreu no meio da transmissão (processo alvo fechou, crash): tenta
+        // de novo — o Discord reiniciando não pode matar o áudio da stream
+        const mode = opts.mode, hwnd = opts.hwnd, name = opts.name
+        setTimeout(() => { if (!audioProc) audioStart({ mode, hwnd, name }) }, 3000)
+      }
+      audioProc = null
+    })
+  })
+}
+
+function audioStop () {
+  stopTestTone()
+  if (audioProc) { const p = audioProc; audioProc = null; p.kill() }
+}
+
+// ── seno de teste (dev em não-Windows): mesma interface do helper ─────────
+let testTimer = null
+function startTestTone () {
+  stopTestTone()
+  const rate = 48000, ch = 2, frames = 480   // 10ms
+  win?.webContents.send('audio-meta', { rate, channels: ch })
+  let phase = 0
+  testTimer = setInterval(() => {
+    const buf = Buffer.allocUnsafe(frames * ch * 4)
+    for (let i = 0; i < frames; i++) {
+      const v = Math.sin(2 * Math.PI * 440 * phase / rate) * 0.2
+      phase = (phase + 1) % rate
+      for (let c = 0; c < ch; c++) buf.writeFloatLE(v, (i * ch + c) * 4)
+    }
+    win?.webContents.send('audio-pcm', buf)
+  }, 10)
+}
+function stopTestTone () { clearInterval(testTimer); testTimer = null }
+
 // ── auto-update (AppImage e NSIS; o feed são as Releases do GitHub) ──────
 function setupUpdates () {
   if (!app.isPackaged) return          // em dev não há feed nem assinatura
@@ -131,7 +249,7 @@ function setupUpdates () {
   setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 6 * 60 * 60 * 1000)
 }
 
-app.on('before-quit', () => { quitting = true })
+app.on('before-quit', () => { quitting = true; audioStop() })
 
 // A janela nunca é destruída (o close vira hide), então isto só dispara se algo
 // a matar de fato — nesse caso não há UI pra voltar, então encerra.
