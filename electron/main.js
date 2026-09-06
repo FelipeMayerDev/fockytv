@@ -119,7 +119,11 @@ app.whenReady().then(() => {
 const helperPath = path.join(__dirname.replace('app.asar', 'app.asar.unpacked'),
   'audio-helper', 'audio-helper.exe')
 
-let audioProc = null, headerBuf = null, metaSent = false
+// Diagnóstico (picotado, app vazando no áudio): fica em <userData>/audio-filter.log
+const alogPath = () => path.join(app.getPath('userData'), 'audio-filter.log')
+const alog = m => { try { fs.appendFileSync(alogPath(), new Date().toISOString() + ' ' + m + '\n') } catch {} }
+
+let audioProc = null, headerBuf = null, metaSent = false, pcmPending = [], pcmFlush = null
 
 async function audioStart (opts) {
   audioStop()
@@ -128,6 +132,7 @@ async function audioStart (opts) {
     opts.mode === 'window' ? ['--hwnd', String(opts.hwnd)] :
     opts.mode === 'exclude' ? ['--exclude-name', opts.name ?? 'Discord'] : null
   if (!args) return { ok: false, error: 'modo inválido' }
+  alog('start ' + args.join(' '))
   if (opts.mode !== 'test' && process.platform !== 'win32') {
     // dev fora do Windows: FOCKY_AUDIO_TEST=1 troca o helper por um seno,
     // para exercitar o pipeline do renderer (a UI nem mostra a opção sem isso)
@@ -135,13 +140,15 @@ async function audioStart (opts) {
       startTestTone()
       return { ok: true, rate: 48000, channels: 2 }
     }
+    alog('fora do windows sem FOCKY_AUDIO_TEST')
     return { ok: false, error: 'filtro de áudio só no Windows' }
   }
   headerBuf = null
   metaSent = false
+  pcmPending = []
   return new Promise(res => {
     let settled = false
-    const done = r => { if (!settled) { settled = true; res(r) } }
+    const done = r => { if (!settled) { settled = true; alog('ready ' + JSON.stringify(r)); res(r) } }
 
     if (opts.mode === 'test' && process.platform !== 'win32') {
       // dev: valida o pipeline do renderer fora do Windows com um seno em JS
@@ -152,9 +159,19 @@ async function audioStart (opts) {
     try {
       audioProc = spawn(helperPath, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
     } catch (e) {
+      alog('spawn falhou: ' + e.message)
       return done({ ok: false, error: 'helper: ' + e.message })
     }
-    const timer = setTimeout(() => done({ ok: false, error: 'helper não respondeu' }), 10000)
+    const timer = setTimeout(() => { alog('timeout esperando header'); done({ ok: false, error: 'helper não respondeu' }) }, 10000)
+
+    // rajadas de stdout viram mensagens IPC de ~40ms: menos jitter no caminho
+    const flush = () => {
+      if (!pcmPending.length) return
+      const buf = Buffer.concat(pcmPending)
+      pcmPending = []
+      win?.webContents.send('audio-pcm', buf)
+    }
+
     audioProc.stdout.on('data', chunk => {
       // primeiro pedaço traz o header próprio: "FPCM" + rate + channels
       let buf = chunk
@@ -165,6 +182,7 @@ async function audioStart (opts) {
         buf = headerBuf
         headerBuf = null
         if (buf.readUInt32BE(0) !== 0x4650434D) {   // "FPCM"
+          alog('header desconhecido')
           audioProc.kill()
           clearTimeout(timer)
           return done({ ok: false, error: 'protocolo do helper não reconhecido' })
@@ -172,23 +190,28 @@ async function audioStart (opts) {
         const rate = buf.readUInt32LE(4), channels = buf.readUInt32LE(8)
         win?.webContents.send('audio-meta', { rate, channels })
         metaSent = true
+        clearInterval(pcmFlush)
+        pcmFlush = setInterval(flush, 40)
         clearTimeout(timer)
         done({ ok: true, rate, channels })
         buf = buf.subarray(16)
       }
-      if (buf.length) win?.webContents.send('audio-pcm', buf)
+      if (buf.length) pcmPending.push(buf)
     })
     let err = ''
-    audioProc.stderr.on('data', d => { err += d })
-    audioProc.on('error', e => { clearTimeout(timer); done({ ok: false, error: e.message }) })
+    audioProc.stderr.on('data', d => { err += d; alog('stderr: ' + d.toString().trim()) })
+    audioProc.on('error', e => { clearTimeout(timer); alog('erro: ' + e.message); done({ ok: false, error: e.message }) })
     audioProc.on('exit', code => {
+      clearInterval(pcmFlush); pcmFlush = null
       clearTimeout(timer)
+      alog('exit ' + code + (err.trim() ? ' stderr=' + err.trim() : ''))
       if (!settled && code !== 0)
         return done({ ok: false, error: 'helper saiu (' + code + '): ' + err.trim() })
       if (settled && code !== 0) {
         // morreu no meio da transmissão (processo alvo fechou, crash): tenta
         // de novo — o Discord reiniciando não pode matar o áudio da stream
         const mode = opts.mode, hwnd = opts.hwnd, name = opts.name
+        alog('respawn em 3s')
         setTimeout(() => { if (!audioProc) audioStart({ mode, hwnd, name }) }, 3000)
       }
       audioProc = null
@@ -198,7 +221,8 @@ async function audioStart (opts) {
 
 function audioStop () {
   stopTestTone()
-  if (audioProc) { const p = audioProc; audioProc = null; p.kill() }
+  clearInterval(pcmFlush); pcmFlush = null
+  if (audioProc) { const p = audioProc; audioProc = null; alog('stop'); p.kill() }
 }
 
 // ── seno de teste (dev em não-Windows): mesma interface do helper ─────────

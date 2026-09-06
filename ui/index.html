@@ -806,31 +806,66 @@ async function watchdog (key) {
 // O helper WASAPI manda float32 interleaved pelo IPC; o MediaStreamTrackGenerator
 // (com AudioData) entrega isso como track comum — o WHIP nem fica sabendo da
 // diferença. Um único listener roteia pro writer da sessão corrente.
-let pcmSink = null
+let pcmSink = null, audioTimer = null
 fockyApi.onAudioPcm?.(buf => pcmSink?.(buf))
 
+// O PCM chega por IPC em rajadas: sem buffer, cada atraso vira um buraco no
+// som (picotado). Acumula um LEAD e entrega no ritmo do relógio; em underrun
+// congela o relógio em vez de pular áudio.
 async function startFilteredAudio (opts) {
   const r = await fockyApi.audioStart(opts)
   if (!r?.ok) throw new Error(r?.error || 'filtro de áudio indisponível')
   filterMode = opts.mode
   const gen = new MediaStreamTrackGenerator({ kind: 'audio' })
   const writer = gen.writable.getWriter()
-  let t = 0   // timestamp em µs, cresce com o que foi entregue
+  const queue = []
+  let received = 0, written = 0, startedAt = 0
+  const LEAD = 0.25   // s de margem antes de começar a tocar
+
   pcmSink = buf => {
     const frames = buf.length / (r.channels * 4)
     if (!frames) return
-    writer.write(new AudioData({
-      format: 'f32', sampleRate: r.rate, numberOfFrames: frames,
-      numberOfChannels: r.channels, timestamp: t, data: buf,
-    })).catch(() => {})
-    t += frames / r.rate * 1e6
+    queue.push(buf)
+    received += frames
+    // consumidor mais lento que o realtime (não deveria): corta o mais velho
+    if (received - written > r.rate * 3) {
+      let drop = received - written - r.rate * 2
+      while (drop > 0 && queue.length) {
+        const f = queue[0].length / (r.channels * 4)
+        if (f > drop) break
+        drop -= f; queue.shift(); written += f
+      }
+    }
   }
-  gen.addEventListener('ended', () => { pcmSink = null; filterMode = null })
+
+  audioTimer = setInterval(() => {
+    if (!startedAt) {
+      if (received / r.rate < LEAD) return
+      startedAt = Date.now()
+    }
+    const target = (Date.now() - startedAt) / 1000 * r.rate
+    while (queue.length && written < target) {
+      const buf = queue.shift()
+      const frames = buf.length / (r.channels * 4)
+      writer.write(new AudioData({
+        format: 'f32', sampleRate: r.rate, numberOfFrames: frames,
+        numberOfChannels: r.channels,
+        timestamp: Math.round(written / r.rate * 1e6), data: buf,
+      })).catch(() => {})
+      written += frames
+    }
+    // underrun: empurra o relógio pra frente até o buffer se refazer
+    if (!queue.length && startedAt && written < target)
+      startedAt += (target - written) / r.rate * 1000
+  }, 50)
+
+  gen.addEventListener('ended', () => stopFilteredAudio())
   return gen
 }
 
 function stopFilteredAudio () {
   pcmSink = null
+  clearInterval(audioTimer); audioTimer = null
   filterMode = null
   fockyApi.audioStop?.()
 }
@@ -1107,7 +1142,7 @@ async function openShareDialog (isSwap, cam) {
 // Tela toda: dá para excluir o Discord (o eco da própria voz some e o Discord
 // segue funcionando normal no PC de quem transmite). Sem o helper (navegador,
 // Linux), o áudio é sempre do sistema inteiro — a opção nem aparece.
-const hwndOf = id => id?.match(/^window:(\d+):/)?.[1]
+const hwndOf = id => id?.match(/^window:(\d+)/)?.[1]
 
 function updateShareAudio (srcId) {
   pickedIsWindow = !!hwndOf(srcId)

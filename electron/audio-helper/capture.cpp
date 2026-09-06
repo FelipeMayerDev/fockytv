@@ -18,13 +18,14 @@
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
-#include <psapi.h>
+#include <tlhelp32.h>
 #include <io.h>
 #include <fcntl.h>
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
+#include <vector>
 
 // ── o que falta nos headers do mingw ──────────────────────────────────────
 enum PROCESS_LOOPBACK_MODE_ {
@@ -86,26 +87,50 @@ static DWORD pid_of_window(uint64_t hwnd) {
   return pid;
 }
 
-// PID raiz do processo pelo nome (sem ".exe"), para o modo exclude.
-static DWORD pid_of_name(const wchar_t* name) {
-  DWORD pids[1024], needed = 0;
-  if (!EnumProcesses(pids, sizeof(pids), &needed)) return 0;
-  for (DWORD i = 0; i < needed / sizeof(DWORD); i++) {
-    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pids[i]);
-    if (!h) continue;
-    wchar_t base[MAX_PATH]; DWORD sz = MAX_PATH;
-    DWORD hit = 0;
-    if (QueryFullProcessImageNameW(h, 0, base, &sz)) {
-      wchar_t* stem = wcsrchr(base, L'\\');
-      stem = stem ? stem + 1 : base;
-      wchar_t* dot = wcsrchr(stem, L'.');
-      if (dot) *dot = 0;   // "Discord.exe" → "Discord"
-      if (!_wcsicmp(stem, name)) hit = pids[i];
-    }
-    CloseHandle(h);
-    if (hit) return hit;
+// Sobe a cadeia de pais: se algum ancestral é da família, pid é descendente
+// (não é raiz). Limite de saltos contra ciclos de PPID órfãos.
+static bool in_parent_tree (DWORD pid, const std::vector<std::pair<DWORD, DWORD>>& procs,
+                            bool (*is_family)(DWORD, void*), void* ctx) {
+  DWORD cur = pid;
+  for (int hops = 0; hops < 32; hops++) {
+    DWORD ppid = 0; bool found = false;
+    for (auto& pr : procs) if (pr.first == cur) { ppid = pr.second; found = true; break; }
+    if (!found || ppid == 0) return false;
+    if (is_family(ppid, ctx)) return true;
+    cur = ppid;
   }
-  return 0;
+  return false;
+}
+
+// PID raiz da árvore do processo pelo prefixo do nome (ex.: "Discord" casa
+// "Discord", "DiscordPTB", "DiscordCanary"). A API de process loopback exclui
+// UMA árvore: tem que ser o tronco — qualquer processo fora dela continua
+// sendo capturado. Raiz = o processo cujo pai NÃO é da família.
+static DWORD pid_of_name(const wchar_t* name) {
+  struct Family { std::vector<DWORD> pids; };
+  Family fam;
+  std::vector<std::pair<DWORD, DWORD>> procs;   // (pid, ppid) de tudo
+  HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+  if (snap == INVALID_HANDLE_VALUE) return 0;
+  PROCESSENTRY32W pe = { sizeof(pe) };
+  if (Process32FirstW(snap, &pe)) do {
+    wchar_t stem[MAX_PATH];
+    wcsncpy(stem, pe.szExeFile, MAX_PATH - 1);
+    stem[MAX_PATH - 1] = 0;
+    wchar_t* dot = wcsrchr(stem, L'.');
+    if (dot) *dot = 0;   // "Discord.exe" → "Discord"
+    if (!_wcsnicmp(stem, name, wcslen(name))) fam.pids.push_back(pe.th32ProcessID);
+    procs.push_back({ pe.th32ProcessID, pe.th32ParentProcessID });
+  } while (Process32NextW(snap, &pe));
+  CloseHandle(snap);
+
+  auto cb = [](DWORD pid, void* ctx) -> bool {
+    for (DWORD f : ((Family*)ctx)->pids) if (f == pid) return true;
+    return false;
+  };
+  for (DWORD pid : fam.pids)
+    if (!in_parent_tree(pid, procs, cb, &fam)) return pid;
+  return fam.pids.empty() ? 0 : fam.pids[0];
 }
 
 static bool write_all(const void* buf, size_t len) {
@@ -162,6 +187,7 @@ int main(int argc, char** argv) {
       fwprintf(stderr, L"uso: --hwnd N | --exclude-name X | --test\n");
       return 1;
     }
+    fwprintf(stderr, L"pid=%lu mode=%d\n", pid, (int)mode);
 
     if (FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED))) return 4;
 
