@@ -32,3 +32,25 @@ export async function initDiscord () {
 export function discordDisplayName (fallback) {
   return sdk?.user?.username ?? fallback
 }
+
+// O Discord apaga window.RTCPeerConnection (e cia.) no documento da Activity;
+// um iframe aninhado da nossa origem não recebe o patch. Copiamos as RTC*
+// de volta antes do app construir os PCs do WHEP.
+export async function restoreWebRTC () {
+  if (!inDiscord || window.RTCPeerConnection) return
+  const f = document.createElement('iframe')
+  f.hidden = true
+  f.src = new URL('shim.html?v=1', import.meta.url).href
+  const done = new Promise((res, rej) => {
+    f.onload = () => res()
+    f.onerror = () => rej(new Error('shim.html falhou ao carregar'))
+    setTimeout(() => rej(new Error('shim.html timeout')), 5000)
+  })
+  document.body.append(f)
+  await done
+  const w = f.contentWindow
+  for (const k of ['RTCPeerConnection', 'RTCSessionDescription', 'RTCIceCandidate',
+    'RTCRtpSender', 'RTCRtpReceiver', 'RTCRtpTransceiver', 'RTCError'])
+    if (!window[k] && w[k]) window[k] = w[k]
+  return window.RTCPeerConnection ? 'restored' : 'unavailable'
+}

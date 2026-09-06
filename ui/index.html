@@ -600,9 +600,12 @@ const thumbs = new Map()   // streamKey -> dataURL, pra não regerar a cada refr
 let discord = false   // true quando rodando como Activity (sem captura de mídia)
 async function bootstrapDiscord () {
   try {
-    const { inDiscord, initDiscord, discordDisplayName } = await import('./discord.js?v=1')
+    const { inDiscord, initDiscord, discordDisplayName, restoreWebRTC } = await import('./discord.js?v=1')
     discord = inDiscord
     if (!inDiscord) return null
+    // tem que rodar antes do loop de codecs: getCapabilities também some
+    const how = await restoreWebRTC()
+    if (how) console.info('[fockytv/discord] WebRTC via iframe shim:', how)
     const sdk = await initDiscord()
     // o username pode chegar após o ready; sem ele, o diálogo normal decide
     const name = discordDisplayName(null)
@@ -1756,8 +1759,12 @@ if (localStorage.getItem('noIntro') !== '1') {
   })
 }
 
-fockyApi.config().then(c => {
+fockyApi.config().then(async c => {
   cfg = c
+  // bootstrap primeiro: dentro da Activity o shim devolve as RTC* antes
+  // do getCapabilities do loop de codecs abaixo
+  const discordNick = await bootstrapDiscord()
+
   for (const m of new Set(RTCRtpSender.getCapabilities('video').codecs
       .map(x => x.mimeType.toLowerCase())
       .filter(x => !/rtx|red|ulpfec|flexfec/.test(x))))
@@ -1771,11 +1778,8 @@ fockyApi.config().then(c => {
 
   const saved = localStorage.getItem('nick')
   if (saved) setNick(saved)   // já salvo: entra direto
-  else bootstrapDiscord().then(discordNick => {
-    // Activity: o Discord já sabe quem é o usuário — nick vem de lá
-    if (discordNick) setNick(discordNick)
-    else askNick(true)
-  })
+  else if (discordNick) setNick(discordNick)   // Activity: nick vem do Discord
+  else askNick(true)
 
   refresh().catch(e => toast(e.message))
   poll = setInterval(() => refresh().catch(() => {}), 5000)
