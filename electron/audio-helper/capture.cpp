@@ -1,6 +1,6 @@
 // audio-helper: captura de áudio por aplicativo no Windows (WASAPI process
-// loopback, mesmo mecanismo do "Application Audio Capture" do OBS — Windows
-// 10 2004+). Escreve em stdout um cabeçalho próprio e o PCM cru:
+// loopback, mesmo mecanismo do "Application Audio Capture" do OBS —
+// Windows 10 build 20348+). Escreve em stdout um cabeçalho próprio e o PCM cru:
 //
 //   "FPCM" u32 sampleRate u32 channels  →  seguido de float32 interleaved.
 //
@@ -32,9 +32,14 @@ enum PROCESS_LOOPBACK_MODE_ {
   PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE_ = 0,
   PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE_ = 1
 };
+// ORDEM IMPORTA: TargetProcessId vem PRIMEIRO no SDK. Estava invertido aqui,
+// e como são dois DWORDs a struct tem o mesmo tamanho — compilava, ativava,
+// entregava áudio, e o WASAPI lia o modo como PID e o PID como modo. Em
+// exclude isso virava "exclua a árvore do processo 1": som do sistema inteiro,
+// Discord junto. Era esse o vazamento. (audioclientactivationparams.h)
 struct AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS_ {
-  PROCESS_LOOPBACK_MODE_ ProcessLoopbackMode;
   DWORD TargetProcessId;
+  PROCESS_LOOPBACK_MODE_ ProcessLoopbackMode;
 };
 struct AUDIOCLIENT_ACTIVATION_PARAMS_ {
   int ActivationType;   // AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK == 1
@@ -215,7 +220,7 @@ int main(int argc, char** argv) {
     if (FAILED(hr)) {
       fwprintf(stderr, L"ActivateAudioInterfaceAsync falhou hr=0x%08lX "
                L"(0x80070490/0x80004001 em geral = Windows sem a API de "
-               L"process loopback, precisa 10 2004+)\n", (unsigned long)hr);
+               L"process loopback, precisa do build 20348+)\n", (unsigned long)hr);
       return 6;
     }
     if (WaitForSingleObject(g_done, 10000) != WAIT_OBJECT_0) {
