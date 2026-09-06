@@ -237,11 +237,20 @@ int main(int argc, char** argv) {
     }
     if (!client) { fwprintf(stderr, L"ativacao falhou\n"); return 8; }
 
-    WAVEFORMATEX* fmt = nullptr;
-    if (FAILED(client->GetMixFormat(&fmt)) || !fmt) return 9;
+    // Formato fixo, não GetMixFormat: no endpoint de process loopback ele não
+    // é suportado (devolve o do dispositivo, que pode vir PCM 16 bits) e o
+    // resto do código escreve float32 — dava PCM lido como float, ou seja,
+    // ruído. O WASAPI converte pro que pedirmos aqui.
+    WAVEFORMATEX fmt = {};
+    fmt.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
+    fmt.nChannels = 2;
+    fmt.nSamplesPerSec = 48000;
+    fmt.wBitsPerSample = 32;
+    fmt.nBlockAlign = fmt.nChannels * fmt.wBitsPerSample / 8;
+    fmt.nAvgBytesPerSec = fmt.nSamplesPerSec * fmt.nBlockAlign;
     if (FAILED(client->Initialize(AUDCLNT_SHAREMODE_SHARED,
                                   AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-                                  10000000 /*1s*/, 0, fmt, nullptr)))
+                                  10000000 /*1s*/, 0, &fmt, nullptr)))
       return 10;
 
     HANDLE dataReady = CreateEvent(nullptr, FALSE, FALSE, nullptr);
@@ -250,7 +259,7 @@ int main(int argc, char** argv) {
     if (FAILED(client->GetService(__uuidof(IAudioCaptureClient), (void**)&cap))) return 11;
     client->Start();
 
-    uint32_t rate = fmt->nSamplesPerSec, ch = fmt->nChannels;
+    uint32_t rate = fmt.nSamplesPerSec, ch = fmt.nChannels;
     char header[16];
     memcpy(header, "FPCM", 4);
     memcpy(header + 4, &rate, 4);
@@ -258,14 +267,25 @@ int main(int argc, char** argv) {
     memset(header + 12, 0, 4);
     if (!write_all(header, 16)) return 12;
 
+    // Silêncio TEM que ir como zeros: o consumidor toca pelo relógio, contando
+    // frames. Pular os pacotes silenciosos (o normal quando o app alvo não está
+    // tocando nada) encolhia a linha do tempo e picotava tudo depois.
+    std::vector<float> zeros;
     for (;;) {
       WaitForSingleObject(dataReady, 2000);
       BYTE* data = nullptr; UINT32 frames = 0; DWORD flags = 0;
       while (SUCCEEDED(cap->GetNextPacketSize(&frames)) && frames > 0) {
         if (FAILED(cap->GetBuffer(&data, &frames, &flags, nullptr, nullptr))) break;
-        if (!(flags & AUDCLNT_BUFFERFLAGS_SILENT))
-          if (!write_all(data, (size_t)frames * ch * sizeof(float))) goto done;
+        size_t bytes = (size_t)frames * ch * sizeof(float);
+        bool ok;
+        if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
+          zeros.assign((size_t)frames * ch, 0.f);
+          ok = write_all(zeros.data(), bytes);
+        } else {
+          ok = write_all(data, bytes);
+        }
         cap->ReleaseBuffer(frames);
+        if (!ok) goto done;
       }
     }
 done:
