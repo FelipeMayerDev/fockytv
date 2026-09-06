@@ -578,7 +578,10 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
 
 <script>
 // No navegador, a própria página é o servidor e o seletor de tela é nativo.
-const focky = window.focky ?? {
+// Nunca `const focky`: no Electron o contextBridge expõe `focky` como global
+// não-configurável, e redeclarar com const/let é SyntaxError que mata o script
+// inteiro antes de qualquer linha rodar.
+const fockyApi = window.focky ?? {
   config: () => Promise.resolve({ serverUrl: location.origin, displayName: 'focky' }),
   sources: async () => [],
   pick: async () => {},
@@ -996,7 +999,7 @@ async function openShareDialog (isSwap, cam) {
     return
   }
 
-  const sources = await focky.sources()
+  const sources = await fockyApi.sources()
   picked = sources[0]?.id ?? null
 
   // No Wayland o desktopCapturer devolve uma entrada genérica sem nome —
@@ -1028,7 +1031,7 @@ $('#share-cam').onclick = () => openShareDialog(false, true).catch(e => toast(e.
 async function doSwap (id) {
   swapping = true
   try {
-    await focky.pick(id)
+    await fockyApi.pick(id)
     const fresh = await capture(+$('#fps').value, false, $('#cursor').checked)
     if (overlay) {
       // o canvas segue no sender; o que muda é o que ele desenha no fundo
@@ -1052,7 +1055,7 @@ $('#swap').onclick = async () => {
   // a próxima. A conexão WHIP fica de pé, então quem assiste só vê congelar.
   if (cfg.wayland) stream?.getVideoTracks().forEach(t => t.stop())
   try {
-    const sources = await focky.sources()   // no Wayland, isto JÁ é o seletor
+    const sources = await fockyApi.sources()   // no Wayland, isto JÁ é o seletor
     if (sources.length > 1 || sources[0]?.name) return openShareDialog(true)
     await doSwap(sources[0]?.id)
   } catch (e) {
@@ -1082,7 +1085,7 @@ $('#share-go').onclick = async () => {
           audio: $('#audio').checked,
         })
       } else {
-        await focky.pick(picked)
+        await fockyApi.pick(picked)
         stream = await capture(fps, $('#audio').checked, $('#cursor').checked)
       }
       pc = await publish(nick, stream, fps, $('#codec').value)
@@ -1729,7 +1732,7 @@ if (localStorage.getItem('noIntro') !== '1') {
   })
 }
 
-focky.config().then(c => {
+fockyApi.config().then(c => {
   cfg = c
   for (const m of new Set(RTCRtpSender.getCapabilities('video').codecs
       .map(x => x.mimeType.toLowerCase())
@@ -1769,12 +1772,12 @@ function showNews () {
     { label: 'Ok', run: () => $('#toast').classList.remove('on') })
 }
 
-focky.onUpdate(({ state, version, notes }) => {
+fockyApi.onUpdate(({ state, version, notes }) => {
   if (state === 'available') toast(`Baixando a versão ${version}…`)
   if (state === 'ready') {
     localStorage.setItem('news', JSON.stringify({ version, notes: notes ?? '' }))
     toast(`Versão ${version} pronta para instalar.`, {
-      label: 'Reiniciar', run: () => focky.installUpdate(),
+      label: 'Reiniciar', run: () => fockyApi.installUpdate(),
     })
   }
   // erro de update é silencioso: não vale interromper quem está transmitindo
