@@ -1156,14 +1156,17 @@ function updateShareAudio (srcId) {
     $('#faudio-label').textContent = 'Remover áudio do Discord'
     $('#faudio-desc').textContent = 'o Discord não entra na transmissão — e continua tocando normal no seu PC'
   }
-  // janela: filtro ligado por padrão; tela: quem quiser tirar o Discord marca.
-  // No Linux a tela sem marcar ainda tem som (PipeWire pega todos os apps) —
-  // no Windows desmarcar cai no loopback de sistema do Chromium.
-  $('#faudio').checked = winFilter
+  // Ligado por padrão nos dois modos. Era `= winFilter`, então compartilhar a
+  // TELA nascia com o filtro desligado — e a queixa de "o Discord vaza" era
+  // isso: o filtro nunca rodava, ninguém desmarcou nada. O padrão tem que ser
+  // o que a tela toda pede (fora o Discord); quem quiser o Discord no ar
+  // desmarca. No Linux desmarcado ainda tem som (PipeWire pega todos os apps);
+  // no Windows desmarcado cai no loopback de sistema do Chromium.
+  $('#faudio').checked = true
   $('#faudio-row').hidden = !(cfg?.audioFilter && srcId && $('#audio').checked)
   $('#audio-desc').textContent =
     winFilter ? 'com o filtro abaixo, só o aplicativo escolhido'
-    : !pickedIsWindow ? 'áudio do sistema junto com o vídeo'
+    : !pickedIsWindow ? 'com o filtro abaixo, o sistema inteiro menos o Discord'
     : cfg?.audioFilter ? 'áudio filtrado do aplicativo escolhido'
     // navegador: janela não tem som separado — mas o Chrome dá o som só da
     // aba quando o compartilhamento é de aba
