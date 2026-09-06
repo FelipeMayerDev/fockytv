@@ -1142,7 +1142,9 @@ async function openShareDialog (isSwap, cam) {
 // Tela toda: dá para excluir o Discord (o eco da própria voz some e o Discord
 // segue funcionando normal no PC de quem transmite). Sem o helper (navegador,
 // Linux), o áudio é sempre do sistema inteiro — a opção nem aparece.
-const hwndOf = id => id?.match(/^window:(\d+)/)?.[1]
+const hwndOf = id => id?.match(/^window:(0x[0-9a-f]+|\d+)/i)?.[1]
+// Electron pode entregar o HWND em decimal ou hex: 0x na frente decide
+const hwndNum = h => parseInt(h, h.startsWith('0x') || h.startsWith('0X') ? 16 : 10)
 
 function updateShareAudio (srcId) {
   pickedIsWindow = !!hwndOf(srcId)
@@ -1163,7 +1165,9 @@ function updateShareAudio (srcId) {
     winFilter ? 'com o filtro abaixo, só o aplicativo escolhido'
     : !pickedIsWindow ? 'áudio do sistema junto com o vídeo'
     : cfg?.audioFilter ? 'áudio filtrado do aplicativo escolhido'
-    : 'áudio do sistema inteiro — o navegador não separa o som por janela'
+    // navegador: janela não tem som separado — mas o Chrome dá o som só da
+    // aba quando o compartilhamento é de aba
+    : 'sem filtro no navegador: compartilhe uma ABA e o som sai só dela'
 }
 $('#audio').onchange = () => updateShareAudio(picked)
 
@@ -1239,7 +1243,7 @@ $('#share-go').onclick = async () => {
         const useFilter = cfg.audioFilter && $('#audio').checked && !$('#faudio-row').hidden
         let audioOpts = null
         if (useFilter && pickedIsWindow && cfg.windowFilter && $('#faudio').checked && hwnd)
-          audioOpts = { mode: 'window', hwnd: +hwnd }
+          audioOpts = { mode: 'window', hwnd: hwndNum(hwnd) }
         else if (useFilter && $('#faudio').checked)
           audioOpts = { mode: 'exclude', name: 'Discord' }
         else if (useFilter && cfg.linux && !pickedIsWindow)
@@ -1260,6 +1264,13 @@ $('#share-go').onclick = async () => {
       camOnly = !!cam         // só a câmera no ar: não há tela pra sobrepor
       setLive(true)
       sfx.live()
+      // fonte de áudio visível pro host: filtro que falhou em silêncio é a
+      // pior falha possível (o Discord entra e ninguém sabe o porquê)
+      toast(audioOpts
+        ? (audioOpts.mode === 'window' ? 'Som: só o aplicativo da janela'
+           : audioOpts.mode === 'exclude' ? 'Som: sistema sem o Discord'
+           : 'Som: todos os aplicativos')
+        : $('#audio').checked ? 'Som: sistema inteiro' : 'Sem áudio')
     }
     $('#dlg-share').close()
   } catch (e) {
