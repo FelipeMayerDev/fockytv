@@ -20,6 +20,8 @@ services:
       - UDP_MUX_PORT=8180
       - NAT_1_TO_1_IP=192.168.1.129
       - NETWORK_TYPES=udp4|tcp4
+      # /api/fixed/* (busca/playlist das lives fixas) vira proxy pro sidecar
+      - FIXED_LIVE_URL=http://fixed-live:3000
       # ponytail: self-test morre em hairpin NAT do container; cliente real via LAN funciona
       - NETWORK_TEST_ON_START=FALSE
       # ponytail: o playit alocou 3652, não 8180 — anuncia o par público direto no SDP.
@@ -28,6 +30,23 @@ services:
     volumes:
       - ../ui/index.html:/broadcast-box/web/build/index.html:ro
       - ../ui/du-bist-gut-genug.mp3:/broadcast-box/web/build/du-bist-gut-genug.mp3:ro
+      - ../ui/assets:/broadcast-box/web/build/assets:ro
+
+  # Lives fixas (TV e música): yt-dlp + ffmpeg + werift publicando no
+  # broadcast-box via WHIP nas chaves `tv` e `music`. Sem viewers por 60 s a
+  # stream desliga sozinha — a playlist de música sobrevive.
+  fixed-live:
+    build: ./fixed-live
+    image: fockytv/fixed-live:latest
+    container_name: fockytv-fixed
+    restart: unless-stopped
+    environment:
+      - BB_URL=http://broadcast-box:8080
+      - IDLE_MS=60000
+    # cookies do YouTube (formato Netscape) contra o "confirm you're not a
+    # bot": exporte de um navegador logado pra server/cookies.txt e reinicie
+    volumes:
+      - ./cookies.txt:/app/cookies.txt
 
   playit:
     image: ghcr.io/playit-cloud/playit-agent:0.15

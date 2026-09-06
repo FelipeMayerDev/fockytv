@@ -1,0 +1,30 @@
+diff --git i/internal/server/handlers/routes.go w/internal/server/handlers/routes.go
+index 1886540..e8da603 100644
+--- i/internal/server/handlers/routes.go
++++ w/internal/server/handlers/routes.go
+@@ -4,6 +4,8 @@ import (
+ 	"errors"
+ 	"log/slog"
+ 	"net/http"
++	"net/http/httputil"
++	"net/url"
+ 	"os"
+ 	"path"
+ 	"strings"
+@@ -37,6 +39,16 @@ func GetServeMuxHandler() http.HandlerFunc {
+ 	serverMux.HandleFunc("/api/log", corsHandler(logHandler))
+ 	serverMux.HandleFunc("/api/status", corsHandler(statusHandler))
+ 
++	// FockyTV: lives fixas (tv/música) moram no sidecar fixed-live do compose.
++	// Proxy reverso aqui mantém uma origem só — a UI (e o túnel playit) falam
++	// com /api/fixed/* sem CORS nem porta extra. Desativado sem a env.
++	if fixedLiveURL := os.Getenv("FIXED_LIVE_URL"); fixedLiveURL != "" {
++		if target, err := url.Parse(fixedLiveURL); err == nil {
++			fixedLiveProxy := httputil.NewSingleHostReverseProxy(target)
++			serverMux.HandleFunc("/api/fixed/", corsHandler(fixedLiveProxy.ServeHTTP))
++		}
++	}
++
+ 	// Admin endpoints
+ 	serverMux.HandleFunc("/api/admin/login", corsHandler(adminHandlers.LoginHandler))
+ 	serverMux.HandleFunc("/api/admin/status", corsHandler(adminHandlers.StatusHandler))

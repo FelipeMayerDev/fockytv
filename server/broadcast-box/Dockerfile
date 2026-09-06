@@ -1,13 +1,16 @@
 # broadcast-box upstream + viewer-identity.patch: o `/api/status` passa a
 # trazer o nick de quem assiste (query `?viewer=` no POST do WHEP).
-# Patch aditivo — nada do upstream é alterado, só estendido.
+# + fixed-proxy.patch: `/api/fixed/*` vira proxy reverso pro sidecar
+# fixed-live (lives fixas de TV e música), uma origem só.
+# Patches aditivos — nada do upstream é alterado, só estendido.
 FROM alpine/git AS src
 ARG BROADCAST_BOX_REF=9f43de20e802ee8acc826c3999e021e736dd2a89
 RUN git clone --depth 1 https://github.com/Glimesh/broadcast-box /src \
  && git -C /src fetch --depth 1 origin ${BROADCAST_BOX_REF} \
  && git -C /src checkout FETCH_HEAD
-COPY viewer-identity.patch /tmp/
-RUN git -C /src apply /tmp/viewer-identity.patch
+COPY viewer-identity.patch fixed-proxy.patch /tmp/
+RUN git -C /src apply /tmp/viewer-identity.patch \
+ && git -C /src apply /tmp/fixed-proxy.patch
 
 FROM node:alpine AS web
 COPY --from=src /src /src

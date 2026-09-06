@@ -1,0 +1,4 @@
+# Cole aqui o cookies.txt exportado de um navegador logado no YouTube
+# (extensão "Get cookies.txt LOCALY", formato Netscape).
+# Este arquivo é um placeholder: enquanto não houver cookies de youtube.com
+# aqui, o serviço ignora o arquivo e segue sem cookies.

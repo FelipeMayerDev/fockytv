@@ -1,6 +1,8 @@
 <!doctype html>
 <meta charset="utf-8">
 <title>FockyTV</title>
+<link rel="icon" href="assets/favicon.ico" sizes="48x64 64x64 128x128 256x256">
+<link rel="apple-touch-icon" href="assets/logo.png">
 <style>
 /* tokens do shadcn (dark, zinc) */
 :root {
@@ -31,6 +33,13 @@ button.outline { background:transparent; color:hsl(var(--foreground)); border-co
 button.outline:hover { background:hsl(var(--muted)); opacity:1 }
 button.ghost { background:transparent; color:hsl(var(--muted-foreground)) }
 button.ghost:hover { background:hsl(var(--muted)); color:hsl(var(--foreground)); opacity:1 }
+
+/* scrollbar fina no tema do app (o padrão do navegador grita no escuro) */
+* { scrollbar-width:thin; scrollbar-color:hsl(var(--muted)) transparent }
+::-webkit-scrollbar { width:8px; height:8px }
+::-webkit-scrollbar-thumb { background:hsl(var(--muted)); border-radius:999px }
+::-webkit-scrollbar-track { background:transparent }
+::-webkit-scrollbar-corner { background:transparent }
 button.destructive { background:hsl(var(--destructive)); color:#fff }
 button:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px }
 
@@ -92,16 +101,17 @@ button.icon { width:36px; padding:0 }
   .user { padding:0; width:36px; justify-content:center }
   #vol { width:56px }
 }
-#vol {
-  width:80px; height:4px; padding:0; border:0; border-radius:999px;
+#vol, #fb-seek {
+  height:4px; padding:0; border:0; border-radius:999px;
   background:hsl(var(--muted)); appearance:none; cursor:pointer;
 }
-#vol::-webkit-slider-thumb {
+#vol { width:80px }
+#vol::-webkit-slider-thumb, #fb-seek::-webkit-slider-thumb {
   appearance:none; width:12px; height:12px; border-radius:50%;
   background:hsl(var(--foreground)); cursor:pointer;
 }
-#vol:focus { outline:none }
-#vol:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:4px }
+#vol:focus, #fb-seek:focus { outline:none }
+#vol:focus-visible, #fb-seek:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:4px }
 .pill {
   display:flex; align-items:center; gap:8px; height:30px; padding:0 12px;
   border:1px solid hsl(var(--border)); border-radius:999px; font-size:12px;
@@ -154,9 +164,88 @@ main { flex:1; overflow:hidden; display:flex; flex-direction:column }
            font-size:12px; color:hsl(var(--muted-foreground)) }
 #cam-ctl label { display:flex; align-items:center; gap:8px }
 
-#player-wrap { flex:1; background:#000; display:none; min-height:0 }
+#player-wrap { flex:1; background:#000; display:none; min-height:0; position:relative }
 #player-wrap.on { display:block }
-#player-wrap video { width:100%; height:100%; object-fit:contain }
+#player-wrap video { width:100%; height:100%; object-fit:contain; display:block }
+#player-tools { position:absolute; top:12px; left:12px; z-index:6; display:flex; gap:4px }
+#player-tools .ghost { background:#0009 }
+#fixed-loading { position:absolute; inset:0 372px 0 0; z-index:7; display:grid; place-items:center;
+  background:#0008; pointer-events:none }
+#player-wrap.tv-panel-hidden #fixed-loading { right:0 }
+#fixed-loading div { width:min(520px, 72%); text-align:center; font-weight:600 }
+#fixed-loading i { display:block; height:12px; margin-top:10px; overflow:hidden; border-radius:999px;
+  background:hsl(var(--muted)) }
+#fixed-loading i::after { content:''; display:block; height:100%; width:var(--progress); background:hsl(var(--foreground)) }
+#fixed-panel {
+  position:absolute; top:0; right:0; bottom:0; width:min(360px, 92vw);
+  background:hsl(var(--card)); border-left:1px solid hsl(var(--border));
+  border-radius:0; padding:16px; overflow:auto; z-index:4;
+}
+#fixed-panel h3 { font-size:15px; font-weight:600; margin-bottom:2px }
+#fixed-panel-toggle { position:absolute; top:12px; right:382px; z-index:6 }
+#player-wrap.tv-panel-hidden #fixed-panel-toggle { right:12px }
+
+/* canal música: visual centrado, letra rolando (spotify-like).
+   right acompanhando o painel lateral: o centro fica no espaço do vídeo,
+   não da tela toda (mesma margem da #fixed-bar) */
+#music-view { position:absolute; left:0; top:0; bottom:0; right:372px; z-index:3;
+  display:none; background:linear-gradient(180deg, hsl(240 10% 9%), hsl(var(--background)) 70%) }
+#music-view.on { display:flex }
+#mv-main { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center;
+  padding:28px 24px 16px; overflow:hidden }
+#mv-art { width:min(240px, 26vh); aspect-ratio:1; border-radius:12px; object-fit:cover;
+  box-shadow:0 12px 40px #000a; flex:none }
+#mv-title { font-size:17px; font-weight:600; margin-top:18px; max-width:100%;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+#mv-sub { font-size:13px; margin-top:2px }
+#lyrics { flex:1; width:min(640px, 100%); overflow-y:auto; margin-top:14px;
+  /* referencial do offsetTop das linhas: sem isto o auto-scroll mede contra o
+     #music-view (absoluto) e rola além da linha atual — a certa fica acima */
+  position:relative;
+  text-align:center; padding:30vh 12px 96px; scrollbar-width:none }
+#lyrics::-webkit-scrollbar { display:none }
+/* ligando a faixa: capa esmaece pulsando até o áudio entrar */
+#music-view.loading #mv-art { animation:mv-load 1.2s ease-in-out infinite }
+@keyframes mv-load { 50% { opacity:.35; filter:saturate(.3) } }
+#fixed-bar button:disabled { opacity:.4; cursor:default; transform:none }
+#fb-seek:disabled { opacity:.4 }
+.lyr { padding:7px 0; font-size:15px; color:hsl(var(--muted-foreground));
+  cursor:pointer; border-radius:6px; transition:color .2s, transform .2s }
+.lyr:hover { color:hsl(var(--foreground)) }
+.lyr.on { color:hsl(var(--foreground)); font-weight:600; transform:scale(1.04) }
+
+/* barra de player inferior (spotify-like) */
+#fixed-bar {
+  position:absolute; left:0; right:372px; bottom:0; z-index:5;
+  display:flex; align-items:center; gap:6px; padding:14px 20px 12px;
+  background:linear-gradient(transparent, hsl(var(--background)) 38%);
+}
+#player-wrap.tv-panel-hidden #fixed-bar { right:0 }
+#fixed-bar button { flex:none }
+#fixed-bar .skip {
+  background:transparent; border:none; height:44px; width:44px; padding:0;
+  color:hsl(var(--muted-foreground));
+}
+#fixed-bar .skip:hover { color:hsl(var(--foreground)); opacity:1 }
+#fixed-bar .skip svg { width:24px; height:24px; fill:currentColor; stroke:none }
+#fb-toggle {
+  background:hsl(var(--foreground)); color:hsl(var(--background));
+  border:none; height:46px; width:46px; padding:0; border-radius:50%;
+  transition:transform .12s;
+}
+#fb-toggle:hover { transform:scale(1.05); opacity:1 }
+#fb-toggle svg { width:22px; height:22px; fill:currentColor; stroke:none }
+/* SVG não tem a propriedade/atributo hidden utilizável do JS — classe na régua */
+#fb-toggle svg.off { display:none }
+#fb-toggle.busy svg { display:none }
+#fb-toggle.busy::after {
+  content:''; width:18px; height:18px; border-radius:50%;
+  border:2.5px solid hsl(var(--background) / .3); border-top-color:hsl(var(--background));
+  animation:fb-spin .8s linear infinite;
+}
+@keyframes fb-spin { to { transform:rotate(360deg) } }
+#fb-seek { flex:1 }
+#fixed-bar .muted { font-size:12px; flex:none; width:44px; text-align:center }
 
 /* dialog */
 dialog {
@@ -183,6 +272,7 @@ dialog .desc { font-size:13px; color:hsl(var(--muted-foreground)); margin-bottom
 #sources img { width:100%; aspect-ratio:16/10; object-fit:cover; border-radius:4px; background:#000 }
 #sources figcaption { font-size:11px; margin-top:5px; color:hsl(var(--muted-foreground));
                       white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+#cookies-file { width:100%; color:hsl(var(--muted-foreground)) }
 .err { color:hsl(var(--destructive)); font-size:13px; min-height:1.2em }
 
 /* skeleton da miniatura */
@@ -212,6 +302,45 @@ dialog .desc { font-size:13px; color:hsl(var(--muted-foreground)); margin-bottom
 }
 body.intro #brand, body.intro button { animation: shake .18s infinite }
 @media (prefers-reduced-motion: reduce) { body.intro #brand, body.intro button { animation: none } }
+
+/* lives fixas: busca e fila */
+.results { display:flex; flex-direction:column; gap:4px; margin-bottom:12px; max-height:240px; overflow:auto }
+.results button {
+  display:flex; gap:10px; align-items:center; justify-content:flex-start; height:auto; padding:6px;
+  background:transparent; color:hsl(var(--foreground)); border-color:transparent;
+  text-align:left; font-weight:400;
+}
+.results button:hover { background:hsl(var(--muted)); opacity:1 }
+.results img { width:80px; aspect-ratio:16/9; object-fit:cover; border-radius:4px; flex:none; background:#000 }
+.results .r-title { font-size:13px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.results .r-sub { font-size:12px; color:hsl(var(--muted-foreground)) }
+/* loading no botão de resultado: spinner no lugar da thumb enquanto add/toca */
+.results button:disabled { opacity:.6; cursor:default }
+.spinner { width:18px; height:18px; border-radius:50%; flex:none; margin:0 31px;
+  border:2px solid hsl(var(--muted-foreground)); border-top-color:transparent;
+  animation:spin .8s linear infinite }
+@keyframes spin { to { transform:rotate(1turn) } }
+.now {
+  display:flex; gap:10px; align-items:center; border:1px solid hsl(var(--border));
+  border-radius:var(--radius); padding:8px; margin-bottom:12px;
+}
+.now img { width:64px; aspect-ratio:16/9; object-fit:cover; border-radius:4px; flex:none; background:#000 }
+.now .bar-pos { height:4px; border-radius:999px; background:hsl(var(--muted)); margin-top:6px; overflow:hidden }
+.now .bar-pos i { display:block; height:100%; background:hsl(var(--foreground)) }
+#music-queue { display:flex; flex-direction:column; gap:2px; overflow:visible; max-height:none }
+#music-queue .q-item {
+  display:flex; align-items:center; gap:10px; padding:6px; border-radius:var(--radius);
+  cursor:pointer;
+}
+#music-queue .q-item:hover, #music-queue .q-item.now { background:hsl(var(--muted)) }
+#music-queue .q-item.loading { animation:mv-load 1.2s ease-in-out infinite }
+#music-queue img { width:44px; height:44px; border-radius:6px; object-fit:cover; flex:none; background:#000 }
+#music-queue .q-title { display:block; min-width:0; font-size:13px; font-weight:500;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+#music-queue .q-sub { display:block; font-size:12px; color:hsl(var(--muted-foreground));
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+#music-queue .q-x { cursor:pointer; color:hsl(var(--muted-foreground)); padding:0 4px }
+#music-queue .q-x:hover { color:hsl(var(--destructive)) }
 </style>
 
 <!-- ── entrada: nick ─────────────────────────────────────────────────── -->
@@ -233,6 +362,7 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
   <button class="ghost icon" id="back" hidden title="Voltar" aria-label="Voltar">
     <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
   </button>
+  <img src="assets/logo.png" alt="" style="width:22px;height:22px;flex:none">
   <h1 id="brand">FockyTV</h1>
 
   <div class="pill" id="live-pill" hidden>
@@ -260,14 +390,6 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
     </button>
     <input type="range" id="vol" min="0" max="1" step="0.05" value="1"
            title="Volume" aria-label="Volume">
-    <button class="ghost icon" id="pip" title="Picture in picture" aria-label="Picture in picture">
-      <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/>
-        <rect x="12" y="12" width="8" height="6" rx="1"/></svg>
-    </button>
-    <button class="ghost icon" id="fs" title="Tela cheia" aria-label="Tela cheia">
-      <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/>
-        <path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
-    </button>
   </div>
 
   <button class="outline icon" id="swap" hidden title="Trocar janela" aria-label="Trocar janela">
@@ -300,7 +422,63 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
 
 <main>
   <div id="grid-live"></div>
-  <div id="player-wrap"><video autoplay playsinline></video></div>
+  <div id="player-wrap">
+    <video autoplay playsinline></video>
+    <div id="fixed-loading" hidden><div><span id="fixed-loading-label"></span><i></i></div></div>
+    <div id="player-tools" hidden>
+      <button class="ghost icon" id="pip" title="Picture in picture" aria-label="Picture in picture">
+        <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/>
+          <rect x="12" y="12" width="8" height="6" rx="1"/></svg>
+      </button>
+      <button class="ghost icon" id="fs" title="Tela cheia" aria-label="Tela cheia">
+        <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/>
+          <path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+      </button>
+    </div>
+    <!-- canal música: capa + letras sincronizadas (spotify-like), capa centrada -->
+    <div id="music-view">
+      <div id="mv-main">
+        <img id="mv-art" alt="">
+        <div id="mv-title"></div>
+        <div id="mv-sub" class="muted"></div>
+        <div id="lyrics"><p class="muted" id="lyr-empty">sem letra pra esta música</p></div>
+      </div>
+    </div>
+    <!-- barra de player estilo spotify: anterior/play/próxima + seek arrastável -->
+    <div id="fixed-bar" hidden>
+      <button class="skip" id="fb-prev" title="Anterior">
+        <svg viewBox="0 0 24 24"><path d="M19 20 9 12l10-8v16Z"/><rect x="5" y="4" width="2" height="16"/></svg>
+      </button>
+      <button id="fb-toggle" title="Tocar/Pausar">
+        <svg viewBox="0 0 24 24" id="fb-ico-play"><path d="M7 4.5l13 7.5-13 7.5v-15Z"/></svg>
+        <svg viewBox="0 0 24 24" id="fb-ico-pause" class="off"><path d="M7 4h3.6v16H7zM13.4 4H17v16h-3.6z"/></svg>
+      </button>
+      <button class="skip" id="fb-next" title="Próxima">
+        <svg viewBox="0 0 24 24"><path d="M5 4l10 8-10 8V4Z"/><rect x="17" y="4" width="2" height="16"/></svg>
+      </button>
+      <span class="muted" id="fb-pos">0:00</span>
+      <input type="range" id="fb-seek" min="0" max="100" step="0.1" value="0"
+             title="Posição" aria-label="Posição">
+      <span class="muted" id="fb-dur">0:00</span>
+    </div>
+    <!-- painel do canal fixo: busca e controles de quem está assistindo -->
+    <aside id="fixed-panel" hidden>
+      <h3 id="fixed-title"></h3>
+      <p class="desc" id="fixed-desc"></p>
+      <div class="field">
+        <label for="fixed-q">Buscar no YouTube</label>
+        <input id="fixed-q" placeholder="busque e escolha abaixo">
+      </div>
+      <div class="results" id="fixed-results"></div>
+      <div id="fixed-now" class="now" hidden></div>
+      <div id="music-queue"></div>
+      <button class="outline destructive" id="tv-stop" hidden style="width:100%">Parar vídeo</button>
+      <p class="err" id="fixed-err"></p>
+    </aside>
+    <button class="ghost icon" id="fixed-panel-toggle" hidden title="Ocultar busca" aria-label="Ocultar busca">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16M11 9l-3 3 3 3"/></svg>
+    </button>
+  </div>
   <div id="stage-wrap">
     <canvas id="stage"></canvas>
     <div id="cam-ctl">
@@ -313,6 +491,20 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
 </main>
 
 <div id="toast"></div>
+
+<dialog id="dlg-cookies">
+  <h3>Cookie do YouTube expirou</h3>
+  <p class="desc">Exporte um novo <code>cookies.txt</code> (formato Netscape) de um navegador logado no YouTube.</p>
+  <div class="field">
+    <label for="cookies-file">Arquivo</label>
+    <input id="cookies-file" type="file" accept=".txt,text/plain">
+  </div>
+  <p class="err" id="cookies-err"></p>
+  <div class="actions">
+    <button class="outline" id="cookies-cancel">Agora não</button>
+    <button id="cookies-send">Enviar cookie</button>
+  </div>
+</dialog>
 
 <dialog id="dlg-cfg">
   <h3>Configurações</h3>
@@ -381,6 +573,8 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
     <button id="share-go">Compartilhar</button>
   </div>
 </dialog>
+
+<!-- ── painel dos canais fixos mora dentro do player (veja #fixed-panel) ── -->
 
 <script>
 // No navegador, a própria página é o servidor e o seletor de tela é nativo.
@@ -550,7 +744,13 @@ function showPlayer (key) {
   $('#grid-live').style.display = key ? 'none' : ''
   $('#back').hidden = !key
   $('#player-ctl').hidden = !key
+  setVideoControls(false)
   $('#brand').textContent = key ?? 'FockyTV'
+  // assistindo canal fixo (Música/TV): compartilhar tela/câmera não faz
+  // sentido aí — esconde; ao fechar, volta o estado de quem está transmitindo
+  const watchFixed = FIXED_KEYS.includes(key)
+  $('#share').hidden = watchFixed || !!pc
+  $('#share-cam').hidden = watchFixed || (!!pc && camOnly)
   clearInterval(poll)
   poll = setInterval(() => (key ? watchdog(key) : refresh()).catch(() => {}), 5000)
 }
@@ -558,6 +758,7 @@ function showPlayer (key) {
 // Quem assiste não recebe sinal quando o host sai: o WHEP continua de pé, só
 // para de chegar mídia. Então o poll da listagem vira vigia enquanto se assiste.
 async function watchdog (key) {
+  if (FIXED_KEYS.includes(key)) return   // canal fixo: quem cuida é o fixedTick
   if ((await status()).some(st => st.streamKey === key)) return
   closePlayer()
   toast(`${key} parou de compartilhar.`)
@@ -739,6 +940,11 @@ $('#nick-ok').onclick = () => {
     $('#nick-err').textContent = 'Use 1 a 32 caracteres: letras, números, . _ -'
     return
   }
+  // chaves das lives fixas do servidor: não são nicks
+  if (FIXED_KEYS.includes(v)) {
+    $('#nick-err').textContent = `"${v}" é reservado pra live fixa do servidor.`
+    return
+  }
   setNick(v)
   $('#dlg-nick').close()
 }
@@ -917,16 +1123,18 @@ const grade = (loss, rtt, dead) =>
   : ['hsl(142 70% 45%)', 'boa']
 
 async function showNet () {
+  // canal música: o que importa é o áudio — kbps no lugar de resolução/fps
+  const audioMode = fixedKey === 'music'
   let v, rtt = 0
   ;(await viewer.getStats()).forEach(r => {
-    if (r.type === 'inbound-rtp' && r.kind === 'video') v = r
+    if (r.type === 'inbound-rtp' && r.kind === (audioMode ? 'audio' : 'video')) v = r
     // só o par em uso; os outros candidatos têm RTT velho ou nenhum
     if (r.type === 'candidate-pair' && r.nominated) rtt = (r.currentRoundTripTime ?? 0) * 1000
   })
   if (!v) return
 
-  const now = { lost: v.packetsLost ?? 0, got: v.packetsReceived ?? 0 }
-  const d = last && { lost: now.lost - last.lost, got: now.got - last.got }
+  const now = { lost: v.packetsLost ?? 0, got: v.packetsReceived ?? 0, bytes: v.bytesReceived ?? 0 }
+  const d = last && { lost: now.lost - last.lost, got: now.got - last.got, bytes: now.bytes - last.bytes }
   last = now
 
   const total = d ? d.lost + d.got : 0
@@ -935,10 +1143,13 @@ async function showNet () {
 
   $('#net-dot').style.background = color
   $('#net').title = `Conexão ${label}`
-  $('#net-stats').textContent =
-    `${v.frameWidth ?? '—'}×${v.frameHeight ?? '—'} · ${Math.round(v.framesPerSecond ?? 0)} fps` +
-    (rtt ? ` · ${Math.round(rtt)} ms` : '') +
-    (loss >= 0.1 ? ` · ${loss.toFixed(1)}% perda` : '')
+  $('#net-stats').textContent = audioMode
+    ? `${d && d.bytes > 0 ? Math.round((d.bytes * 8) / 2 / 1000) : '—'} kbps` +
+      (rtt ? ` · ${Math.round(rtt)} ms` : '') +
+      (loss >= 0.1 ? ` · ${loss.toFixed(1)}% perda` : '')
+    : `${v.frameWidth ?? '—'}×${v.frameHeight ?? '—'} · ${Math.round(v.framesPerSecond ?? 0)} fps` +
+      (rtt ? ` · ${Math.round(rtt)} ms` : '') +
+      (loss >= 0.1 ? ` · ${loss.toFixed(1)}% perda` : '')
 }
 
 // ── grade ao vivo (tela padrão) ──────────────────────────────────────────
@@ -984,8 +1195,45 @@ async function status () {
 // "N assistindo" contaria as próprias miniaturas.
 const viewersOf = st => [...new Set((st.sessions ?? []).map(s => s.viewer).filter(Boolean))]
 
+// tile permanente de canal fixo: a miniatura é a capa do que está passando
+// agora (do /api/fixed), não um frame capturado — troca junto com a mídia
+function fixedTile (key) {
+  const st = fixedStates[key]
+  const isTv = key === 'tv'
+  const cur = isTv ? st?.current : st?.queue?.[st?.index]
+  const playing = st && st.status !== 'idle'
+
+  const el = document.createElement('div')
+  el.className = 'vid'
+  el.innerHTML =
+    `<div class="thumb"><div class="skeleton"></div></div>
+     <div class="meta"><div class="avatar">${isTv ? '📺' : '🎵'}</div>
+       <div style="min-width:0">
+         <div class="title"></div><div class="sub"></div>
+       </div></div>`
+  const thumb = el.querySelector('.thumb')
+  thumb.replaceChildren(...(cur
+    ? [Object.assign(new Image(), { src: cur.thumb })]
+    : [Object.assign(document.createElement('span'),
+        { className: 'muted', textContent: 'nada passando' })]),
+    Object.assign(document.createElement('span'),
+      { className: 'badge', textContent: st?.status === 'starting' ? 'CARREGANDO…' : playing ? 'AO VIVO' : 'EM ESPERA' }))
+  el.querySelector('.title').textContent = FIXED_LABEL[key]
+  el.querySelector('.sub').textContent = cur?.title ?? 'clique para escolher algo'
+  el.onclick = () => openFixed(key)
+  return el
+}
+
 async function refresh () {
   const live = await status()
+
+  // quantos estão ouvindo o canal música (sessões com nick de verdade)
+  const mst = live.find(st => st.streamKey === 'music')
+  musicListeners = mst ? viewersOf(mst).length : 0
+
+  // estado dos canais fixos alimenta os tiles (thumb do que está passando)
+  await Promise.all(FIXED_KEYS.map(k =>
+    fixed(k).then(s => fixedStates[k] = s).catch(() => {})))
 
   // no ar: lista de quem assiste no header, atualizada neste mesmo poll
   const mine = live.find(st => st.streamKey === nick)
@@ -997,17 +1245,9 @@ async function refresh () {
     $('#viewers-pill').title = names.join(', ')
   }
 
-  if (!live.length) {
-    thumbs.clear()
-    $('#grid-live').innerHTML =
-      `<div class="empty">
-         <p style="font-size:15px;color:hsl(var(--foreground))">Ninguém ao vivo agora</p>
-         <p style="margin-top:6px">Clique em <b>Compartilhar tela</b> para ser o primeiro.</p>
-       </div>`
-    return
-  }
-
-  $('#grid-live').replaceChildren(...live.map(st => {
+  // os canais fixos têm tiles próprios: saem da listagem comum
+  const others = live.filter(st => !FIXED_KEYS.includes(st.streamKey))
+  $('#grid-live').replaceChildren(...FIXED_KEYS.map(fixedTile), ...others.map(st => {
     const el = document.createElement('div')
     el.className = 'vid'
     el.innerHTML =
@@ -1049,12 +1289,13 @@ function openPlayer (key) {
   release(viewer); viewer = null
   showPlayer(key)
   watch(key, $('#player-wrap video'), nick)
-    .then(p => viewer = p)
+    .then(p => { viewer = p; setVideoControls(true) })
     .catch(e => { toast(e.message); closePlayer() })
 }
 
 function closePlayer () {
   if (viewer) sfx.end()
+  closeFixed()
   release(viewer); viewer = null
   $('#player-wrap video').srcObject = null
   showPlayer(null)
@@ -1065,6 +1306,10 @@ $('#back').onclick = closePlayer
 
 // ── controles do player (sem play/pause: numa live não há o que pausar) ──
 const vid = $('#player-wrap video')
+function setVideoControls (ready) {
+  $('#player-tools').hidden = !ready
+  $('#net').hidden = !ready
+}
 
 const drawVolIcon = () => {
   const off = vid.muted || vid.volume === 0
@@ -1094,6 +1339,383 @@ $('#pip').onclick = () => (document.pictureInPictureElement
 $('#fs').onclick = () => (document.fullscreenElement
   ? document.exitFullscreen()
   : $('#player-wrap').requestFullscreen()).catch(e => toast(e.message))
+
+// ── lives fixas: TV e música (sidecar fixed-live no servidor) ───────────
+// Os dois canais são tiles permanentes da grade; o que está passando (thumb
+// e título) vem do /api/fixed/*. A busca e os controles moram dentro do
+// player de cada canal — quem está assistindo escolhe e controla.
+const FIXED_KEYS = ['tv', 'music']
+const FIXED_LABEL = { tv: '📺 TV', music: '🎵 Música' }
+const fixedStates = { tv: null, music: null }
+let musicListeners = 0   // do /api/status (refresh), mostrado como "N ouvindo"
+let cookiePrompted = false
+
+const fixed = (path, opts = {}) => fetch(cfg.serverUrl + '/api/fixed/' + path, {
+  headers: { 'Content-Type': 'application/json' }, ...opts,
+}).then(async r => {
+  const b = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(b.error || `fixed-live ${r.status}`)
+  return b
+})
+
+const mmss = s => !s ? '0:00' : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+const fmtBytes = b => !b ? '' : b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${(b / 1e6).toFixed(0)} MB`
+
+function promptCookies () {
+  if (cookiePrompted || $('#dlg-cookies').open) return
+  cookiePrompted = true
+  $('#cookies-file').value = ''
+  $('#cookies-err').textContent = ''
+  $('#dlg-cookies').showModal()
+}
+
+$('#cookies-cancel').onclick = () => $('#dlg-cookies').close()
+$('#cookies-send').onclick = async () => {
+  const file = $('#cookies-file').files[0]
+  if (!file) return $('#cookies-err').textContent = 'Escolha o arquivo cookies.txt.'
+  try {
+    $('#cookies-send').disabled = true
+    await fixed('cookies', { method: 'POST', body: JSON.stringify({ cookies: await file.text() }) })
+    $('#dlg-cookies').close()
+    cookiePrompted = false
+    fixedTick()
+  } catch (e) { $('#cookies-err').textContent = e.message }
+  finally { $('#cookies-send').disabled = false }
+}
+
+// cartão "tocando agora" com barra de progresso
+function paintNow (el, { title, thumb, position = 0, duration = 0 }, extra = '') {
+  el.hidden = false
+  el.innerHTML = `<img src="${thumb}"><div style="flex:1;min-width:0">
+    <div class="r-title"></div>
+    <div class="r-sub">${mmss(position)} / ${mmss(duration)}${extra}</div>
+    <div class="bar-pos"><i style="width:${duration ? Math.min(100, 100 * position / duration) : 0}%"></i></div>
+  </div>`
+  el.querySelector('.r-title').textContent = title
+}
+
+// busca no YouTube: Enter no campo dispara, cada resultado vira botão com a
+// ação do canal aberto (tocar na TV / adicionar à fila de música)
+$('#fixed-q').addEventListener('keydown', async e => {
+  if (e.key !== 'Enter' || e.target.value.trim().length < 2) return
+  const box = $('#fixed-results')
+  box.replaceChildren(Object.assign(document.createElement('p'),
+    { className: 'muted', textContent: 'buscando…' }))
+  try {
+    const results = await fixed(`search?limit=${fixedKey === 'tv' ? 20 : 8}&q=${encodeURIComponent(e.target.value)}`)
+    box.replaceChildren(...results.map(r => {
+      const b = document.createElement('button')
+      b.innerHTML = `<img src="${r.thumb}"><div style="min-width:0">
+        <div class="r-title"></div><div class="r-sub"></div></div>`
+      b.querySelector('.r-title').textContent = r.title
+      b.querySelector('.r-sub').textContent = `${r.channel} · ${mmss(r.duration)}`
+      b.onclick = async () => {
+        if (b.disabled) return
+        const isTv = fixedKey === 'tv'
+        // feedback: botão vira loading enquanto o add roda (meta no servidor),
+        // toast confirma quando entra na fila
+        b.disabled = true
+        const label = b.querySelector('.r-title')
+        const saida = label.textContent
+        const img = b.querySelector('img')
+        const spin = Object.assign(document.createElement('span'), { className: 'spinner' })
+        img.replaceWith(spin)
+        try {
+          if (isTv) {
+            await fixed('tv/play', { method: 'POST', body: JSON.stringify({ id: r.id }) })
+            toast(`Tocando na TV: ${saida}`)
+          } else {
+            await fixed('music/add', { method: 'POST', body: JSON.stringify({ id: r.id, addedBy: nick }) })
+            toast(`Adicionada à fila: ${saida}`)
+          }
+          fixedTick()
+        } catch (err) {
+          $('#fixed-err').textContent = err.message
+          toast(`Não deu: ${err.message}`)
+        } finally {
+          spin.replaceWith(img)
+          b.disabled = false
+        }
+      }
+      return b
+    }))
+    if (!results.length) box.replaceChildren(Object.assign(document.createElement('p'),
+      { className: 'muted', textContent: 'nada encontrado' }))
+  } catch (err) { box.replaceChildren(); $('#fixed-err').textContent = err.message }
+})
+
+// ── player do canal fixo: vídeo à esquerda, painel de busca à direita ───
+let fixedKey = null          // 'tv' | 'music' enquanto o player estiver aberto
+let fixedTimer = null
+let lyrTimer = null
+let lyr = { id: null, lines: [] }     // letra da faixa atual
+let musicPos = { pos: 0, at: 0, live: false }  // posição interpolada no client
+let tvPanelHidden = false
+
+function setTvPanel (hidden) {
+  tvPanelHidden = hidden
+  $('#fixed-panel').hidden = hidden
+  $('#player-wrap').classList.toggle('tv-panel-hidden', hidden)
+  const label = hidden ? 'Mostrar busca' : 'Ocultar busca'
+  $('#fixed-panel-toggle').title = label
+  $('#fixed-panel-toggle').setAttribute('aria-label', label)
+}
+
+$('#fixed-panel-toggle').onclick = () => setTvPanel(!tvPanelHidden)
+
+// desenha as linhas da letra; cada linha clicável seeka praquele ponto
+function paintLyrics () {
+  const box = $('#lyrics')
+  if (!lyr.lines.length) {
+    box.innerHTML = '<p class="muted">sem letra pra esta música</p>'
+    return
+  }
+  box.replaceChildren(...lyr.lines.map(l => {
+    const el = document.createElement('div')
+    el.className = 'lyr'
+    el.textContent = l.text
+    el.onclick = () =>
+      fixed('music/seek', { method: 'POST', body: JSON.stringify({ position: l.t }) })
+        .then(fixedTick).catch(e => toast(e.message))
+    return el
+  }))
+}
+
+// destaque que acompanha a música: a posição vem do servidor a cada 2 s e é
+// interpolada localmente pra rolar suave entre um tick e outro. Também mexe
+// na barra de player (posição e seek).
+let seekDrag = false
+function tickLyrics () {
+  if (!fixedKey) return
+  const pos = musicPos.live ? musicPos.pos + (Date.now() - musicPos.at) / 1000 : musicPos.pos
+
+  // barra inferior
+  $('#fb-pos').textContent = mmss(pos)
+  $('#fb-dur').textContent = mmss(musicPos.dur)
+  if (!seekDrag && musicPos.dur > 0)
+    $('#fb-seek').value = Math.min(100, (100 * pos) / musicPos.dur)
+
+  if (fixedKey !== 'music' || !lyr.lines.length) return
+  let idx = -1
+  lyr.lines.forEach((l, i) => { if (l.t <= pos) idx = i })
+  const box = $('#lyrics')
+  const lines = box.children
+  for (let i = 0; i < lines.length; i++) lines[i].classList.toggle('on', i === idx)
+  const el = lines[idx]
+  if (el) box.scrollTo({ top: el.offsetTop - box.clientHeight / 2 + el.clientHeight / 2,
+                         behavior: 'smooth' })
+}
+
+function openFixed (key) {
+  sfx.watch()
+  last = null
+  $('#net-stats').textContent = '—'
+  $('#net-dot').style.background = ''
+  release(viewer); viewer = null
+  fixedKey = key
+  $('#fixed-title').textContent = FIXED_LABEL[key]
+  $('#fixed-desc').textContent = key === 'tv'
+    ? 'Canal do servidor: o que você tocar aqui, todo mundo assiste.'
+    : 'Playlist colaborativa: quem está assistindo adiciona e controla.'
+  $('#fixed-results').replaceChildren()
+  $('#fixed-err').textContent = ''
+  $('#fixed-now').hidden = true
+  lyr = { id: null, lines: [] }
+  paintLyrics()
+  showPlayer(key)
+  $('#brand').textContent = FIXED_LABEL[key]
+  tvPanelHidden = false
+  $('#player-wrap').classList.remove('tv-panel-hidden')
+  $('#fixed-panel').hidden = false
+  $('#fixed-panel-toggle').hidden = key !== 'tv'
+  $('#fixed-bar').hidden = false
+  $('#fb-prev').hidden = $('#fb-next').hidden = $('#fb-toggle').hidden = false
+  $('#fb-prev').title = key === 'tv' ? 'Voltar 10 segundos' : 'Anterior'
+  $('#fb-next').title = key === 'tv' ? 'Avançar 10 segundos' : 'Próxima'
+  seekDrag = false
+  clearInterval(fixedTimer)
+  fixedTick()
+  fixedTimer = setInterval(fixedTick, 500)
+  clearInterval(lyrTimer)
+  lyrTimer = setInterval(tickLyrics, 500)
+}
+
+async function fixedTick () {
+  if (!fixedKey) return
+  const key = fixedKey
+  const st = await fixed(key).catch(() => null)
+  if (!st || key !== fixedKey) return
+  fixedStates[key] = st
+  $('#fixed-err').textContent = ''
+
+  const isTv = key === 'tv'
+  const cur = isTv ? st.current : st.queue[st.index]
+  const streaming = st.status === 'live' || st.status === 'starting'
+  const ready = st.status === 'live'
+  setVideoControls(ready)
+  const loading = isTv && st.status === 'starting'
+  $('#fixed-loading').hidden = !loading
+  if (loading) {
+    const progress = Math.round(st.progress ?? 0)
+    const extra = [
+      st.speed ? `${(st.speed / 1e6).toFixed(1)} MB/s` : '',
+      st.total ? `${fmtBytes(st.progress / 100 * st.total)} de ${fmtBytes(st.total)}` : '',
+    ].filter(Boolean).join(' · ')
+    $('#fixed-loading-label').textContent = `Baixando vídeo… ${progress}%${extra ? ' · ' + extra : ''}`
+    $('#fixed-loading i').style.setProperty('--progress', `${progress}%`)
+  }
+  if (!isTv && st.cookiesNeeded) promptCookies()
+  else if (!st.cookiesNeeded) cookiePrompted = false
+
+  // canal vazio: sem barra de player — play/timeline sem nada tocando não
+  // ajudam; ela volta sozinha quando uma faixa entrar
+  $('#fixed-bar').hidden = st.status === 'idle'
+
+  // canal música tem visual próprio (capa + letra); TV usa o card do painel
+  $('#music-view').classList.toggle('on', !isTv)
+
+  if (isTv) {
+    if (streaming && cur) paintNow($('#fixed-now'), {
+      title: cur.title, thumb: cur.thumb,
+      position: cur.position, duration: cur.duration,
+    }, st.status === 'starting' ? ' · ligando…' : '')
+    else $('#fixed-now').hidden = true
+    musicPos = { pos: cur?.position ?? 0, at: Date.now(),
+                 live: st.status === 'live', dur: cur?.duration ?? 0 }
+  } else if (cur) {
+    $('#mv-art').src = cur.thumb
+    $('#mv-title').textContent = cur.title
+    // ligando a próxima: capa esmaecida pulsando + aviso, pra ninguém clicar de novo
+    $('#music-view').classList.toggle('loading', st.status === 'starting')
+    $('#mv-sub').textContent = st.status === 'starting'
+      ? 'carregando…'
+      : `${cur.addedBy ? cur.addedBy + ' · ' : ''}${mmss(st.position)} / ${mmss(cur.duration)}`
+        + (musicListeners ? ` · ${musicListeners} ouvindo` : '')
+    // faixa mudou: busca a letra (com retry — o LRCLIB às vezes rate-limita
+    // e uma falha transitória não pode virar "sem letra" definitivo)
+    if (lyr.id !== cur.id) {
+      lyr = { id: cur.id, lines: [], tries: 0 }
+      paintLyrics()
+      const want = () => fixed('music/lyrics')
+        .then(l => {
+          if (l.id !== lyr.id) return               // faixa já mudou de novo
+          if (l.lines?.length) { lyr.lines = l.lines; paintLyrics() }
+          else if (++lyr.tries < 5) setTimeout(() => lyr.id === cur.id && !lyr.lines.length && want(), 5000)
+        })
+        .catch(() => { if (++lyr.tries < 5) setTimeout(() => lyr.id === cur.id && want(), 5000) })
+      want()
+    }
+    musicPos = { pos: st.position, at: Date.now(),
+                 live: st.status === 'live', dur: cur.duration }
+  }
+
+  $('#tv-stop').hidden = !(isTv && st.status !== 'idle')
+  // botão play/pause da barra segue o estado real; enquanto liga, gira o botão
+  const busy = st.status === 'starting'
+  for (const b of ['#fb-toggle', '#fb-prev', '#fb-next', '#fb-seek'])
+    $(b).disabled = busy
+  $('#fb-toggle').classList.toggle('busy', busy)
+  setPlayIcon(st.status === 'live')
+
+  // fila da música: clicar pula pra faixa; ✕ tira da fila
+  if (!isTv) $('#music-queue').replaceChildren(...st.queue.map((q, i) => {
+    const el = document.createElement('div')
+    el.className = 'q-item' + (i === st.index ? ' now' : '')
+    if (i === st.index && st.status === 'starting') el.classList.add('loading')
+    el.title = 'Tocar esta'
+    el.innerHTML = `<img alt="" loading="lazy">
+      <span style="flex:1;min-width:0">
+        <span class="q-title"></span>
+        <span class="q-sub"></span>
+      </span>
+      <span class="muted" style="font-size:12px">${mmss(q.duration)}</span>
+      <span class="q-x" title="Tirar da fila">✕</span>`
+    el.querySelector('img').src = q.thumb
+    el.querySelector('.q-title').textContent = q.title
+    el.querySelector('.q-sub').textContent = q.addedBy ? `adicionada por ${q.addedBy}` : ''
+    el.querySelector('.q-x').onclick = e => {
+      e.stopPropagation()
+      fixed('music/remove', { method: 'POST', body: JSON.stringify({ index: i }) })
+        .then(fixedTick).catch(e2 => toast(e2.message))
+    }
+    el.onclick = () => i !== st.index &&
+      fixed('music/jump', { method: 'POST', body: JSON.stringify({ index: i }) })
+        .then(fixedTick).catch(e2 => toast(e2.message))
+    return el
+  }))
+
+  // assistir: conecta quando há mídia, solta quando não há (sem watchdog).
+  // E se a conexão morrer (o host foi recriado no servidor fecha as sessões
+  // WHEP), solta e reconecta no próximo tick — sem isso o player fica mudo
+  // e congelado com a stream "no ar".
+  if (viewer && ['failed', 'closed'].includes(viewer.connectionState)) {
+    release(viewer); viewer = null
+    $('#player-wrap video').srcObject = null
+  }
+  if (streaming && !viewer) {
+    watch(key, $('#player-wrap video'), nick)
+      .then(p => viewer = p)
+      .catch(e => { $('#fixed-err').textContent = e.message })
+  } else if (!streaming && viewer) {
+    release(viewer); viewer = null
+    $('#player-wrap video').srcObject = null
+  }
+}
+
+function closeFixed () {
+  fixedKey = null
+  clearInterval(fixedTimer)
+  clearInterval(lyrTimer)
+  $('#fixed-panel').hidden = true
+  $('#fixed-panel-toggle').hidden = true
+  $('#player-wrap').classList.remove('tv-panel-hidden')
+  $('#fixed-bar').hidden = true
+  $('#fixed-loading').hidden = true
+  setVideoControls(false)
+  $('#music-view').classList.remove('on')
+}
+
+// ── barra de player (seek arrastável + prev/play/next) ──────────────────
+$('#fb-seek').addEventListener('input', () => seekDrag = true)
+$('#fb-seek').addEventListener('change', e => {
+  seekDrag = false
+  if (!musicPos.dur) return
+  fixed(fixedKey + '/seek', {
+    method: 'POST', body: JSON.stringify({ position: (+e.target.value / 100) * musicPos.dur }),
+  }).then(fixedTick).catch(e2 => toast(e2.message))
+})
+// play/seta ↔ pause/II (classe, não `hidden`: SVG não tem essa propriedade)
+function setPlayIcon (playing) {
+  $('#fb-ico-play').classList.toggle('off', playing)
+  $('#fb-ico-pause').classList.toggle('off', !playing)
+}
+const isPlaying = () => !$('#fb-ico-pause').classList.contains('off')
+
+$('#fb-toggle').onclick = () => {
+  const resume = !isPlaying()
+  setPlayIcon(resume)                       // resposta imediata; o tick confirma
+  fixed(fixedKey + '/' + (resume ? 'resume' : 'pause'),
+    { method: 'POST' }).then(fixedTick).catch(e => { setPlayIcon(!resume); toast(e.message) })
+}
+$('#fb-next').onclick = () => {
+  const action = fixedKey === 'tv'
+    ? fixed('tv/seek', { method: 'POST', body: JSON.stringify({ position: musicPos.pos + 10 }) })
+    : fixed('music/next', { method: 'POST' })
+  action.then(fixedTick).catch(e => toast(e.message))
+}
+$('#fb-prev').onclick = () => {
+  if (fixedKey === 'tv') return fixed('tv/seek', {
+    method: 'POST', body: JSON.stringify({ position: Math.max(0, musicPos.pos - 10) }),
+  }).then(fixedTick).catch(e => toast(e.message))
+  const idx = fixedStates.music?.index ?? 0
+  // spotify-like: comeu mais de 3 s, volta pro início; senão, faixa anterior
+  const back = musicPos.pos > 3 || idx <= 0
+    ? fixed('music/seek', { method: 'POST', body: JSON.stringify({ position: 0 }) })
+    : fixed('music/jump', { method: 'POST', body: JSON.stringify({ index: idx - 1 }) })
+  back.then(fixedTick).catch(e => toast(e.message))
+}
+$('#tv-stop').onclick = () =>
+  fixed('tv/stop', { method: 'POST' }).then(fixedTick).catch(e => toast(e.message))
 
 // ── boot ─────────────────────────────────────────────────────────────────
 if (localStorage.getItem('noIntro') !== '1') {

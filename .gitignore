@@ -3,3 +3,5 @@ dist/
 .cache/
 server/.env
 server/playit-data/
+cookies.txt
+.zcode/
