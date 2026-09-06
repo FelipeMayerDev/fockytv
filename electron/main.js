@@ -64,11 +64,15 @@ const linuxAudio = process.platform === 'linux' && hasTool('pw-dump') && hasTool
   // O renderer já escolheu antes de chamar getDisplayMedia, então aqui é só entregar.
   // NÃO chamar getSources de novo: no Wayland cada chamada abre uma sessão nova do
   // portal e os ids não batem entre chamadas. Resolve contra o que já foi listado.
-  session.defaultSession.setDisplayMediaRequestHandler((_req, callback) => {
+  session.defaultSession.setDisplayMediaRequestHandler((req, callback) => {
     const src = sources.find(s => s.id === picked) ?? sources[0]
     if (!src) return callback({})
-    // gotcha #5: áudio do sistema só no Windows; no Linux depende de PipeWire, fica pra depois
-    callback(process.platform === 'win32' ? { video: src, audio: 'loopback' } : { video: src })
+    // gotcha #5: áudio do sistema só no Windows; no Linux depende de PipeWire, fica pra depois.
+    // audioRequested importa: com o filtro por app ligado o renderer pede audio:false, e
+    // entregar loopback assim mesmo punha o som do sistema (Discord junto) numa 2ª trilha —
+    // que era justamente a que o publish mandava pro WHIP.
+    callback(process.platform === 'win32' && req.audioRequested
+      ? { video: src, audio: 'loopback' } : { video: src })
   })
 
   // ── áudio filtrado por aplicativo (Windows) ─────────────────────────────
@@ -133,8 +137,11 @@ const alog = m => { try { fs.appendFileSync(alogPath(), new Date().toISOString()
 
 let audioProc = null, headerBuf = null, metaSent = false, pcmPending = [], pcmFlush = null
 
+let audioGen = 0
+
 async function audioStart (opts) {
   audioStop()
+  const gen = ++audioGen
   const args =
     opts.mode === 'test' ? ['--test'] :
     opts.mode === 'window' ? ['--hwnd', String(opts.hwnd)] :
@@ -175,12 +182,16 @@ async function audioStart (opts) {
     }
     const timer = setTimeout(() => { alog('timeout esperando header'); done({ ok: false, error: 'helper não respondeu' }) }, 10000)
 
-    // rajadas de stdout viram mensagens IPC de ~40ms: menos jitter no caminho
+    // rajadas de stdout viram mensagens IPC de ~40ms: menos jitter no caminho.
+    // O pipe corta em qualquer byte: mandar frame pela metade desloca o
+    // interleave do resto da transmissão (é o "som quebrado"). Sobra fica.
+    let frameBytes = 0
     const flush = () => {
-      if (!pcmPending.length) return
+      if (!frameBytes || !pcmPending.length) return
       const buf = Buffer.concat(pcmPending)
-      pcmPending = []
-      win?.webContents.send('audio-pcm', buf)
+      const cut = buf.length - buf.length % frameBytes
+      pcmPending = cut < buf.length ? [buf.subarray(cut)] : []
+      if (cut) win?.webContents.send('audio-pcm', buf.subarray(0, cut))
     }
 
     audioProc.stdout.on('data', chunk => {
@@ -199,6 +210,7 @@ async function audioStart (opts) {
           return done({ ok: false, error: 'protocolo do helper não reconhecido' })
         }
         const rate = buf.readUInt32LE(4), channels = buf.readUInt32LE(8)
+        frameBytes = channels * 4
         win?.webContents.send('audio-meta', { rate, channels })
         metaSent = true
         clearInterval(pcmFlush)
@@ -223,7 +235,9 @@ async function audioStart (opts) {
         // de novo — o Discord reiniciando não pode matar o áudio da stream
         const mode = opts.mode, hwnd = opts.hwnd, name = opts.name
         alog('respawn em 3s')
-        setTimeout(() => { if (!audioProc) audioStart({ mode, hwnd, name }) }, 3000)
+        // só se ninguém pediu stop nem começou outra captura no meio tempo:
+        // audioProc==null também é o estado logo depois do stop
+        setTimeout(() => { if (gen === audioGen && !audioProc) audioStart({ mode, hwnd, name }) }, 3000)
       }
       audioProc = null
     })
@@ -231,6 +245,7 @@ async function audioStart (opts) {
 }
 
 function audioStop () {
+  audioGen++
   stopTestTone()
   stopLinuxAudio()
   clearInterval(pcmFlush); pcmFlush = null
