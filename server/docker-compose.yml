@@ -29,6 +29,7 @@ services:
       - "APPEND_CANDIDATE=a=candidate:playit1 1 udp 1694498815 147.185.221.213 3652 typ host\r\n"
     volumes:
       - ../ui/index.html:/broadcast-box/web/build/index.html:ro
+      - ../ui/discord.js:/broadcast-box/web/build/discord.js:ro
       - ../ui/du-bist-gut-genug.mp3:/broadcast-box/web/build/du-bist-gut-genug.mp3:ro
       - ../ui/assets:/broadcast-box/web/build/assets:ro
 

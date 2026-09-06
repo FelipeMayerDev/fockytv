@@ -5,6 +5,10 @@
 // bundle step. Se um dia o ui/ ganhar build, trocar por dependência local.
 const SDK_URL = 'https://esm.sh/@discord/embedded-app-sdk'
 
+// Application ID do app "FockyTV" no Discord Developer Portal. O SDK exige
+// no construtor; fora do iframe do Discord ele nunca é usado.
+const CLIENT_ID = '1546036535881637898'
+
 // O Discord abre a Activity com ?frame_id= (entre outros query params). Sem
 // isso estamos no Electron ou num navegador comum — init nem é tentado.
 export const inDiscord = new URLSearchParams(location.search).has('frame_id')
@@ -14,7 +18,7 @@ let sdk = null
 export async function initDiscord () {
   if (!inDiscord || sdk) return sdk
   const { default: DiscordSDK } = await import(SDK_URL)
-  sdk = new DiscordSDK()
+  sdk = new DiscordSDK(CLIENT_ID)
   await sdk.ready()
   console.info('[fockytv/discord] activity ready', {
     channelId: sdk.channelId,
