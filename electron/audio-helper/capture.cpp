@@ -210,10 +210,18 @@ int main(int argc, char** argv) {
     g_done = CreateEvent(nullptr, FALSE, FALSE, nullptr);
     Handler handler;
     IActivateAudioInterfaceAsyncOperation_* op = nullptr;
-    if (FAILED(activate(L"VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK",
-                        __uuidof(IAudioClient), &pv, &handler, &op)))
+    HRESULT hr = activate(L"VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK",
+                          __uuidof(IAudioClient), &pv, &handler, &op);
+    if (FAILED(hr)) {
+      fwprintf(stderr, L"ActivateAudioInterfaceAsync falhou hr=0x%08lX "
+               L"(0x80070490/0x80004001 em geral = Windows sem a API de "
+               L"process loopback, precisa 10 2004+)\n", (unsigned long)hr);
       return 6;
-    if (WaitForSingleObject(g_done, 10000) != WAIT_OBJECT_0) return 7;
+    }
+    if (WaitForSingleObject(g_done, 10000) != WAIT_OBJECT_0) {
+      fwprintf(stderr, L"timeout na ativacao\n");
+      return 7;
+    }
 
     IAudioClient* client = nullptr;
     if (op) {
@@ -222,6 +230,8 @@ int main(int argc, char** argv) {
       if (SUCCEEDED(op->GetActivateResult(&got, &unk)) && SUCCEEDED(got) && unk) {
         unk->QueryInterface(__uuidof(IAudioClient), (void**)&client);
         unk->Release();
+      } else {
+        fwprintf(stderr, L"ativacao falhou hr=0x%08lX\n", (unsigned long)got);
       }
       op->Release();
     }
