@@ -864,6 +864,13 @@ app.get("/api/fixed/music/lyrics", wrap(async (req, res) => {
   res.json({ id: item.id, lines: (await lyricsOf(item)) ?? [] })
 }))
 app.post("/api/fixed/music/resume", wrap(async (req, res) => {
+  // broadcast-box reiniciou etc. deixou o canal em idle com a fila viva: o
+  // resume tem que religar, senão o ouvinte fica controlando a timeline
+  // de um canal que nunca volta a tocar (e 60s depois a fila zera).
+  if (music.status === "idle" && music.queue.length) {
+    await playCurrent()
+    return res.json(musicState())
+  }
   if (music.status !== "paused") return res.json(musicState())
   await music.runner.startMedia(await metaOf(music.queue[music.index].id, true),
     { offset: music.runner.position(), video: false, preload: true })
