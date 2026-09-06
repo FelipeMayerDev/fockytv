@@ -748,6 +748,21 @@ app.get("/api/fixed/search", wrap(async (req, res) => {
   res.json(await search(q, limit))
 }))
 
+// Proxy de imagens externas (capas do YouTube etc.): dentro da Activity do
+// Discord o CSP bloqueia img de outras origens — a UI reescreve para cá.
+app.get("/api/fixed/img", wrap(async (req, res) => {
+  const url = (req.query.url ?? "").toString()
+  let u
+  try { u = new URL(url) } catch { return res.status(400).json({ error: "url inválida" }) }
+  if (!/^https?:$/.test(u.protocol)) return res.status(400).json({ error: "protocolo" })
+  const r = await fetch(u, { signal: AbortSignal.timeout(8_000) })
+  if (!r.ok || !(r.headers.get("content-type") ?? "").startsWith("image/"))
+    return res.status(502).json({ error: "não é imagem" })
+  res.setHeader("content-type", r.headers.get("content-type"))
+  res.setHeader("cache-control", "public, max-age=86400")
+  r.body.pipe(res)
+}))
+
 app.get("/api/fixed/tv", (req, res) => res.json(tvState()))
 app.post("/api/fixed/tv/play", wrap(async (req, res) => {
   if (!req.body?.id) return res.status(400).json({ error: "id obrigatório" })

@@ -598,6 +598,11 @@ const thumbs = new Map()   // streamKey -> dataURL, pra não regerar a cada refr
 // ── Discord Activity (só acorda dentro do iframe do Discord) ──────────────
 // Fora dele o import é pulado: o esm.sh nem é requisitado no Electron/navegador.
 let discord = false   // true quando rodando como Activity (sem captura de mídia)
+// CSP da Activity bloqueia img externa (capas do YouTube): passa pelo nosso
+// proxy quando dentro do Discord. Precisa do cfg, então é chamada tardia.
+const imgSrc = url => discord && /^https?:/.test(url ?? '')
+  ? `${cfg.serverUrl}/api/fixed/img?url=${encodeURIComponent(url)}`
+  : url
 async function bootstrapDiscord () {
   try {
     const { inDiscord, initDiscord, discordDisplayName, restoreWebRTC } = await import('./discord.js?v=2')
@@ -1243,7 +1248,7 @@ function fixedTile (key) {
        </div></div>`
   const thumb = el.querySelector('.thumb')
   thumb.replaceChildren(...(cur
-    ? [Object.assign(new Image(), { src: cur.thumb })]
+    ? [Object.assign(new Image(), { src: imgSrc(cur.thumb) })]
     : [Object.assign(document.createElement('span'),
         { className: 'muted', textContent: 'nada passando' })]),
     Object.assign(document.createElement('span'),
@@ -1435,7 +1440,7 @@ $('#fixed-q').addEventListener('keydown', async e => {
     const results = await fixed(`search?limit=${fixedKey === 'tv' ? 20 : 8}&q=${encodeURIComponent(e.target.value)}`)
     box.replaceChildren(...results.map(r => {
       const b = document.createElement('button')
-      b.innerHTML = `<img src="${r.thumb}"><div style="min-width:0">
+      b.innerHTML = `<img src="${imgSrc(r.thumb)}"><div style="min-width:0">
         <div class="r-title"></div><div class="r-sub"></div></div>`
       b.querySelector('.r-title').textContent = r.title
       b.querySelector('.r-sub').textContent = `${r.channel} · ${mmss(r.duration)}`
@@ -1606,14 +1611,14 @@ async function fixedTick () {
 
   if (isTv) {
     if (streaming && cur) paintNow($('#fixed-now'), {
-      title: cur.title, thumb: cur.thumb,
+      title: cur.title, thumb: imgSrc(cur.thumb),
       position: cur.position, duration: cur.duration,
     }, st.status === 'starting' ? ' · ligando…' : '')
     else $('#fixed-now').hidden = true
     musicPos = { pos: cur?.position ?? 0, at: Date.now(),
                  live: st.status === 'live', dur: cur?.duration ?? 0 }
   } else if (cur) {
-    $('#mv-art').src = cur.thumb
+    $('#mv-art').src = imgSrc(cur.thumb)
     $('#mv-title').textContent = cur.title
     // ligando a próxima: capa esmaecida pulsando + aviso, pra ninguém clicar de novo
     $('#music-view').classList.toggle('loading', st.status === 'starting')
@@ -1660,7 +1665,7 @@ async function fixedTick () {
       </span>
       <span class="muted" style="font-size:12px">${mmss(q.duration)}</span>
       <span class="q-x" title="Tirar da fila">✕</span>`
-    el.querySelector('img').src = q.thumb
+    el.querySelector('img').src = imgSrc(q.thumb)
     el.querySelector('.q-title').textContent = q.title
     el.querySelector('.q-sub').textContent = q.addedBy ? `adicionada por ${q.addedBy}` : ''
     el.querySelector('.q-x').onclick = e => {
