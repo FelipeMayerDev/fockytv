@@ -52,6 +52,16 @@ static const IID IID_IUnknown_ =
 static const IID IID_AAIF_CompletionHandler =
   { 0x41D949AB, 0x9862, 0x444A, {0x80,0xF6,0xC2,0x61,0x33,0x4D,0xA5,0xEB} };
 
+// A ActivateAudioInterfaceAsync exige um handler ágil: sem marshaling
+// free-threaded ela recusa na cara dura com E_ILLEGAL_METHOD_CALL (0x8000000E)
+// e nada nunca chega a ser capturado. O sample da MS ganha isso de graça via
+// FtmBase da WRL; aqui, sem WRL, é o marshaler padrão do COM na mão.
+static const IID IID_IAgileObject_ =
+  { 0x94EA2B94, 0xE9CC, 0x49E0, {0xC0,0xFF,0xEE,0x64,0xCA,0x8F,0x5B,0x90} };
+static const IID IID_IMarshal_ =
+  { 0x00000003, 0x0000, 0x0000, {0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46} };
+static IUnknown* g_ftm = nullptr;
+
 struct IActivateAudioInterfaceAsyncOperation_ : public IUnknown {
   virtual HRESULT STDMETHODCALLTYPE GetActivateResult(HRESULT* hr, IUnknown** unk) = 0;
 };
@@ -70,10 +80,13 @@ static HANDLE g_done = nullptr;
 struct Handler : public IActivateAudioInterfaceCompletionHandler_ {
   STDMETHODIMP QueryInterface(REFIID riid, void** out) override {
     if (!memcmp(&riid, &IID_IUnknown_, sizeof(IID)) ||
-        !memcmp(&riid, &IID_AAIF_CompletionHandler, sizeof(IID))) {
+        !memcmp(&riid, &IID_AAIF_CompletionHandler, sizeof(IID)) ||
+        !memcmp(&riid, &IID_IAgileObject_, sizeof(IID))) {
       *out = static_cast<IActivateAudioInterfaceCompletionHandler_*>(this);
       return S_OK;
     }
+    if (g_ftm && !memcmp(&riid, &IID_IMarshal_, sizeof(IID)))
+      return g_ftm->QueryInterface(riid, out);
     *out = nullptr;
     return E_NOINTERFACE;
   }
@@ -214,13 +227,21 @@ int main(int argc, char** argv) {
 
     g_done = CreateEvent(nullptr, FALSE, FALSE, nullptr);
     Handler handler;
+    // tem que existir ANTES do activate: é durante a chamada que o COM pede
+    // IMarshal ao handler
+    if (FAILED(CoCreateFreeThreadedMarshaler(
+          static_cast<IActivateAudioInterfaceCompletionHandler_*>(&handler), &g_ftm))) {
+      fwprintf(stderr, L"CoCreateFreeThreadedMarshaler falhou\n");
+      return 13;
+    }
     IActivateAudioInterfaceAsyncOperation_* op = nullptr;
     HRESULT hr = activate(L"VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK",
                           __uuidof(IAudioClient), &pv, &handler, &op);
     if (FAILED(hr)) {
       fwprintf(stderr, L"ActivateAudioInterfaceAsync falhou hr=0x%08lX "
-               L"(0x80070490/0x80004001 em geral = Windows sem a API de "
-               L"process loopback, precisa do build 20348+)\n", (unsigned long)hr);
+               L"(0x8000000E = handler sem marshaling free-threaded; "
+               L"0x80070490/0x80004001 = Windows sem a API de process "
+               L"loopback, precisa do build 20348+)\n", (unsigned long)hr);
       return 6;
     }
     if (WaitForSingleObject(g_done, 10000) != WAIT_OBJECT_0) {
