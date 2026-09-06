@@ -599,7 +599,7 @@ const thumbs = new Map()   // streamKey -> dataURL, pra não regerar a cada refr
 // Fora dele o import é pulado: o esm.sh nem é requisitado no Electron/navegador.
 async function bootstrapDiscord () {
   try {
-    const { inDiscord, initDiscord, discordDisplayName } = await import('./discord.js')
+    const { inDiscord, initDiscord, discordDisplayName } = await import('./discord.js?v=1')
     if (!inDiscord) return null
     const sdk = await initDiscord()
     // o username pode chegar após o ready; sem ele, o diálogo normal decide
