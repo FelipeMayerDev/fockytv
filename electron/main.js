@@ -41,6 +41,9 @@ const linuxAudio = process.platform === 'linux' && hasTool('pw-dump') && hasTool
     // X11 via wmctrl; no Wayland o portal não conta quem foi escolhido.
     audioFilter: process.platform === 'win32' || linuxAudio || process.env.FOCKY_AUDIO_TEST === '1',
     windowFilter: process.platform === 'win32' || (linuxAudio && hasTool('wmctrl') && !wayland),
+    // sala de músicos: microfone pelo helper WASAPI exclusivo (10ms, sem
+    // pipeline de voz do Windows); a UI esconde a opção fora do Windows
+    nativeMic: process.platform === 'win32',
   }))
 
   ipcMain.handle('sources', async () => {
@@ -145,7 +148,10 @@ async function audioStart (opts) {
   const args =
     opts.mode === 'test' ? ['--test'] :
     opts.mode === 'window' ? ['--hwnd', String(opts.hwnd)] :
-    opts.mode === 'exclude' ? ['--exclude-name', opts.name ?? 'Discord'] : null
+    opts.mode === 'exclude' ? ['--exclude-name', opts.name ?? 'Discord'] :
+    opts.mode === 'mic' ? ['--mic'] : null
+  if (opts.mode === 'mic' && process.platform !== 'win32')
+    return { ok: false, error: 'captura nativa do microfone é só no Windows (WASAPI)' }
   if (opts.mode !== 'test' && process.platform === 'linux') {
     // window|exclude|screen: no PipeWire dá pra capturar (e misturar) os
     // streams de app direto; o modo screen pega todos sem exceção
@@ -214,7 +220,9 @@ async function audioStart (opts) {
         win?.webContents.send('audio-meta', { rate, channels })
         metaSent = true
         clearInterval(pcmFlush)
-        pcmFlush = setInterval(flush, 40)
+        // sala de músicos (mic): cada 40ms de flush é latência a mais na
+        // conta — lá o caminho é curto o suficiente pra valer tick de 10ms
+        pcmFlush = setInterval(flush, opts.mode === 'mic' ? 10 : 40)
         clearTimeout(timer)
         done({ ok: true, rate, channels })
         buf = buf.subarray(16)

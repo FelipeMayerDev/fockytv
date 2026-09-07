@@ -252,7 +252,7 @@ export async function initJam ({ serverUrl }) {
 
   // ── API pública ─────────────────────────────────────────────────────────
   return {
-    async join (_room, _nick, _onState) {
+    async join (_room, _nick, _onState, { micStream: extMic = null } = {}) {
       room = _room; me = _nick; onState = _onState || onState
       ws = new WebSocket(`${wsUrl}/ws/jam?room=${encodeURIComponent(room)}&nick=${encodeURIComponent(me)}`)
       ws.onmessage = e => {
@@ -264,10 +264,12 @@ export async function initJam ({ serverUrl }) {
         ws.onerror = () => rej(new Error('sinalização indisponível'))
       })
 
-      // mic sem nenhum processamento de voz; fones são obrigatórios (sem AEC
-      // o alto-falante vira eco). channelCount 2 fica quando o dispositivo
-      // tiver — mono entra no encoder como estéreo duplicado.
-      micStream = await navigator.mediaDevices.getUserMedia({
+      // Fonte do microfone: por padrão getUserMedia sem nenhum processamento
+      // de voz (fones são obrigatórios — sem AEC o alto-falante vira eco). No
+      // app desktop, o chamador pode injetar o PCM do helper WASAPI exclusivo
+      // via micStream: captura com ~10ms de latência, fora da pipeline de voz
+      // do Chromium inteira.
+      micStream = extMic ?? await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: false, noiseSuppression: false, autoGainControl: false,
           channelCount: 2, sampleRate: 48000,
