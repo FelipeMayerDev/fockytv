@@ -7,6 +7,8 @@
 // Modos:
 //   --hwnd N          só o áudio do processo da janela N (include tree)
 //   --exclude-name X  todo o sistema MENOS a árvore do processo X (ex.: Discord)
+//   --mic             microfone via WASAPI exclusivo event-driven (sala de
+//                     músicos: 10ms de buffer, sem passar pelo mixer do SO)
 //   --test            senoide 440 Hz (validação do pipeline fora do Windows)
 //
 // Sair basta fechar o stdout (quebra de pipe) ou matar o processo.
@@ -48,6 +50,12 @@ struct AUDIOCLIENT_ACTIVATION_PARAMS_ {
 
 static const IID IID_IUnknown_ =
   { 0x00000000, 0x0000, 0x0000, {0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46} };
+
+// Subtipos de formato (ksmedia.h): PCM inteiro e IEEE float
+static const GUID GUID_SUBTYPE_PCM_ =
+  { 0x00000001, 0x0000, 0x0010, {0x80,0x00,0x00,0xaa,0x00,0x38,0x9b,0x71} };
+static const GUID GUID_SUBTYPE_IEEE_FLOAT_ =
+  { 0x00000003, 0x0000, 0x0010, {0x80,0x00,0x00,0xaa,0x00,0x38,0x9b,0x71} };
 
 static const IID IID_AAIF_CompletionHandler =
   { 0x41D949AB, 0x9862, 0x444A, {0x80,0xF6,0xC2,0x61,0x33,0x4D,0xA5,0xEB} };
@@ -184,11 +192,169 @@ static int run_test() {
   }
 }
 
+// ── modo --mic: microfone em baixa latência (sala de músicos) ─────────────
+// WASAPI exclusivo + event-driven: o evento do driver entrega ~10ms por vez,
+// sem o mixer compartilhado (que acrescenta 10–30ms e remonteia). Exclusivo é
+// exigente com formato: tenta float32 → int32 → int24 → int16 (48k, 2 canais)
+// e cai pro modo compartilhado se o device não abrir de jeito nenhum —
+// capturar sempre é mais importante que os 20ms de diferença.
+//
+// Saída: mesmo protocolo FPCM float32 do loopback, então o main.js não muda.
+
+struct WAVEFMT_EXT_ {   // WAVEFORMATEXTENSIBLE (struct própria: headers à parte)
+  WAVEFORMATEX fmt;
+  WORD samples;         // bits de alinhamento do container
+  DWORD channelMask;
+  GUID sub;
+};
+
+static void ext_init (WAVEFMT_EXT_& e, int bits, bool isFloat, int ch) {
+  memset(&e, 0, sizeof(e));
+  e.fmt.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+  e.fmt.nChannels = ch;
+  e.fmt.nSamplesPerSec = 48000;
+  e.fmt.wBitsPerSample = bits;
+  e.fmt.nBlockAlign = ch * bits / 8;
+  e.fmt.nAvgBytesPerSec = 48000 * e.fmt.nBlockAlign;
+  e.fmt.cbSize = 22;
+  e.samples = bits;
+  e.channelMask = ch == 2 ? 0x3 : 0x4;   // stereo/mono
+  e.sub = isFloat ? GUID_SUBTYPE_IEEE_FLOAT_ : GUID_SUBTYPE_PCM_;
+}
+
+// converte um pacote do formato `bits` inteiro (ou float) pra float32 in-place
+// no buffer de saída. `in` pode ser o próprio `out` quando não há conversão.
+static void to_float (const BYTE* in, float* out, UINT32 frames, int ch, int bits, bool isFloat) {
+  const size_t n = (size_t)frames * ch;
+  if (isFloat && bits == 32) {
+    if (in != reinterpret_cast<BYTE*>(out)) memcpy(out, in, n * 4);
+    return;
+  }
+  for (size_t i = 0; i < n; i++) {
+    if (bits == 16) out[i] = reinterpret_cast<const short*>(in)[i] / 32768.f;
+    else if (bits == 32) out[i] = reinterpret_cast<const int*>(in)[i] / 2147483648.f;
+    else {   // 24 empacotado
+      const BYTE* b = in + i * 3;
+      int32_t v = b[0] | (b[1] << 8) | (b[2] << 16);
+      if (v & 0x800000) v |= ~0xFFFFFF;   // sinal
+      out[i] = v / 8388608.f;
+    }
+  }
+}
+
+static int run_mic () {
+  if (FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED))) return 4;
+
+  IMMDeviceEnumerator* enumerator = nullptr;
+  static const IID IID_IMMDeviceEnumerator_ =
+    { 0xA95664D2, 0x9614, 0x4F35, {0xA7,0x46,0xDE,0x8D,0xB6,0x36,0x17,0xE6} };
+  static const CLSID CLSID_MMDeviceEnumerator_ =
+    { 0xBCDE0395, 0xE52F, 0x467C, {0x8E,0x3D,0xC4,0x57,0x92,0x91,0x69,0x2E} };
+  if (FAILED(CoCreateInstance(CLSID_MMDeviceEnumerator_, nullptr, CLSCTX_ALL,
+                              IID_IMMDeviceEnumerator_, (void**)&enumerator))) return 20;
+  IMMDevice* dev = nullptr;
+  if (FAILED(enumerator->GetDefaultAudioEndpoint(eCapture, eConsole, &dev))) return 21;
+  IAudioClient* client = nullptr;
+  if (FAILED(dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)&client))) return 22;
+
+  // candidato: bits, float? Tenta exclusivo 10ms com cada um.
+  const int PERIOD = 480;   // frames @48k = 10ms
+  const REFERENCE_TIME hns10ms = 100000;
+  WAVEFMT_EXT_ cands[4];
+  bool isFloatC[4] = { true, false, false, false };
+  int bitsC[4] = { 32, 32, 24, 16 };
+  for (int i = 0; i < 4; i++) ext_init(cands[i], bitsC[i], isFloatC[i], 2);
+
+  int useBits = 32;
+  bool useFloat = true, exclusive = false;
+  WAVEFORMATEX* sharedFmt = nullptr;
+  for (int i = 0; i < 4; i++) {
+    HRESULT ok = client->IsFormatSupported(AUDCLNT_SHAREMODE_EXCLUSIVE,
+                                           &cands[i].fmt, nullptr);
+    if (SUCCEEDED(ok)) {
+      useBits = bitsC[i]; useFloat = isFloatC[i]; exclusive = true;
+      fwprintf(stderr, L"mic: exclusivo %s %d-bit\n", isFloatC[i] ? L"float" : L"int", bitsC[i]);
+      if (FAILED(client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE,
+                                    AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                                    hns10ms, hns10ms, &cands[i].fmt, nullptr))) {
+        exclusive = false;   // formato aceito mas não abriu: tenta o próximo
+        continue;
+      }
+      break;
+    }
+  }
+  if (!exclusive) {
+    // compartilhado event-driven com o formato do mixer: bem mais latência que
+    // o exclusivo, mas ainda pula a pipeline de voz do Chromium (AEC/NS/AGC)
+    if (FAILED(client->GetMixFormat(&sharedFmt))) return 23;
+    useBits = sharedFmt->wBitsPerSample;
+    useFloat = sharedFmt->wFormatTag == WAVE_FORMAT_IEEE_FLOAT ||
+               (sharedFmt->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
+                !memcmp(&reinterpret_cast<WAVEFMT_EXT_*>(sharedFmt)->sub,
+                        &GUID_SUBTYPE_IEEE_FLOAT_, sizeof(GUID)));
+    fwprintf(stderr, L"mic: compartilhado %s %d-bit %luHz %dch\n",
+             useFloat ? L"float" : L"int", useBits,
+             (unsigned long)sharedFmt->nSamplesPerSec, (int)sharedFmt->nChannels);
+    if (FAILED(client->Initialize(AUDCLNT_SHAREMODE_SHARED,
+                                  AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                                  0, 0, sharedFmt, nullptr))) return 24;
+  }
+
+  HANDLE dataReady = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+  client->SetEventHandle(dataReady);
+  IAudioCaptureClient* cap = nullptr;
+  if (FAILED(client->GetService(__uuidof(IAudioCaptureClient), (void**)&cap))) return 25;
+  client->Start();
+
+  UINT32 rate = exclusive ? 48000 : sharedFmt->nSamplesPerSec;
+  UINT32 ch = exclusive ? 2 : sharedFmt->nChannels;
+  char header[16];
+  memcpy(header, "FPCM", 4);
+  memcpy(header + 4, &rate, 4);
+  memcpy(header + 8, &ch, 4);
+  memset(header + 12, 0, 4);
+  if (!write_all(header, 16)) return 12;
+
+  // pacotes chegam no formato do device: converte pra float32 num buffer de
+  // trabalho (0.5s de folga cobre qualquer rajada de evento)
+  std::vector<BYTE> in(2 * rate * ch * (useBits / 8));
+  std::vector<float> out(2 * rate * ch);
+  unsigned long long total = 0;
+  int waits = 0;
+  for (;;) {
+    DWORD w = WaitForSingleObject(dataReady, 2000);
+    if (w == WAIT_TIMEOUT) {
+      fwprintf(stderr, L"sem evento: total=%llu frames, %d timeouts\n", total, ++waits);
+      if (waits > 15) return 14;
+      continue;
+    }
+    waits = 0;
+    BYTE* data = nullptr; UINT32 frames = 0; DWORD flags = 0;
+    while (SUCCEEDED(cap->GetNextPacketSize(&frames)) && frames > 0) {
+      if (FAILED(cap->GetBuffer(&data, &frames, &flags, nullptr, nullptr))) break;
+      if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
+        memset(out.data(), 0, (size_t)frames * ch * 4);
+      } else {
+        memcpy(in.data(), data, (size_t)frames * ch * (useBits / 8));
+        to_float(in.data(), out.data(), frames, ch, useBits, useFloat);
+      }
+      if (!write_all(out.data(), (size_t)frames * ch * 4)) goto done;
+      total += frames;
+      cap->ReleaseBuffer(frames);
+    }
+  }
+done:
+  client->Stop();
+  if (sharedFmt) CoTaskMemFree(sharedFmt);
+  return 0;
+}
+
 int main(int argc, char** argv) {
     // stdout binário: sem isso o modo texto traduz \n e corrompe o PCM
     _setmode(_fileno(stdout), _O_BINARY);
 
     if (argc > 1 && !strcmp(argv[1], "--test")) return run_test();
+    if (argc > 1 && !strcmp(argv[1], "--mic")) return run_mic();
 
     DWORD pid = 0;
     PROCESS_LOOPBACK_MODE_ mode = PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE_;
@@ -202,7 +368,7 @@ int main(int argc, char** argv) {
       if (!pid) { fwprintf(stderr, L"processo nao encontrado\n"); return 3; }
       mode = PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE_;
     } else {
-      fwprintf(stderr, L"uso: --hwnd N | --exclude-name X | --test\n");
+      fwprintf(stderr, L"uso: --hwnd N | --exclude-name X | --mic | --test\n");
       return 1;
     }
     fwprintf(stderr, L"pid=%lu mode=%d\n", pid, (int)mode);

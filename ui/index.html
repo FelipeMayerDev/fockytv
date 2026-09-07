@@ -262,6 +262,45 @@ dialog .desc { font-size:13px; color:hsl(var(--muted-foreground)); margin-bottom
 .opts { display:grid; grid-template-columns:1fr 1fr; gap:16px }
 .actions { display:flex; justify-content:flex-end; gap:8px; margin-top:20px }
 
+/* sala de músicos */
+.jam-warn {
+  background:hsl(38 92% 50% / .12); border:1px solid hsl(38 92% 50% / .4);
+  border-radius:var(--radius); padding:10px 14px; font-size:13px; margin-bottom:16px;
+}
+#jam-peers { display:flex; flex-direction:column; gap:8px; margin:8px 0 }
+.jam-peer {
+  display:flex; align-items:center; gap:10px; padding:8px 12px;
+  background:hsl(var(--muted)); border-radius:var(--radius); font-size:13px;
+}
+.jam-peer .jp-name { font-weight:600; flex:none; max-width:120px; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap }
+.jam-peer .jp-stats { color:hsl(var(--muted-foreground)); font-size:11px; flex:1 }
+.jam-peer .jp-meter { width:64px; height:4px; border-radius:999px; background:hsl(var(--border));
+  overflow:hidden; flex:none }
+.jam-peer .jp-meter i { display:block; height:100%; width:0; background:hsl(142 71% 45%); transition:width .15s }
+.jam-peer input[type=range] { width:90px; height:4px; padding:0; border:0;
+  appearance:none; background:hsl(var(--border)); border-radius:999px }
+.jam-peer input[type=range]::-webkit-slider-thumb { appearance:none; width:12px; height:12px;
+  border-radius:50%; background:hsl(var(--foreground)) }
+/* canal 🎸 Sala: conexão no centro, quem está na sala no painel da direita
+   (mesmo esquema do #music-view + #fixed-panel) */
+#jam-view { position:absolute; left:0; top:0; bottom:0; right:372px; z-index:3;
+  display:none; background:linear-gradient(180deg, hsl(240 10% 9%), hsl(var(--background)) 70%) }
+#jam-view.on { display:flex }
+#jam-main { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center;
+  justify-content:center; gap:14px; padding:28px 24px; overflow:auto }
+#jam-card { width:min(420px, 100%) }
+#jam-panel { position:absolute; top:0; right:0; bottom:0; width:min(360px, 92vw);
+  background:hsl(var(--card)); border-left:1px solid hsl(var(--border));
+  padding:16px; overflow:auto; z-index:4 }
+#jam-panel h3 { font-size:15px; font-weight:600; margin-bottom:2px }
+.ji { display:flex; justify-content:space-between; align-items:baseline; padding:6px 0 }
+.ji b { font-size:14px }
+#ji-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:14px }
+.ji-stat { background:hsl(var(--muted)); border-radius:8px; padding:10px 8px; text-align:center }
+.ji-stat b { display:block; font-size:22px; font-variant-numeric:tabular-nums }
+.ji-stat span { font-size:11px; color:hsl(var(--muted-foreground)) }
+
 #sources { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
            gap:10px; margin:16px 0; max-height:230px; overflow:auto }
 #sources figure {
@@ -478,6 +517,53 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
     <button class="ghost icon" id="fixed-panel-toggle" hidden title="Ocultar busca" aria-label="Ocultar busca">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16M11 9l-3 3 3 3"/></svg>
     </button>
+    <!-- canal 🎸 Sala: conexão no centro, quem está na sala no painel da direita -->
+    <div id="jam-view">
+      <div id="jam-main">
+        <div class="jam-warn" style="width:min(420px,100%)">
+          <strong>Use fones de ouvido.</strong> Sem cancelamento de eco — quem usar
+          caixa de som vai levar o áudio dos outros de volta.
+        </div>
+
+        <div class="card" id="jam-card">
+          <h3>Sala de músicos</h3>
+          <p class="desc">Áudio P2P direto, sem servidor no meio e sem processamento de voz.
+             Latência típica: 30–80&nbsp;ms em rede boa.</p>
+
+          <div id="jam-entry">
+            <div class="field">
+              <label for="jam-room">Sala</label>
+              <input id="jam-room" maxlength="64" placeholder="ex.: ensaio-terca">
+            </div>
+            <div class="row" id="jam-native-row" hidden>
+              <label for="jam-native" style="font-size:13px">Captura nativa (WASAPI exclusivo, menos latência)</label>
+              <span class="switch"><input type="checkbox" id="jam-native" checked><span></span></span>
+            </div>
+            <p class="err" id="jam-err" hidden></p>
+          </div>
+
+          <div id="jam-info" hidden>
+            <div class="ji"><span class="muted">Sala</span><b id="ji-room"></b></div>
+            <div class="ji"><span class="muted">Você</span><b id="ji-nick"></b></div>
+            <div id="ji-grid" hidden>
+              <div class="ji-stat"><b id="ji-rtt">—</b><span>RTT médio</span></div>
+              <div class="ji-stat"><b id="ji-buf">—</b><span>buffer</span></div>
+              <div class="ji-stat"><b id="ji-fail">—</b><span>falhas</span></div>
+            </div>
+          </div>
+
+          <div class="actions" style="margin-top:8px">
+            <button id="jam-toggle">Entrar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <aside id="jam-panel" hidden>
+      <h3>Quem está na sala</h3>
+      <p class="desc" id="jam-status" hidden></p>
+      <div id="jam-peers"></div>
+      <p class="muted" id="jam-empty" hidden style="font-size:13px">só você — compartilhe o nome da sala</p>
+    </aside>
   </div>
   <div id="stage-wrap">
     <canvas id="stage"></canvas>
@@ -1394,18 +1480,36 @@ const viewersOf = st => [...new Set((st.sessions ?? []).map(s => s.viewer).filte
 function fixedTile (key) {
   const st = fixedStates[key]
   const isTv = key === 'tv'
-  const cur = isTv ? st?.current : st?.queue?.[st?.index]
-  const playing = st && st.status !== 'idle'
 
   const el = document.createElement('div')
   el.className = 'vid'
   el.innerHTML =
     `<div class="thumb"><div class="skeleton"></div></div>
-     <div class="meta"><div class="avatar">${isTv ? '📺' : '🎵'}</div>
+     <div class="meta"><div class="avatar">${FIXED_LABEL[key].slice(0, 2)}</div>
        <div style="min-width:0">
          <div class="title"></div><div class="sub"></div>
        </div></div>`
   const thumb = el.querySelector('.thumb')
+
+  if (key === 'jam') {
+    // canal da sala: "ao vivo" quando tem gente tocando, sem mídia pra mostrar
+    const total = st?.total ?? 0
+    thumb.replaceChildren(
+      Object.assign(document.createElement('span'),
+        { className: 'muted',
+          textContent: total ? plural(total, 'músico', 'músicos') : 'sem sala ativa' }),
+      Object.assign(document.createElement('span'),
+        { className: 'badge', textContent: total ? 'AO VIVO' : 'EM ESPERA' }))
+    el.querySelector('.title').textContent = FIXED_LABEL[key]
+    el.querySelector('.sub').textContent = total
+      ? `${st.rooms.length} sala${st.rooms.length > 1 ? 's' : ''} · clique para entrar`
+      : 'entre e toque junto'
+    el.onclick = () => openFixed(key)
+    return el
+  }
+
+  const cur = isTv ? st?.current : st?.queue?.[st?.index]
+  const playing = st && st.status !== 'idle'
   thumb.replaceChildren(...(cur
     ? [Object.assign(new Image(), { src: imgSrc(cur.thumb) })]
     : [Object.assign(document.createElement('span'),
@@ -1416,6 +1520,31 @@ function fixedTile (key) {
   el.querySelector('.sub').textContent = cur?.title ?? 'clique para escolher algo'
   el.onclick = () => openFixed(key)
   return el
+}
+
+// canal 🎸 Sala: sem mídia nem busca — a vista é o painel da sala em si
+function openJam () {
+  sfx.watch()
+  last = null
+  release(viewer); viewer = null
+  fixedKey = 'jam'
+  showPlayer('jam')
+  $('#brand').textContent = FIXED_LABEL.jam
+  $('#fixed-panel').hidden = true
+  $('#fixed-panel-toggle').hidden = true
+  $('#fixed-bar').hidden = true
+  $('#fixed-loading').hidden = true
+  $('#music-view').classList.remove('on')
+  $('#jam-view').classList.add('on')
+  $('#jam-panel').hidden = false
+  $('#jam-entry').hidden = jamJoined
+  $('#jam-info').hidden = !jamJoined
+  $('#jam-native-row').hidden = !cfg.nativeMic
+  if (cfg.nativeMic) $('#jam-native').disabled = !!filterMode
+  $('#jam-room').value ||= localStorage.getItem('jam-room') ?? ''
+  clearInterval(fixedTimer)
+  fixedTick()
+  fixedTimer = setInterval(fixedTick, 500)
 }
 
 async function refresh () {
@@ -1538,8 +1667,8 @@ $('#fs').onclick = () => (document.fullscreenElement
 // Os dois canais são tiles permanentes da grade; o que está passando (thumb
 // e título) vem do /api/fixed/*. A busca e os controles moram dentro do
 // player de cada canal — quem está assistindo escolhe e controla.
-const FIXED_KEYS = ['tv', 'music']
-const FIXED_LABEL = { tv: '📺 TV', music: '🎵 Música' }
+const FIXED_KEYS = ['tv', 'music', 'jam']
+const FIXED_LABEL = { tv: '📺 TV', music: '🎵 Música', jam: '🎸 Sala' }
 const fixedStates = { tv: null, music: null }
 let musicListeners = 0   // do /api/status (refresh), mostrado como "N ouvindo"
 let cookiePrompted = false
@@ -1702,6 +1831,7 @@ function tickLyrics () {
 }
 
 function openFixed (key) {
+  if (key === 'jam') return openJam()
   sfx.watch()
   last = null
   $('#net-stats').textContent = '—'
@@ -1739,6 +1869,13 @@ function openFixed (key) {
 async function fixedTick () {
   if (!fixedKey) return
   const key = fixedKey
+  // canal da sala: nada de mídia — só o painel ao vivo (jamRender)
+  if (key === 'jam') {
+    const st = await fixed('jam').catch(() => null)
+    if (st) fixedStates.jam = st
+    if (fixedKey === 'jam') jamRender()
+    return
+  }
   const st = await fixed(key).catch(() => null)
   if (!st || key !== fixedKey) return
   fixedStates[key] = st
@@ -1881,6 +2018,8 @@ function closeFixed () {
   $('#fixed-loading').hidden = true
   setVideoControls(false)
   $('#music-view').classList.remove('on')
+  $('#jam-view').classList.remove('on')
+  $('#jam-panel').hidden = true
 }
 
 // ── barra de player (seek arrastável + prev/play/next) ──────────────────
@@ -1985,6 +2124,161 @@ function showNews () {
   toast(`Atualizado para a versão ${news.version}${what ? ': ' + what : '.'}`,
     { label: 'Ok', run: () => $('#toast').classList.remove('on') })
 }
+
+// ── sala de músicos ──────────────────────────────────────────────────────
+// Motor inteiro em jam.js (import dinâmico: não pesa o boot de quem não usa).
+// UI: entrada na sala, lista de peers com ganho/mudo e telemetria (RTT via
+// ping no DataChannel, buffer e underruns do jitter buffer, nível do sinal).
+let jam = null, jamTimer = null, jamJoined = false
+const jamRow = id => {
+  const row = document.createElement('div')
+  row.className = 'jam-peer'
+  row.dataset.peer = id
+  row.innerHTML = `<span class="jp-name"></span>
+    <span class="jp-stats"></span>
+    <span class="jp-meter"><i></i></span>
+    <button class="ghost icon jp-mute" title="Mutar" aria-label="Mutar">
+      <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M23 9l-6 6"/><path d="M17 9l6 6"/></svg>
+    </button>
+    <input type="range" min="0" max="1.5" step="0.05" value="1" title="Ganho">`
+  row.querySelector('.jp-name').textContent = id
+  const gain = row.querySelector('input')
+  gain.oninput = () => jam.setGain(id, +gain.value)
+  let muted = false
+  row.querySelector('.jp-mute').onclick = () => {
+    muted = !muted
+    jam.setGain(id, muted ? 0 : +gain.value)
+    row.querySelector('.jp-mute').style.color = muted ? 'hsl(0 72% 51%)' : ''
+  }
+  return row
+}
+
+function jamRender () {
+  if (!jam) return
+  const st = jam.state
+  // centro: com quem está conectado e como está a conexão
+  $('#ji-room').textContent = st.room
+  $('#ji-nick').textContent = st.nick
+  const con = st.peers.filter(p => p.connected)
+  $('#ji-grid').hidden = !con.length
+  if (con.length) {
+    const rtts = con.filter(p => p.rtt != null).map(p => p.rtt)
+    $('#ji-rtt').textContent = rtts.length
+      ? Math.round(rtts.reduce((a, b) => a + b, 0) / rtts.length) + 'ms' : '—'
+    $('#ji-buf').textContent =
+      Math.round(con.reduce((a, p) => a + (p.bufferMs ?? 0), 0) / con.length) + 'ms'
+    $('#ji-fail').textContent = con.reduce((a, p) => a + (p.underruns ?? 0), 0)
+  }
+  // painel da direita: quem está na sala
+  const status = $('#jam-status')
+  if (jamJoined) {
+    status.hidden = false
+    status.textContent = st.peers.length
+      ? `Sala: ${st.room} · ${st.peers.length} músico${st.peers.length > 1 ? 's' : ''}`
+      : `Sala: ${st.room} · só você`
+  } else status.hidden = true
+  $('#jam-empty').hidden = !(jamJoined && !st.peers.length)
+  const list = $('#jam-peers')
+  for (const p of st.peers) {
+    let row = list.querySelector(`[data-peer="${CSS.escape(p.id)}"]`)
+    if (!row) { row = jamRow(p.id); list.append(row) }
+    const s = row.querySelector('.jp-stats')
+    const bits = []
+    bits.push(p.connected ? 'conectado' : 'conectando…')
+    if (p.rtt != null) bits.push(`RTT ${p.rtt}ms`)
+    if (p.bufferMs != null) bits.push(`buffer ${p.bufferMs}ms`)
+    if (p.underruns) bits.push(`${p.underruns} falhas`)
+    s.textContent = bits.join(' · ')
+    row.querySelector('.jp-meter i').style.width = Math.min(100, (p.level ?? 0) * 160) + '%'
+  }
+  for (const row of [...list.children])
+    if (!st.peers.some(p => p.id === row.dataset.peer)) row.remove()
+}
+
+
+$('#jam-toggle').onclick = async () => {
+  const btn = $('#jam-toggle')
+  jamErrSet(null)
+  try {
+    if (jamJoined) {
+      await jam.leave()
+      jamNativeStop()
+      clearInterval(jamTimer)
+      jamJoined = false
+      $('#jam-peers').replaceChildren()
+      btn.textContent = 'Entrar'
+      $('#jam-entry').hidden = false
+      $('#jam-info').hidden = true
+      $('#jam-status').hidden = true
+      return
+    }
+    const room = $('#jam-room').value.trim()
+    if (!room) return jamErrSet('Escolha um nome para a sala.')
+    jam ??= await import('./jam.js?v=1').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+    // captura nativa quando disponível e o filtro de stream não estiver usando
+    // o helper; falhando, cai pro getUserMedia sem processamento de voz
+    let ms = null
+    if ($('#jam-native').checked && cfg.nativeMic && !filterMode) {
+      try { ms = await jamNativeStart() }
+      catch (e) { toast('Captura nativa indisponível, usando o mic do navegador.') }
+    }
+    await jam.join(room, nick, () => {}, ms ? { micStream: ms } : {})
+    jamJoined = true
+    localStorage.setItem('jam-room', room)
+    btn.textContent = 'Sair'
+    $('#jam-entry').hidden = true
+    $('#jam-info').hidden = false
+    jamRender()
+    jamTimer = setInterval(jamRender, 1000)
+    // dialog fica aberto: é o painel da sala (peers, ganho, latência ao vivo)
+    toast(`Você entrou em "${room}". Fones de ouvido!`)
+  } catch (e) { jamNativeStop(); jamErrSet(e.message) }
+}
+function jamErrSet (msg) {
+  const el = $('#jam-err')
+  el.hidden = !msg
+  if (msg) el.textContent = msg
+}
+
+// ── captura nativa do mic pra sala (Electron/Windows) ─────────────────────
+// O helper WASAPI exclusivo manda PCM float32 pelo IPC; aqui vira track direto
+// SEM o LEAD de 250ms do filtro de stream — o jitter buffer da sala é quem
+// paces o áudio, buffer extra aqui seria latência de graça. Mutuamente
+// exclusivo com o filtro por app da transmissão: um helper por vez.
+let jamPcmWriter = null, jamPcmMeta = null, jamPcmFrames = 0, jamNativeOn = false
+fockyApi.onAudioPcm?.(buf => {
+  if (!jamPcmWriter) return
+  const { rate, channels } = jamPcmMeta
+  const frames = buf.length / (channels * 4)
+  if (!frames) return
+  const data = new Float32Array(buf.buffer, buf.byteOffset, frames * channels)
+  jamPcmWriter.write(new AudioData({
+    format: 'f32', sampleRate: rate, numberOfFrames: frames,
+    numberOfChannels: channels, timestamp: Math.round(jamPcmFrames * 1e6 / rate),
+    data,
+  })).catch(() => {})
+  jamPcmFrames += frames
+})
+
+async function jamNativeStart () {
+  const r = await fockyApi.audioStart({ mode: 'mic' })
+  if (!r?.ok) throw new Error(r?.error || 'captura nativa indisponível')
+  const gen = new MediaStreamTrackGenerator({ kind: 'audio' })
+  jamPcmWriter = gen.writable.getWriter()
+  jamPcmMeta = r
+  jamPcmFrames = 0
+  jamNativeOn = true
+  return new MediaStream([gen])
+}
+
+function jamNativeStop () {
+  if (!jamNativeOn) return
+  jamNativeOn = false
+  try { jamPcmWriter?.close() } catch {}
+  jamPcmWriter = null
+  fockyApi.audioStop().catch(() => {})
+}
+
 
 fockyApi.onUpdate(({ state, version, notes }) => {
   if (state === 'available') toast(`Baixando a versão ${version}…`)
