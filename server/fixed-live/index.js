@@ -958,10 +958,13 @@ httpServer.on("upgrade", (req, sock, head) => {
   jamWss.handleUpgrade(req, sock, head, ws => jamWss.emit("connection", ws, req))
 })
 
-// lista de salas pra UI
-app.get("/api/fixed/jam/rooms", (req, res) => res.json(
-  [...jamRooms.entries()].map(([room, members]) => ({ room, members: [...members.keys()] }))
-))
+// lista de salas pra UI, no formato de canal fixo (status + conteúdo)
+app.get("/api/fixed/jam", (req, res) => {
+  const rooms = [...jamRooms.entries()].map(([room, members]) =>
+    ({ room, members: [...members.keys()] }))
+  res.json({ status: rooms.length ? "live" : "idle", rooms,
+             total: rooms.reduce((n, r) => n + r.members.length, 0) })
+})
 
 
 // docker stop/recreate: mata os hosts com DELETE, senão o broadcast-box fica

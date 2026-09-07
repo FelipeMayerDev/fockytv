@@ -285,6 +285,11 @@ dialog .desc { font-size:13px; color:hsl(var(--muted-foreground)); margin-bottom
 #jam-on { display:none }
 #jam-btn.on { border-color:hsl(142 71% 45%); color:hsl(142 71% 45%) }
 
+/* canal 🎸 Sala dentro do player (mesmo padrão do #music-view) */
+#jam-view { position:absolute; inset:0; z-index:4; display:none; place-items:center;
+            background:#000; overflow:auto; padding:24px }
+#jam-view.on { display:grid }
+
 #sources { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
            gap:10px; margin:16px 0; max-height:230px; overflow:auto }
 #sources figure {
@@ -506,6 +511,37 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
     <button class="ghost icon" id="fixed-panel-toggle" hidden title="Ocultar busca" aria-label="Ocultar busca">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16M11 9l-3 3 3 3"/></svg>
     </button>
+    <!-- canal 🎸 Sala: vista própria dentro do player, como #music-view -->
+    <div id="jam-view">
+      <div class="card" style="width:min(480px,92vw)">
+        <h3>Sala de músicos</h3>
+        <p class="desc">Áudio P2P direto entre os músicos, sem servidor no meio e sem
+           processamento de voz. Latência típica: 30–80&nbsp;ms em rede boa.</p>
+
+        <div class="jam-warn" id="jam-warn">
+          <strong>Use fones de ouvido.</strong> Sem cancelamento de eco — quem usar
+          caixa de som vai levar o áudio dos outros de volta.
+        </div>
+
+        <div class="field" id="jam-entry">
+          <label for="jam-room">Sala</label>
+          <input id="jam-room" maxlength="64" placeholder="ex.: ensaio-terca">
+        </div>
+
+        <div class="row" id="jam-native-row" hidden>
+          <label for="jam-native" style="font-size:13px">Captura nativa (WASAPI exclusivo, menos latência)</label>
+          <span class="switch"><input type="checkbox" id="jam-native" checked><span></span></span>
+        </div>
+
+        <div id="jam-peers"></div>
+        <p class="desc" id="jam-status" hidden></p>
+
+        <p class="err" id="jam-err" hidden></p>
+        <div class="actions" style="margin-top:8px">
+          <button id="jam-toggle">Entrar</button>
+        </div>
+      </div>
+    </div>
   </div>
   <div id="stage-wrap">
     <canvas id="stage"></canvas>
@@ -611,36 +647,6 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
 </dialog>
 
 <!-- ── painel dos canais fixos mora dentro do player (veja #fixed-panel) ── -->
-
-<dialog id="dlg-jam">
-  <h3>Sala de músicos</h3>
-  <p class="desc">Áudio P2P direto entre os músicos, sem servidor no meio e sem
-     processamento de voz. Latência típica: 30–80&nbsp;ms em rede boa.</p>
-
-  <div class="jam-warn" id="jam-warn">
-    <strong>Use fones de ouvido.</strong> Sem cancelamento de eco — quem usar
-    caixa de som vai levar o áudio dos outros de volta.
-  </div>
-
-  <div class="field" id="jam-entry">
-    <label for="jam-room">Sala</label>
-    <input id="jam-room" maxlength="64" placeholder="ex.: ensaio-terca">
-  </div>
-
-  <div class="row" id="jam-native-row" hidden>
-    <label for="jam-native" style="font-size:13px">Captura nativa (WASAPI exclusivo, menos latência)</label>
-    <span class="switch"><input type="checkbox" id="jam-native" checked><span></span></span>
-  </div>
-
-  <div id="jam-peers"></div>
-  <p class="desc" id="jam-status" hidden></p>
-
-  <p class="err" id="jam-err" hidden></p>
-  <div class="actions">
-    <button class="outline" id="jam-close">Fechar</button>
-    <button id="jam-toggle">Entrar</button>
-  </div>
-</dialog>
 
 <script>
 // No navegador, a própria página é o servidor e o seletor de tela é nativo.
@@ -1452,18 +1458,36 @@ const viewersOf = st => [...new Set((st.sessions ?? []).map(s => s.viewer).filte
 function fixedTile (key) {
   const st = fixedStates[key]
   const isTv = key === 'tv'
-  const cur = isTv ? st?.current : st?.queue?.[st?.index]
-  const playing = st && st.status !== 'idle'
 
   const el = document.createElement('div')
   el.className = 'vid'
   el.innerHTML =
     `<div class="thumb"><div class="skeleton"></div></div>
-     <div class="meta"><div class="avatar">${isTv ? '📺' : '🎵'}</div>
+     <div class="meta"><div class="avatar">${FIXED_LABEL[key].slice(0, 2)}</div>
        <div style="min-width:0">
          <div class="title"></div><div class="sub"></div>
        </div></div>`
   const thumb = el.querySelector('.thumb')
+
+  if (key === 'jam') {
+    // canal da sala: "ao vivo" quando tem gente tocando, sem mídia pra mostrar
+    const total = st?.total ?? 0
+    thumb.replaceChildren(
+      Object.assign(document.createElement('span'),
+        { className: 'muted',
+          textContent: total ? plural(total, 'músico', 'músicos') : 'sem sala ativa' }),
+      Object.assign(document.createElement('span'),
+        { className: 'badge', textContent: total ? 'AO VIVO' : 'EM ESPERA' }))
+    el.querySelector('.title').textContent = FIXED_LABEL[key]
+    el.querySelector('.sub').textContent = total
+      ? `${st.rooms.length} sala${st.rooms.length > 1 ? 's' : ''} · clique para entrar`
+      : 'entre e toque junto'
+    el.onclick = () => openFixed(key)
+    return el
+  }
+
+  const cur = isTv ? st?.current : st?.queue?.[st?.index]
+  const playing = st && st.status !== 'idle'
   thumb.replaceChildren(...(cur
     ? [Object.assign(new Image(), { src: imgSrc(cur.thumb) })]
     : [Object.assign(document.createElement('span'),
@@ -1474,6 +1498,28 @@ function fixedTile (key) {
   el.querySelector('.sub').textContent = cur?.title ?? 'clique para escolher algo'
   el.onclick = () => openFixed(key)
   return el
+}
+
+// canal 🎸 Sala: sem mídia nem busca — a vista é o painel da sala em si
+function openJam () {
+  sfx.watch()
+  last = null
+  release(viewer); viewer = null
+  fixedKey = 'jam'
+  showPlayer('jam')
+  $('#brand').textContent = FIXED_LABEL.jam
+  $('#fixed-panel').hidden = true
+  $('#fixed-panel-toggle').hidden = true
+  $('#fixed-bar').hidden = true
+  $('#fixed-loading').hidden = true
+  $('#music-view').classList.remove('on')
+  $('#jam-view').classList.add('on')
+  $('#jam-native-row').hidden = !cfg.nativeMic
+  if (cfg.nativeMic) $('#jam-native').disabled = !!filterMode
+  $('#jam-room').value ||= localStorage.getItem('jam-room') ?? ''
+  clearInterval(fixedTimer)
+  fixedTick()
+  fixedTimer = setInterval(fixedTick, 500)
 }
 
 async function refresh () {
@@ -1596,8 +1642,8 @@ $('#fs').onclick = () => (document.fullscreenElement
 // Os dois canais são tiles permanentes da grade; o que está passando (thumb
 // e título) vem do /api/fixed/*. A busca e os controles moram dentro do
 // player de cada canal — quem está assistindo escolhe e controla.
-const FIXED_KEYS = ['tv', 'music']
-const FIXED_LABEL = { tv: '📺 TV', music: '🎵 Música' }
+const FIXED_KEYS = ['tv', 'music', 'jam']
+const FIXED_LABEL = { tv: '📺 TV', music: '🎵 Música', jam: '🎸 Sala' }
 const fixedStates = { tv: null, music: null }
 let musicListeners = 0   // do /api/status (refresh), mostrado como "N ouvindo"
 let cookiePrompted = false
@@ -1760,6 +1806,7 @@ function tickLyrics () {
 }
 
 function openFixed (key) {
+  if (key === 'jam') return openJam()
   sfx.watch()
   last = null
   $('#net-stats').textContent = '—'
@@ -1797,6 +1844,13 @@ function openFixed (key) {
 async function fixedTick () {
   if (!fixedKey) return
   const key = fixedKey
+  // canal da sala: nada de mídia — só o painel ao vivo (jamRender)
+  if (key === 'jam') {
+    const st = await fixed('jam').catch(() => null)
+    if (st) fixedStates.jam = st
+    if (fixedKey === 'jam') jamRender()
+    return
+  }
   const st = await fixed(key).catch(() => null)
   if (!st || key !== fixedKey) return
   fixedStates[key] = st
@@ -1939,6 +1993,7 @@ function closeFixed () {
   $('#fixed-loading').hidden = true
   setVideoControls(false)
   $('#music-view').classList.remove('on')
+  $('#jam-view').classList.remove('on')
 }
 
 // ── barra de player (seek arrastável + prev/play/next) ──────────────────
@@ -2100,13 +2155,7 @@ function jamRender () {
     if (!st.peers.some(p => p.id === row.dataset.peer)) row.remove()
 }
 
-$('#jam-btn').onclick = () => {
-  $('#jam-err').hidden = true
-  $('#dlg-jam').showModal()
-  $('#jam-room').value ||= localStorage.getItem('jam-room') ?? ''
-  if (jam) jamRender()
-}
-$('#jam-close').onclick = () => $('#dlg-jam').close()
+$('#jam-btn').onclick = () => openFixed('jam')
 
 $('#jam-toggle').onclick = async () => {
   const btn = $('#jam-toggle')
@@ -2191,11 +2240,6 @@ function jamNativeStop () {
   fockyApi.audioStop().catch(() => {})
 }
 
-$('#jam-btn').addEventListener('click', () => {
-  const native = !!cfg.nativeMic
-  $('#jam-native-row').hidden = !native
-  if (native) $('#jam-native').disabled = !!filterMode
-})
 
 fockyApi.onUpdate(({ state, version, notes }) => {
   if (state === 'available') toast(`Baixando a versão ${version}…`)
