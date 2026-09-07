@@ -24,6 +24,8 @@ export async function initJam ({ serverUrl }) {
   let room = null
   let onState = () => {}
   let onChat = () => {}
+  let onLevels = () => {}
+  let selfLevel = 0
 
   const ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 })
   await ctx.audioWorklet.addModule(new URL('./jam-worklet.js', import.meta.url))
@@ -34,6 +36,7 @@ export async function initJam ({ serverUrl }) {
   mixNode.port.onmessage = e => {
     if (e.data.type !== 'meters') return
     for (const [id, m] of Object.entries(e.data.meters)) meters.set(id, m)
+    fireLevels()
   }
 
   // ── envio ───────────────────────────────────────────────────────────────
@@ -75,7 +78,10 @@ export async function initJam ({ serverUrl }) {
       opus: { frameDuration: FRAME_MS * 1000, usedtx: false },
     })
     tap = new AudioWorkletNode(ctx, 'jam-tap')
-    tap.port.onmessage = e => feedEncoder(e.data)
+    tap.port.onmessage = e => {
+      if (e.data.type === 'level') { selfLevel = e.data.v; fireLevels() }
+      else feedEncoder(e.data)
+    }
     ctx.createMediaStreamSource(stream).connect(tap)
     tap.connect(mixNode) // silencioso no mix (gain 0): só mantém o worklet vivo
   }
@@ -264,6 +270,12 @@ export async function initJam ({ serverUrl }) {
     }
   }
 
+  const fireLevels = () => {
+    const peers = {}
+    for (const [id, m] of meters) peers[id] = m
+    onLevels({ self: selfLevel, peers })
+  }
+
   const emit = () => onState(state())
 
   const state = () => ({
@@ -327,6 +339,7 @@ export async function initJam ({ serverUrl }) {
         ws.send(JSON.stringify({ type: 'chat', text: String(text).slice(0, 500) }))
     },
     onChat (cb) { onChat = cb },
+    onLevels (cb) { onLevels = cb },
     setGain (id, v) { mixNode.port.postMessage({ type: 'gain', id, v }) },
     setTargetMs (ms) { mixNode.port.postMessage({ type: 'target', ms }) },
 

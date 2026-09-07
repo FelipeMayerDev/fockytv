@@ -25,15 +25,26 @@ class JamTap extends AudioWorkletProcessor {
     const n = chs[0].length
     const nch = Math.min(chs.length, 2)
     if (!this.acc || this.acc.length / 2 !== 480 * 2) this.acc = new Float32Array(480 * 2)
+    let peak = 0
     for (let i = 0; i < n; i++) {
       for (let c = 0; c < 2; c++) {
-        this.acc[this.pos++] = nch === 2 ? chs[Math.min(c, nch - 1)][i] : chs[0][i]
+        const v = nch === 2 ? chs[Math.min(c, nch - 1)][i] : chs[0][i]
+        this.acc[this.pos++] = v
+        const a = v < 0 ? -v : v
+        if (a > peak) peak = a
       }
       if (this.pos === this.acc.length) {
         const out = new Float32Array(this.acc)   // cópia: acc volta a encher
         this.pos = 0
         this.port.postMessage(out, [out.buffer])
       }
+    }
+    // nível local ~5x/s: pro detector de voz da UI (pílula acesa = falando)
+    this.blockPeak = Math.max(this.blockPeak ?? 0, peak)
+    if (currentTime - (this.levelAt ?? 0) > 0.2) {
+      this.levelAt = currentTime
+      this.port.postMessage({ type: 'level', v: this.blockPeak })
+      this.blockPeak = 0
     }
     return true
   }
@@ -99,7 +110,7 @@ class JamMix extends AudioWorkletProcessor {
       p.peak = Math.max(p.peak * 0.85, peak)
     }
     // telemetria ~2x/s: buffer de cada peer, underruns e nível
-    if (currentTime - this.meterAt > 0.5) {
+    if (currentTime - this.meterAt > 0.125) {
       this.meterAt = currentTime
       const meters = {}
       for (const [id, p] of this.peers) meters[id] = {
