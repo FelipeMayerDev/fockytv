@@ -2173,7 +2173,8 @@ let jam = null, jamTimer = null, jamJoined = false
 let jamChatLog = []
 function jamChatRender () {
   const box = $('#jam-msgs')
-  box.replaceChildren(...jamChatLog.map(m => {
+  box.querySelectorAll(':scope > .jam-msg').forEach(row => row.remove())
+  box.prepend(...jamChatLog.map(m => {
     const row = document.createElement('div')
     row.className = 'jam-msg' + (m.from === nick ? ' me' : '')
     row.append(Object.assign(document.createElement('b'), { textContent: m.from }),
@@ -2220,6 +2221,29 @@ function jamRender () {
 // /yt recomeça.
 let jamYt = null, ytTicker = null
 
+function jamYtSyncPlayback () {
+  const y = jamYt
+  if (!y?.player) return
+  clearTimeout(y.playTimer)
+  if (!y.playing) return y.player.pauseVideo()
+  const play = () => {
+    if (jamYt !== y || !y.playing) return
+    y.player.seekTo(y.pos + Math.max(0, Date.now() - y.baseAt) / 1000)
+    y.player.playVideo().catch(() => { y.card.querySelector('.jy-start').hidden = false })
+  }
+  const wait = y.baseAt - Date.now()
+  if (wait > 0) y.playTimer = setTimeout(play, wait)
+  else play()
+}
+
+function jamYtClear () {
+  clearInterval(ytTicker)
+  clearTimeout(jamYt?.playTimer)
+  jamYt?.audio?.pause()
+  jamYt?.card?.remove()
+  jamYt = window.__jamYt = null
+}
+
 function ytParse (text) {
   const m = (text ?? '').match(/(?:youtu\.be\/|v=|shorts\/|embed\/)([\w-]{11})/)
   return m ? m[1] : null
@@ -2228,9 +2252,7 @@ function ytParse (text) {
 const ytFmt = s => `${(s / 60) | 0}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
 function jamYtLoad (videoId, host) {
-  jamYt?.audio?.pause()
-  jamYt?.card?.remove()
-  clearInterval(ytTicker)
+  jamYtClear()
   const card = document.createElement('div')
   card.className = 'jam-yt'
   card.innerHTML = `<div class="jy-title">carregando…</div>
@@ -2248,6 +2270,7 @@ function jamYtLoad (videoId, host) {
   $('#jam-msgs').scrollTop = $('#jam-msgs').scrollHeight
   jamYt = { videoId, host, playing: false, pos: 0, baseAt: Date.now(), card,
             player: null, seekDrag: false, wasUnstarted: 0 }
+  const current = jamYt
   window.__jamYt = jamYt   // handle de debug/inspeção (mesmo objeto)
 
   const playBtn = card.querySelector('.jy-play')
@@ -2260,33 +2283,45 @@ function jamYtLoad (videoId, host) {
   fetch(cfg.serverUrl + '/api/fixed/jam/yt?id=' + videoId)
     .then(r => r.json().then(j => { if (!r.ok) throw new Error(j.error || `yt ${r.status}`); return j }))
     .then(meta => {
-      if (jamYt?.videoId !== videoId) return   // outra faixa já entrou no lugar
+      if (jamYt !== current) return   // outra faixa já entrou no lugar
       const audio = new Audio(cfg.serverUrl + '/api/fixed/jam/yt/stream?u=' + encodeURIComponent(meta.url))
       audio.preload = 'auto'
-      jamYt.audio = audio
+      current.audio = audio
       // adapter: mesmo contrato que o tick espera do player
-      jamYt.player = {
+      current.player = {
         getCurrentTime: () => audio.currentTime,
         getPlayerState: () => audio.paused ? 2 : 1,
         getDuration: () => meta.duration || audio.duration || 0,
         seekTo: t => { audio.currentTime = t },
         setPlaybackRate: r => { audio.playbackRate = r },
-        playVideo: () => audio.play().catch(() => {}),
+        playVideo: () => audio.play(),
         pauseVideo: () => audio.pause(),
       }
       card.querySelector('.jy-ctl').style.display = ''
       card.querySelector('.jy-title').textContent = meta.title || videoId
       seek.max = meta.duration || 100
-      audio.play().catch(() => { overlay.hidden = false })   // autoplay bloqueado
+      audio.addEventListener('canplay', () => {
+        if (jamYt !== current) return
+        if (current.host === nick && !current.playing) {
+          current.playing = true
+          current.pos = 0
+          current.baseAt = Date.now() + 1000
+          jam.sendYt({ action: 'state', videoId, playing: true, pos: 0, at: current.baseAt })
+        }
+        jamYtSyncPlayback()
+      }, { once: true })
+      audio.load()
     })
     .catch(e => { card.querySelector('.jy-title').textContent = 'erro ao carregar: ' + e.message })
 
   playBtn.onclick = () => {
     if (jamYt.host !== nick || !jamYt.player?.getPlayerState) return
-    if (jamYt.playing) { jamYt.player.pauseVideo(); jamYt.playing = false }
-    else { jamYt.player.playVideo(); jamYt.playing = true }
+    jamYt.pos = jamYt.player.getCurrentTime?.() ?? jamYt.pos
+    jamYt.baseAt = Date.now() + (jamYt.playing ? 0 : 500)
+    jamYt.playing = !jamYt.playing
+    jamYtSyncPlayback()
     jam.sendYt({ action: 'state', videoId, playing: jamYt.playing,
-                 pos: jamYt.player.getCurrentTime?.() ?? jamYt.pos })
+                 pos: jamYt.pos, at: jamYt.baseAt })
   }
   seek.addEventListener('input', () => jamYt.seekDrag = true)
   seek.addEventListener('change', () => {
@@ -2300,7 +2335,7 @@ function jamYtLoad (videoId, host) {
   overlay.onclick = () => {
     overlay.hidden = true
     jamYt.wasUnstarted = 0
-    jamYt.player?.playVideo()
+    jamYtSyncPlayback()
   }
 
   // tick de sincronização + UI (host mostra posição; seguidor segue e corrige)
@@ -2326,10 +2361,10 @@ function jamYtTick (card, seek, overlay) {
       if (jamYt.sinceBroadcast >= 2000) {
         jamYt.sinceBroadcast = 0
         jam.sendYt({ action: 'state', videoId: jamYt.videoId, playing: true,
-                     pos: p.getCurrentTime() })
+                     pos: p.getCurrentTime(), at: Date.now() })
       }
     }
-  } else if (jamYt.playing) {
+  } else if (jamYt.playing && Date.now() >= jamYt.baseAt) {
     // desbloqueio de autoplay: sem gesto o navegador não inicia — oferta
     if (jamYt.audio?.paused) {
       jamYt.wasUnstarted = (jamYt.wasUnstarted ?? 0) + 1
@@ -2362,7 +2397,8 @@ function jamYtEvent (m) {
   } else if (m.action === 'state') {
     jamYt.playing = m.playing
     jamYt.pos = m.pos
-    jamYt.baseAt = Date.now()
+    jamYt.baseAt = m.at ?? Date.now()
+    jamYtSyncPlayback()
   }
 }
 
@@ -2385,6 +2421,7 @@ async function jamToggleJoin () {
     if (jamJoined) {
       await jam.leave()
       jamNativeStop()
+      jamYtClear()
       clearInterval(jamTimer)
       jamJoined = false
       $('#jam-pills').replaceChildren()
@@ -2400,7 +2437,7 @@ async function jamToggleJoin () {
     }
     // sala única do canal: entrar nele É entrar na sala (sem nome pra digitar)
     const room = 'sala'
-    jam ??= await import('./jam.js?v=5').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+    jam ??= await import('./jam.js?v=6').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
       .then(j => {
         j.onChat(m => {
           if (m.type === 'yt') return jamYtEvent(m)
@@ -2416,7 +2453,7 @@ async function jamToggleJoin () {
       try { ms = await jamNativeStart() }
       catch (e) { toast('Captura nativa indisponível, usando o mic do navegador.') }
     }
-    await jam.join(room, nick, () => {},
+    await jam.join(room, nick, jamRender,
       ms ? { micStream: ms } : { deviceId: $('#jam-dev').value || undefined })
     jam.setMicGain(+localStorage.getItem('jam-micgain') || 1)
     jamJoined = true

@@ -232,15 +232,20 @@ export async function initJam ({ serverUrl }) {
   // peer-joined: só registra o destino — quem chega é quem oferece
   const expectPeer = nick => {
     if (!peers.has(nick)) peers.set(nick, new Peer(nick))
+    emit()
   }
 
   const onSignal = async msg => {
     if (msg.type === 'peers') { for (const p of msg.peers) await connectTo(p); return }
-    if (msg.type === 'peer-joined') return expectPeer(msg.nick)
+    if (msg.type === 'peer-joined') {
+      expectPeer(msg.nick)
+      return onChat({ type: 'chat', from: 'sistema', text: `${msg.nick} entrou na sala` })
+    }
     if (msg.type === 'peer-left') {
       const p = peers.get(msg.nick)
       if (p) { p.close(); peers.delete(msg.nick) }
-      return emit()
+      emit()
+      return onChat({ type: 'chat', from: 'sistema', text: `${msg.nick} saiu da sala` })
     }
     if (msg.type === 'chat' || msg.type === 'yt') return onChat(msg)
     if (msg.type === 'evicted') {
