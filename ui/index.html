@@ -633,6 +633,7 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
   </div>
 
   <div id="jam-peers"></div>
+  <p class="desc" id="jam-status" hidden></p>
 
   <p class="err" id="jam-err" hidden></p>
   <div class="actions">
@@ -2072,7 +2073,16 @@ const jamRow = id => {
 }
 
 function jamRender () {
-  const st = jam?.state ?? { peers: [] }
+  if (!jam) return
+  const st = jam.state
+  // cabeçalho do painel: qual sala e quantos conectados
+  const status = $('#jam-status')
+  if (jamJoined) {
+    status.hidden = false
+    status.textContent = st.peers.length
+      ? `Sala: ${st.room} · ${st.peers.length} músico${st.peers.length > 1 ? 's' : ''} conectado${st.peers.length > 1 ? 's' : ''}`
+      : `Sala: ${st.room} · só você — compartilhe o nome da sala`
+  } else status.hidden = true
   const list = $('#jam-peers')
   for (const p of st.peers) {
     let row = list.querySelector(`[data-peer="${CSS.escape(p.id)}"]`)
@@ -2110,6 +2120,7 @@ $('#jam-toggle').onclick = async () => {
       $('#jam-peers').replaceChildren()
       btn.textContent = 'Entrar'
       $('#jam-entry').hidden = false
+      $('#jam-status').hidden = true
       $('#jam-btn').classList.remove('on')
       return
     }
@@ -2131,7 +2142,7 @@ $('#jam-toggle').onclick = async () => {
     $('#jam-btn').classList.add('on')
     jamRender()
     jamTimer = setInterval(jamRender, 1000)
-    $('#dlg-jam').close()
+    // dialog fica aberto: é o painel da sala (peers, ganho, latência ao vivo)
     toast(`Você entrou em "${room}". Fones de ouvido!`)
   } catch (e) { jamNativeStop(); jamErrSet(e.message) }
 }

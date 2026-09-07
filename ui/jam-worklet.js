@@ -53,6 +53,9 @@ class JamMix extends AudioWorkletProcessor {
         this.peers.set(m.id, {
           ring: [new Float32Array(cap), new Float32Array(cap)],
           r: 0, w: 0, cap, gain: 1, underruns: 0, peak: 0,
+          // carência na entrada: underrun antes do primeiro pacote chegar é
+          // o buffer enchendo, não falha de rede — não conta
+          graceUntil: currentTime + 0.6,
         })
       } else if (m.type === 'remove') this.peers.delete(m.id)
       else if (m.type === 'gain') { const p = this.peers.get(m.id); if (p) p.gain = m.v }
@@ -92,7 +95,7 @@ class JamMix extends AudioWorkletProcessor {
         }
         p.r++
       }
-      if (starved) p.underruns++
+      if (starved && currentTime > p.graceUntil) p.underruns++
       p.peak = Math.max(p.peak * 0.85, peak)
     }
     // telemetria ~2x/s: buffer de cada peer, underruns e nível

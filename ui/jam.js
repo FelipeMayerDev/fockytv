@@ -220,6 +220,19 @@ export async function initJam ({ serverUrl }) {
   const onSignal = async msg => {
     if (msg.type === 'peers') { for (const p of msg.peers) await connectTo(p); return }
     if (msg.type === 'peer-joined') return expectPeer(msg.nick)
+    if (msg.type === 'peer-left') {
+      const p = peers.get(msg.nick)
+      if (p) { p.close(); peers.delete(msg.nick) }
+      return emit()
+    }
+    if (msg.type === 'evicted') {
+      // outro cliente assumiu o nick: desconecta em silêncio
+      room = null
+      for (const p of peers.values()) p.close()
+      peers.clear()
+      stopSend()
+      return emit()
+    }
     const peer = peers.get(msg.from)
     if (!peer) return
     if (msg.type === 'offer') {
