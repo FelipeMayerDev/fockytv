@@ -555,6 +555,14 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
     <label class="switch"><input type="checkbox" id="audio"><span></span></label>
   </div>
 
+  <div class="row" id="faudio-row" hidden>
+    <div>
+      <label style="color:hsl(var(--foreground))" id="faudio-label">Som do aplicativo</label>
+      <p class="desc" style="margin:2px 0 0" id="faudio-desc"></p>
+    </div>
+    <label class="switch"><input type="checkbox" id="faudio"><span></span></label>
+  </div>
+
   <div class="row" id="cursor-row">
     <div>
       <label style="color:hsl(var(--foreground))">Mostrar cursor<span id="cursor-note" hidden
@@ -591,6 +599,7 @@ const fockyApi = window.focky ?? {
 const $ = s => document.querySelector(s)
 let cfg, nick, pc = null, sender = null, audioSender = null, stream = null
 let poll = null, swapping = false, camOnly = false
+let picked = null, pickedIsWindow = false, filterMode = null   // áudio por app
 let cam = null       // MediaStream da câmera, quando ela entra junto com a tela
 let overlay = null   // composição tela+câmera: { canvas, sv, cv, out, box, timer, gain }
 const thumbs = new Map()   // streamKey -> dataURL, pra não regerar a cada refresh
@@ -793,9 +802,78 @@ async function watchdog (key) {
   toast(`${key} parou de compartilhar.`)
 }
 
+// ── áudio por aplicativo: PCM do main vira MediaStreamTrack ───────────────
+// O helper WASAPI manda float32 interleaved pelo IPC; o MediaStreamTrackGenerator
+// (com AudioData) entrega isso como track comum — o WHIP nem fica sabendo da
+// diferença. Um único listener roteia pro writer da sessão corrente.
+let pcmSink = null, audioTimer = null
+fockyApi.onAudioPcm?.(buf => pcmSink?.(buf))
+
+// O PCM chega por IPC em rajadas: sem buffer, cada atraso vira um buraco no
+// som (picotado). Acumula um LEAD e entrega no ritmo do relógio; em underrun
+// congela o relógio em vez de pular áudio.
+async function startFilteredAudio (opts) {
+  const r = await fockyApi.audioStart(opts)
+  if (!r?.ok) throw new Error(r?.error || 'filtro de áudio indisponível')
+  filterMode = opts.mode
+  const gen = new MediaStreamTrackGenerator({ kind: 'audio' })
+  const writer = gen.writable.getWriter()
+  const queue = []
+  let received = 0, written = 0, startedAt = 0
+  const LEAD = 0.25   // s de margem antes de começar a tocar
+
+  pcmSink = buf => {
+    const frames = buf.length / (r.channels * 4)
+    if (!frames) return
+    queue.push(buf)
+    received += frames
+    // consumidor mais lento que o realtime (não deveria): corta o mais velho
+    if (received - written > r.rate * 3) {
+      let drop = received - written - r.rate * 2
+      while (drop > 0 && queue.length) {
+        const f = queue[0].length / (r.channels * 4)
+        if (f > drop) break
+        drop -= f; queue.shift(); written += f
+      }
+    }
+  }
+
+  audioTimer = setInterval(() => {
+    if (!startedAt) {
+      if (received / r.rate < LEAD) return
+      startedAt = Date.now()
+    }
+    const target = (Date.now() - startedAt) / 1000 * r.rate
+    while (queue.length && written < target) {
+      const buf = queue.shift()
+      const frames = buf.length / (r.channels * 4)
+      writer.write(new AudioData({
+        format: 'f32', sampleRate: r.rate, numberOfFrames: frames,
+        numberOfChannels: r.channels,
+        timestamp: Math.round(written / r.rate * 1e6), data: buf,
+      })).catch(() => {})
+      written += frames
+    }
+    // underrun: empurra o relógio pra frente até o buffer se refazer
+    if (!queue.length && startedAt && written < target)
+      startedAt += (target - written) / r.rate * 1000
+  }, 50)
+
+  gen.addEventListener('ended', () => stopFilteredAudio())
+  return gen
+}
+
+function stopFilteredAudio () {
+  pcmSink = null
+  clearInterval(audioTimer); audioTimer = null
+  filterMode = null
+  fockyApi.audioStop?.()
+}
+
 function stop () {
   if (pc) sfx.end()
   dropCam()
+  stopFilteredAudio()
   release(pc); pc = null; sender = null; audioSender = null; camOnly = false
   stream?.getTracks().forEach(t => t.stop()); stream = null
   setLive(false)
@@ -991,7 +1069,6 @@ $('#no-intro').onchange = e =>
 $('#cfg-close').onclick = () => $('#dlg-cfg').close()
 
 // ── compartilhar ─────────────────────────────────────────────────────────
-let picked = null
 
 async function openShareDialog (isSwap, cam) {
   // O iframe da Activity não recebe camera/microphone/display-capture do
@@ -1026,6 +1103,7 @@ async function openShareDialog (isSwap, cam) {
   if (cam) {
     $('#sources').hidden = true
     $('#portal-note').hidden = true
+    $('#faudio-row').hidden = true
     $('#dlg-share').dataset.swap = ''
     $('#dlg-share').showModal()
     return
@@ -1047,6 +1125,7 @@ async function openShareDialog (isSwap, cam) {
     fig.querySelector('figcaption').textContent = src.name
     fig.onclick = () => {
       picked = src.id
+      updateShareAudio(src.id)
       $('#sources').querySelectorAll('figure').forEach(f => f.classList.remove('sel'))
       fig.classList.add('sel')
     }
@@ -1054,8 +1133,46 @@ async function openShareDialog (isSwap, cam) {
   }))
 
   $('#dlg-share').dataset.swap = isSwap ? '1' : ''
+  updateShareAudio(picked)
   $('#dlg-share').showModal()
 }
+
+// ── opções de áudio por aplicativo ────────────────────────────────────────
+// Janela escolhida: o som pode vir só do processo da janela (helper WASAPI).
+// Tela toda: dá para excluir o Discord (o eco da própria voz some e o Discord
+// segue funcionando normal no PC de quem transmite). Sem o helper (navegador,
+// Linux), o áudio é sempre do sistema inteiro — a opção nem aparece.
+const hwndOf = id => id?.match(/^window:(0x[0-9a-f]+|\d+)/i)?.[1]
+// Electron pode entregar o HWND em decimal ou hex: 0x na frente decide
+const hwndNum = h => parseInt(h, h.startsWith('0x') || h.startsWith('0X') ? 16 : 10)
+
+function updateShareAudio (srcId) {
+  pickedIsWindow = !!hwndOf(srcId)
+  const winFilter = pickedIsWindow && cfg?.windowFilter   // modo "só o aplicativo"
+  if (winFilter) {
+    $('#faudio-label').textContent = 'Som só do aplicativo'
+    $('#faudio-desc').textContent = 'o áudio sai só do programa da janela escolhida'
+  } else {
+    $('#faudio-label').textContent = 'Remover áudio do Discord'
+    $('#faudio-desc').textContent = 'o Discord não entra na transmissão — e continua tocando normal no seu PC'
+  }
+  // Ligado por padrão nos dois modos. Era `= winFilter`, então compartilhar a
+  // TELA nascia com o filtro desligado — e a queixa de "o Discord vaza" era
+  // isso: o filtro nunca rodava, ninguém desmarcou nada. O padrão tem que ser
+  // o que a tela toda pede (fora o Discord); quem quiser o Discord no ar
+  // desmarca. No Linux desmarcado ainda tem som (PipeWire pega todos os apps);
+  // no Windows desmarcado cai no loopback de sistema do Chromium.
+  $('#faudio').checked = true
+  $('#faudio-row').hidden = !(cfg?.audioFilter && srcId && $('#audio').checked)
+  $('#audio-desc').textContent =
+    winFilter ? 'com o filtro abaixo, só o aplicativo escolhido'
+    : !pickedIsWindow ? 'com o filtro abaixo, o sistema inteiro menos o Discord'
+    : cfg?.audioFilter ? 'áudio filtrado do aplicativo escolhido'
+    // navegador: janela não tem som separado — mas o Chrome dá o som só da
+    // aba quando o compartilhamento é de aba
+    : 'sem filtro no navegador: compartilhe uma ABA e o som sai só dela'
+}
+$('#audio').onchange = () => updateShareAudio(picked)
 
 $('#share').onclick = () => openShareDialog(false).catch(e => toast(e.message))
 $('#share-cam').onclick = () => openShareDialog(false, true).catch(e => toast(e.message))
@@ -1064,6 +1181,11 @@ async function doSwap (id) {
   swapping = true
   try {
     await fockyApi.pick(id)
+    // trocou de janela com filtro ligado: o som tem que seguir a nova janela
+    if (filterMode === 'window') {
+      const hwnd = hwndOf(id)
+      if (hwnd) fockyApi.audioStart({ mode: 'window', hwnd: hwndNum(hwnd) }).catch(() => {})
+    }
     const fresh = await capture(+$('#fps').value, false, $('#cursor').checked)
     if (overlay) {
       // o canvas segue no sender; o que muda é o que ele desenha no fundo
@@ -1104,6 +1226,8 @@ $('#share-cancel').onclick = () => {
 $('#share-go').onclick = async () => {
   const isSwap = !!$('#dlg-share').dataset.swap
   const cam = !!$('#dlg-share').dataset.cam
+  let audioOpts = null   // fonte de áudio escolhida (null = som do sistema/sem filtro)
+  let audioFail = null   // filtro pedido mas caiu: vira o toast do fim
   try {
     if (isSwap) {
       await doSwap(picked)
@@ -1118,16 +1242,51 @@ $('#share-go').onclick = async () => {
         })
       } else {
         await fockyApi.pick(picked)
-        stream = await capture(fps, $('#audio').checked, $('#cursor').checked)
+        // filtro de áudio por app: o som vem do helper (WASAPI/PipeWire),
+        // não do getDisplayMedia
+        const hwnd = hwndOf(picked)
+        const useFilter = cfg.audioFilter && $('#audio').checked && !$('#faudio-row').hidden
+        if (useFilter && pickedIsWindow && cfg.windowFilter && $('#faudio').checked && hwnd)
+          audioOpts = { mode: 'window', hwnd: hwndNum(hwnd) }
+        else if (useFilter && $('#faudio').checked)
+          audioOpts = { mode: 'exclude', name: 'Discord' }
+        else if (useFilter && cfg.linux && !pickedIsWindow)
+          audioOpts = { mode: 'screen' }   // Linux: som de tudo via PipeWire
+        stream = await capture(fps, $('#audio').checked && !audioOpts, $('#cursor').checked)
+        if (audioOpts) {
+          try { stream.addTrack(await startFilteredAudio(audioOpts)) }
+          catch (e) {
+            // sem o filtro, volta pro áudio do sistema (recaptura: a permissão
+            // já foi dada, o handler entrega a mesma fonte).
+            // NÃO avisar aqui: o toast do fim do fluxo sobrescrevia este em
+            // milissegundos, e a falha do filtro virava um "Som: sistema
+            // inteiro" indistinguível de ter escolhido isso. Dias de Discord
+            // vazando com o aviso certo sendo apagado antes de ser lido.
+            audioFail = e.message
+            audioOpts = null
+            stream.getTracks().forEach(t => t.stop())
+            stream = await capture(fps, true, $('#cursor').checked)
+          }
+        }
       }
       pc = await publish(nick, stream, fps, $('#codec').value)
       camOnly = !!cam         // só a câmera no ar: não há tela pra sobrepor
       setLive(true)
       sfx.live()
+      // fonte de áudio visível pro host: filtro que falhou em silêncio é a
+      // pior falha possível (o Discord entra e ninguém sabe o porquê)
+      if (!cam) toast(audioFail
+        ? 'FILTRO DE ÁUDIO FALHOU (' + audioFail + ') — foi o som do sistema, Discord incluso'
+        : audioOpts
+        ? (audioOpts.mode === 'window' ? 'Som: só o aplicativo da janela'
+           : audioOpts.mode === 'exclude' ? 'Som: sistema sem o Discord'
+           : 'Som: todos os aplicativos')
+        : $('#audio').checked ? 'Som: sistema inteiro' : 'Sem áudio')
     }
     $('#dlg-share').close()
   } catch (e) {
     swapping = false
+    stopFilteredAudio()
     $('#share-err').textContent = e.message
     // no Wayland a fonte antiga já foi solta: sem nova, não há o que transmitir
     if (isSwap && cfg.wayland) { $('#dlg-share').close(); stop(); toast('Transmissão encerrada: ' + e.message) }

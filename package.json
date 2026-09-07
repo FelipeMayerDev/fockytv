@@ -1,6 +1,6 @@
 {
   "name": "fockytv",
-  "version": "0.5.2",
+  "version": "0.5.13",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
@@ -21,6 +21,9 @@
     ],
     "extraFiles": [
       "config.json"
+    ],
+    "asarUnpack": [
+      "electron/audio-helper/audio-helper.exe"
     ],
     "win": {
       "target": [
