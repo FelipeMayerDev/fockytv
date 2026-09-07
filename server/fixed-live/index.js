@@ -954,7 +954,8 @@ jamWss.on("connection", (ws, req) => {
 // upgrade do WebSocket na mesma porta do express
 const httpServer = app.listen(PORT, () => log(`fixed-live na porta ${PORT}, broadcast-box em ${BB_URL}`))
 httpServer.on("upgrade", (req, sock, head) => {
-  if (!req.url.startsWith("/ws/jam")) return sock.destroy()
+  // sob o prefixo do proxy do broadcast-box (ReverseProxy repassa o upgrade do WS)
+  if (!req.url.startsWith("/api/fixed/ws/jam")) return sock.destroy()
   jamWss.handleUpgrade(req, sock, head, ws => jamWss.emit("connection", ws, req))
 })
 

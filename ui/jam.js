@@ -267,7 +267,7 @@ export async function initJam ({ serverUrl }) {
   return {
     async join (_room, _nick, _onState, { micStream: extMic = null } = {}) {
       room = _room; me = _nick; onState = _onState || onState
-      ws = new WebSocket(`${wsUrl}/ws/jam?room=${encodeURIComponent(room)}&nick=${encodeURIComponent(me)}`)
+      ws = new WebSocket(`${wsUrl}/api/fixed/ws/jam?room=${encodeURIComponent(room)}&nick=${encodeURIComponent(me)}`)
       ws.onmessage = e => {
         try { onSignal(JSON.parse(e.data)) } catch {}
       }
