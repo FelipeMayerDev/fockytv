@@ -941,6 +941,12 @@ jamWss.on("connection", (ws, req) => {
       for (const ows of members.values()) if (ows !== ws) jamSend(ows, { type: "chat", from: nick, text })
       return
     }
+    // /yt do chat: estado do player compartilhado (load/state/seek)
+    if (msg.type === "yt") {
+      const relay = { type: "yt", from: nick, ...msg }
+      for (const ows of members.values()) if (ows !== ws) jamSend(ows, relay)
+      return
+    }
     // offer/answer/ice vão endereçados; relay cego pro destino
     const dst = typeof msg.to === "string" ? members.get(msg.to) : null
     if (dst) jamSend(dst, { ...msg, from: nick })

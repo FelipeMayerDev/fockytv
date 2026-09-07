@@ -296,6 +296,21 @@ dialog .desc { font-size:13px; color:hsl(var(--muted-foreground)); margin-bottom
 .jam-msg b { margin-right:6px; color:hsl(var(--muted-foreground)) }
 .jam-msg.me b { color:hsl(142 71% 45%) }
 #jam-msg-form { display:flex; gap:8px; padding:12px; border-top:1px solid hsl(var(--border)) }
+/* card do /yt: player compartilhado da sala */
+.jam-yt { border:1px solid hsl(var(--border)); border-radius:10px; overflow:hidden;
+  background:hsl(var(--card)); margin:4px 0 }
+.jam-yt .jy-title { font-size:12px; font-weight:600; padding:8px 10px 6px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.jam-yt .jy-frame { position:relative; aspect-ratio:16/9; background:#000 }
+.jam-yt .jy-frame iframe { width:100%; height:100%; display:block }
+.jam-yt .jy-start { position:absolute; inset:0; display:grid; place-items:center;
+  background:#000a; color:#fff; font:inherit; font-weight:600 }
+.jam-yt .jy-ctl { display:flex; align-items:center; gap:8px; padding:8px 10px; font-size:12px }
+.jam-yt .jy-ctl .jy-seek { flex:1; height:4px; padding:0; border:0; appearance:none;
+  background:hsl(var(--border)); border-radius:999px }
+.jam-yt .jy-ctl .jy-seek::-webkit-slider-thumb { appearance:none; width:12px; height:12px;
+  border-radius:50%; background:hsl(var(--foreground)) }
+.jam-yt .jy-ctl .muted { font-variant-numeric:tabular-nums; flex:none }
 #jam-main.joined { justify-content:flex-start }
 
 #sources { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
@@ -2166,6 +2181,168 @@ function jamRender () {
   }
 }
 
+// ── /yt: player compartilhado da sala ───────────────────────────────────
+// Quem manda o comando vira o host: toca no player dele e transmite estado
+// (tocando/pausado/posição) pela sinalização ~2x/s. Os seguidores tocam o
+// vídeo LOCALMENTE e corrigem drift (seek grande, playbackRate fino) — o
+// áudio do YouTube nunca passa pelo Opus da sala, cada um ouve full quality
+// e alinhado. Sem host (saiu), a faixa congela no último estado; um novo
+// /yt recomeça.
+let jamYt = null, ytApi = null, ytTicker = null
+
+function ytParse (text) {
+  const m = (text ?? '').match(/(?:youtu\.be\/|v=|shorts\/|embed\/)([\w-]{11})/)
+  return m ? m[1] : null
+}
+
+function jamYtApi () {
+  ytApi ??= new Promise(res => {
+    if (window.YT?.Player) return res(window.YT)
+    const prev = window.onYouTubeIframeAPIReady
+    window.onYouTubeIframeAPIReady = () => { prev?.(); res(window.YT) }
+    const sc = document.createElement('script')
+    sc.src = 'https://www.youtube.com/iframe_api'
+    document.head.append(sc)
+  })
+  return ytApi
+}
+
+const ytFmt = s => `${(s / 60) | 0}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+
+function jamYtLoad (videoId, host) {
+  jamYt?.card?.remove()
+  clearInterval(ytTicker)
+  const card = document.createElement('div')
+  card.className = 'jam-yt'
+  card.innerHTML = `<div class="jy-title">carregando…</div>
+    <div class="jy-frame"><div class="jy-mount"></div>
+      <button class="jy-start" hidden>▶ Clique para sincronizar</button></div>
+    <div class="jy-ctl">
+      <button class="ghost icon jy-play" title="Tocar/Pausar" aria-label="Tocar/Pausar">
+        <svg viewBox="0 0 24 24"><path d="M7 4.5l13 7.5-13 7.5v-15Z"/></svg>
+      </button>
+      <span class="jy-cur muted">0:00</span>
+      <input type="range" class="jy-seek" min="0" max="100" step="0.1" value="0">
+      <span class="jy-dur muted">0:00</span>
+    </div>`
+  $('#jam-msgs').append(card)
+  $('#jam-msgs').scrollTop = $('#jam-msgs').scrollHeight
+  jamYt = { videoId, host, playing: false, pos: 0, baseAt: Date.now(), card,
+            player: null, seekDrag: false, wasUnstarted: 0 }
+  window.__jamYt = jamYt   // handle de debug/inspeção (mesmo objeto)
+
+  const playBtn = card.querySelector('.jy-play')
+  const seek = card.querySelector('.jy-seek')
+  const overlay = card.querySelector('.jy-start')
+  card.querySelector('.jy-ctl').style.display = 'none'   // aparece quando o player sobe
+
+  jamYtApi().then(YT => {
+    jamYt.player = new YT.Player(card.querySelector('.jy-mount'), {
+      videoId,
+      playerVars: { autoplay: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, playsinline: 1 },
+      events: {
+        onReady: () => {
+          card.querySelector('.jy-ctl').style.display = ''
+          card.querySelector('.jy-title').textContent = jamYt.player.getVideoData().title || videoId
+          seek.max = jamYt.player.getDuration() || 100
+        },
+        onStateChange: e => {
+          if (jamYt.host !== nick) return
+          jamYt.playing = e.data === 1
+          if (e.data === 1 || e.data === 2)
+            jam.sendYt({ action: 'state', videoId, playing: jamYt.playing,
+                         pos: jamYt.player.getCurrentTime() })
+        },
+      },
+    })
+  }).catch(e => { window.__ytErr = e.message })
+
+  playBtn.onclick = () => {
+    if (jamYt.host !== nick || !jamYt.player?.getPlayerState) return
+    if (jamYt.playing) { jamYt.player.pauseVideo(); jamYt.playing = false }
+    else { jamYt.player.playVideo(); jamYt.playing = true }
+    jam.sendYt({ action: 'state', videoId, playing: jamYt.playing,
+                 pos: jamYt.player.getCurrentTime?.() ?? jamYt.pos })
+  }
+  seek.addEventListener('input', () => jamYt.seekDrag = true)
+  seek.addEventListener('change', () => {
+    jamYt.seekDrag = false
+    if (jamYt.host !== nick || !jamYt.player?.seekTo) return
+    jamYt.player.seekTo(+seek.value, true)
+    jamYt.pos = +seek.value
+    jamYt.baseAt = Date.now()
+    jam.sendYt({ action: 'seek', videoId, pos: +seek.value, playing: jamYt.playing })
+  })
+  overlay.onclick = () => {
+    overlay.hidden = true
+    jamYt.wasUnstarted = 0
+    jamYt.player?.playVideo()
+  }
+
+  // tick de sincronização + UI (host mostra posição; seguidor segue e corrige)
+  clearInterval(ytTicker)
+  ytTicker = setInterval(() => {
+    try { jamYtTick(card, seek, overlay) } catch (e) { window.__ytErr = e.message }
+  }, 300)
+}
+
+// um passo do sincronizador. window.__jamYt aponta pro mesmo objeto do jamYt
+function jamYtTick (card, seek, overlay) {
+  window.__yticks = (window.__yticks || 0) + 1
+  const jamYt = window.__jamYt
+  if (!jamYt) return
+  const p = jamYt.player
+  if (!p?.getCurrentTime) return
+  const isHost = jamYt.host === nick
+  if (isHost) {
+    if (!jamYt.seekDrag) seek.value = p.getCurrentTime()
+    // estado periódico: seguidores corrigem drift e atrasados entram alinhados
+    if (jamYt.playing) {
+      jamYt.sinceBroadcast = (jamYt.sinceBroadcast ?? 0) + 300
+      if (jamYt.sinceBroadcast >= 2000) {
+        jamYt.sinceBroadcast = 0
+        jam.sendYt({ action: 'state', videoId: jamYt.videoId, playing: true,
+                     pos: p.getCurrentTime() })
+      }
+    }
+  } else if (jamYt.playing) {
+    // desbloqueio de autoplay: sem gesto o navegador não inicia — oferta
+    const st = p.getPlayerState()
+    if (st === 5 || st === -1) {
+      jamYt.wasUnstarted = (jamYt.wasUnstarted ?? 0) + 1
+      if (jamYt.wasUnstarted > 5) overlay.hidden = false
+    }
+    const target = jamYt.pos + (Date.now() - jamYt.baseAt) / 1000
+    const cur = p.getCurrentTime()
+    const diff = cur - target
+    if (Math.abs(diff) > 0.4) { p.seekTo(target, true); p.setPlaybackRate(1) }
+    else if (Math.abs(diff) > 0.08) p.setPlaybackRate(diff > 0 ? 0.96 : 1.04)
+    else p.setPlaybackRate(1)
+    if (!jamYt.seekDrag) seek.value = cur
+  }
+  if (!jamYt.seekDrag) {
+    card.querySelector('.jy-cur').textContent = ytFmt(p.getCurrentTime() || 0)
+    card.querySelector('.jy-dur').textContent = ytFmt(p.getDuration?.() || 0)
+  }
+}
+
+// eventos de /yt recebidos do relay
+function jamYtEvent (m) {
+  if (m.action === 'load' || !jamYt || jamYt.videoId !== m.videoId)
+    return jamYtLoad(m.videoId, m.from)
+  if (m.from !== jamYt.host) return
+  if (m.action === 'seek') {
+    jamYt.pos = m.pos
+    jamYt.baseAt = Date.now()
+    jamYt.playing = m.playing
+    jamYt.player?.seekTo?.(m.pos, true)
+  } else if (m.action === 'state') {
+    jamYt.playing = m.playing
+    jamYt.pos = m.pos
+    jamYt.baseAt = Date.now()
+  }
+}
+
 // voice detection: pílula acende com o pico de nível do worklet (~8x/s)
 const TALK_THRESHOLD = 0.03
 function jamLevels ({ self, peers }) {
@@ -2201,7 +2378,10 @@ async function jamToggleJoin () {
     const room = 'sala'
     jam ??= await import('./jam.js?v=2').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
       .then(j => {
-        j.onChat(m => { jamChatLog.push(m); jamChatRender() })
+        j.onChat(m => {
+          if (m.type === 'yt') return jamYtEvent(m)
+          jamChatLog.push(m); jamChatRender()
+        })
         j.onLevels(jamLevels)
         return j
       })
@@ -2266,6 +2446,13 @@ $('#jam-msg-form').addEventListener('submit', e => {
   const input = $('#jam-msg')
   const text = input.value.trim()
   if (!text || !jamJoined) return
+  if (text.startsWith('/yt ')) {
+    const videoId = ytParse(text.slice(4))
+    if (!videoId) return jamChatLog.push({ from: 'sistema', text: 'link do YouTube não reconhecido' })
+    input.value = ''
+    jam.sendYt({ action: 'load', videoId })
+    return jamYtLoad(videoId, nick)
+  }
   jam.sendChat(text)
   jamChatLog.push({ from: nick, text })
   input.value = ''

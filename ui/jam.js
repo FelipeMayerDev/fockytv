@@ -242,7 +242,7 @@ export async function initJam ({ serverUrl }) {
       if (p) { p.close(); peers.delete(msg.nick) }
       return emit()
     }
-    if (msg.type === 'chat') return onChat(msg)
+    if (msg.type === 'chat' || msg.type === 'yt') return onChat(msg)
     if (msg.type === 'evicted') {
       // outro cliente assumiu o nick: desconecta em silêncio
       room = null
@@ -338,6 +338,10 @@ export async function initJam ({ serverUrl }) {
     sendChat (text) {
       if (ws?.readyState === WebSocket.OPEN)
         ws.send(JSON.stringify({ type: 'chat', text: String(text).slice(0, 500) }))
+    },
+    sendYt (payload) {
+      if (ws?.readyState === WebSocket.OPEN)
+        ws.send(JSON.stringify({ type: 'yt', ...payload }))
     },
     onChat (cb) { onChat = cb },
     onLevels (cb) { onLevels = cb },
