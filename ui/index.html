@@ -2214,7 +2214,7 @@ $('#jam-toggle').onclick = async () => {
     }
     const room = $('#jam-room').value.trim()
     if (!room) return jamErrSet('Escolha um nome para a sala.')
-    jam ??= await import('./jam.js?v=1').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+    jam ??= await import('./jam.js?v=2').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
     // captura nativa quando disponível e o filtro de stream não estiver usando
     // o helper; falhando, cai pro getUserMedia sem processamento de voz
     let ms = null

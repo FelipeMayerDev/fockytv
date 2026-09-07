@@ -62,7 +62,10 @@ export async function initJam ({ serverUrl }) {
         pkt.set(payload, 4)
         outSeq++
         for (const peer of peers.values())
-          if (peer.dc?.readyState === 'open') peer.dc.send(pkt)
+          // rede congestionada: descarta na fonte — atraso crescente soa pior
+          // que perda, e o SCTP com maxRetransmits:0 não guarda fila infinita
+          if (peer.dc?.readyState === 'open' && peer.dc.bufferedAmount < 65536)
+            peer.dc.send(pkt)
       },
       error: e => console.warn('[jam] encoder:', e.message),
     })
@@ -106,25 +109,32 @@ export async function initJam ({ serverUrl }) {
       this.rx++
       const seq = new DataView(pkt.buffer, pkt.byteOffset).getUint32(0)
       const payload = pkt.subarray(pkt.byteOffset + 4)
-      if (this.expected === null) this.expected = seq
+      if (this.expected === null) { this.expected = seq; this.waitingSince = Date.now() }
       if (seq < this.expected) return   // atrasado de vez: fora do buffer
       this.queue.push({ seq, payload })
       this.queue.sort((a, b) => a.seq - b.seq)
       this.pump()
     }
 
-    // alimenta o decoder em sequência; buraco de seq = pula (silêncio curto)
+    // alimenta o decoder em sequência. O canal é unordered: fora de ordem é o
+    // normal, então um buraco espera 30ms pelo pacote perdido antes de saltar
+    // — sem isso cada reordenação virava perda de frame (áudio picotado).
     async pump () {
       if (this.decoding) return
       this.decoding = true
       while (this.queue.length) {
-        const { seq, payload } = this.queue[0]
-        if (seq !== this.expected) { this.expected++; continue } // gap → avança mudo
+        const head = this.queue[0]
+        if (head.seq < this.expected) { this.queue.shift(); continue } // duplicado/velho
+        if (head.seq !== this.expected) {
+          if (Date.now() - this.waitingSince < 30) break   // ainda pode chegar
+          this.expected = head.seq   // perdido de verdade: salta (silêncio curto)
+        }
         this.queue.shift()
         this.expected++
+        this.waitingSince = Date.now()
         try {
           this.decoder.decode(new EncodedAudioChunk({
-            type: 'key', timestamp: this.nextTs, data: payload,
+            type: 'key', timestamp: this.nextTs, data: head.payload,
           }))
           this.nextTs += FRAME_MS * 1000
           this.decoded++
