@@ -532,9 +532,6 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
 
           <div id="jam-entry">
             <div class="field">
-              <label for="jam-room">Sala</label>
-              <input id="jam-room" maxlength="64" placeholder="ex.: ensaio-terca">
-            </div>
             <div class="row" id="jam-native-row" hidden>
               <label for="jam-native" style="font-size:13px">Captura nativa (WASAPI exclusivo, menos latência)</label>
               <span class="switch"><input type="checkbox" id="jam-native" checked><span></span></span>
@@ -543,7 +540,6 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
           </div>
 
           <div id="jam-info" hidden>
-            <div class="ji"><span class="muted">Sala</span><b id="ji-room"></b></div>
             <div class="ji"><span class="muted">Você</span><b id="ji-nick"></b></div>
             <div id="ji-grid" hidden>
               <div class="ji-stat"><b id="ji-rtt">—</b><span>RTT médio</span></div>
@@ -1541,7 +1537,6 @@ function openJam () {
   $('#jam-info').hidden = !jamJoined
   $('#jam-native-row').hidden = !cfg.nativeMic
   if (cfg.nativeMic) $('#jam-native').disabled = !!filterMode
-  $('#jam-room').value ||= localStorage.getItem('jam-room') ?? ''
   clearInterval(fixedTimer)
   fixedTick()
   fixedTimer = setInterval(fixedTick, 500)
@@ -2157,7 +2152,6 @@ function jamRender () {
   if (!jam) return
   const st = jam.state
   // centro: com quem está conectado e como está a conexão
-  $('#ji-room').textContent = st.room
   $('#ji-nick').textContent = st.nick
   const con = st.peers.filter(p => p.connected)
   $('#ji-grid').hidden = !con.length
@@ -2174,8 +2168,8 @@ function jamRender () {
   if (jamJoined) {
     status.hidden = false
     status.textContent = st.peers.length
-      ? `Sala: ${st.room} · ${st.peers.length} músico${st.peers.length > 1 ? 's' : ''}`
-      : `Sala: ${st.room} · só você`
+      ? `${st.peers.length} músico${st.peers.length > 1 ? 's' : ''} conectado${st.peers.length > 1 ? 's' : ''}`
+      : 'só você'
   } else status.hidden = true
   $('#jam-empty').hidden = !(jamJoined && !st.peers.length)
   const list = $('#jam-peers')
@@ -2212,8 +2206,8 @@ $('#jam-toggle').onclick = async () => {
       $('#jam-status').hidden = true
       return
     }
-    const room = $('#jam-room').value.trim()
-    if (!room) return jamErrSet('Escolha um nome para a sala.')
+    // sala única do canal: entrar nele É entrar na sala (sem nome pra digitar)
+    const room = 'sala'
     jam ??= await import('./jam.js?v=2').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
     // captura nativa quando disponível e o filtro de stream não estiver usando
     // o helper; falhando, cai pro getUserMedia sem processamento de voz
@@ -2224,14 +2218,13 @@ $('#jam-toggle').onclick = async () => {
     }
     await jam.join(room, nick, () => {}, ms ? { micStream: ms } : {})
     jamJoined = true
-    localStorage.setItem('jam-room', room)
     btn.textContent = 'Sair'
     $('#jam-entry').hidden = true
     $('#jam-info').hidden = false
     jamRender()
     jamTimer = setInterval(jamRender, 1000)
     // dialog fica aberto: é o painel da sala (peers, ganho, latência ao vivo)
-    toast(`Você entrou em "${room}". Fones de ouvido!`)
+    toast('Você entrou na sala. Fones de ouvido!')
   } catch (e) { jamNativeStop(); jamErrSet(e.message) }
 }
 function jamErrSet (msg) {
