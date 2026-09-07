@@ -935,6 +935,12 @@ jamWss.on("connection", (ws, req) => {
     let msg
     try { msg = JSON.parse(data) } catch { return }
     if (msg.type === "ping") return jamSend(ws, { type: "pong", t: msg.t })
+    // chat da sala: broadcast pra todos (o remetente renderiza o dele local)
+    if (msg.type === "chat" && typeof msg.text === "string") {
+      const text = msg.text.slice(0, 500)
+      for (const ows of members.values()) if (ows !== ws) jamSend(ows, { type: "chat", from: nick, text })
+      return
+    }
     // offer/answer/ice vão endereçados; relay cego pro destino
     const dst = typeof msg.to === "string" ? members.get(msg.to) : null
     if (dst) jamSend(dst, { ...msg, from: nick })

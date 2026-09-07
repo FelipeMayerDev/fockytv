@@ -294,12 +294,13 @@ dialog .desc { font-size:13px; color:hsl(var(--muted-foreground)); margin-bottom
   background:hsl(var(--card)); border-left:1px solid hsl(var(--border));
   padding:16px; overflow:auto; z-index:4 }
 #jam-panel h3 { font-size:15px; font-weight:600; margin-bottom:2px }
-.ji { display:flex; justify-content:space-between; align-items:baseline; padding:6px 0 }
-.ji b { font-size:14px }
-#ji-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:14px }
-.ji-stat { background:hsl(var(--muted)); border-radius:8px; padding:10px 8px; text-align:center }
-.ji-stat b { display:block; font-size:22px; font-variant-numeric:tabular-nums }
-.ji-stat span { font-size:11px; color:hsl(var(--muted-foreground)) }
+#jam-chat { width:min(560px,100%); flex:1; min-height:0; display:flex; flex-direction:column; padding:0 }
+#jam-msgs { flex:1; overflow:auto; display:flex; flex-direction:column; gap:4px; padding:12px }
+.jam-msg { font-size:13px; line-height:1.45; word-wrap:break-word }
+.jam-msg b { margin-right:6px; color:hsl(var(--muted-foreground)) }
+.jam-msg.me b { color:hsl(142 71% 45%) }
+#jam-msg-form { display:flex; gap:8px; padding:12px; border-top:1px solid hsl(var(--border)) }
+#jam-main.joined { justify-content:flex-start }
 
 #sources { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
            gap:10px; margin:16px 0; max-height:230px; overflow:auto }
@@ -536,26 +537,25 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
               <span class="switch"><input type="checkbox" id="jam-native" checked><span></span></span>
             </div>
             <p class="err" id="jam-err" hidden></p>
-          </div>
-
-          <div id="jam-info" hidden>
-            <div class="ji"><span class="muted">Você</span><b id="ji-nick"></b></div>
-            <div id="ji-grid" hidden>
-              <div class="ji-stat"><b id="ji-rtt">—</b><span>RTT médio</span></div>
-              <div class="ji-stat"><b id="ji-buf">—</b><span>buffer</span></div>
-              <div class="ji-stat"><b id="ji-fail">—</b><span>falhas</span></div>
+            <div class="actions" style="margin-top:8px">
+              <button id="jam-toggle">Entrar</button>
             </div>
           </div>
+        </div>
 
-          <div class="actions" style="margin-top:8px">
-            <button id="jam-toggle">Entrar</button>
-          </div>
+        <div class="card" id="jam-chat" hidden>
+          <div id="jam-msgs"></div>
+          <form id="jam-msg-form">
+            <input id="jam-msg" maxlength="500" placeholder="mensagem pra sala…" autocomplete="off">
+            <button>Enviar</button>
+          </form>
         </div>
       </div>
     </div>
     <aside id="jam-panel" hidden>
       <h3>Quem está na sala</h3>
       <p class="desc" id="jam-status" hidden></p>
+      <button id="jam-leave" hidden style="width:100%;margin-bottom:10px">Sair da sala</button>
       <div id="jam-peers"></div>
       <p class="muted" id="jam-empty" hidden style="font-size:13px">só você — compartilhe o nome da sala</p>
     </aside>
@@ -1533,7 +1533,11 @@ function openJam () {
   $('#jam-view').classList.add('on')
   $('#jam-panel').hidden = false
   $('#jam-entry').hidden = jamJoined
-  $('#jam-info').hidden = !jamJoined
+  $('#jam-card').hidden = jamJoined
+  $('#jam-chat').hidden = !jamJoined
+  $('#jam-leave').hidden = !jamJoined
+  $('#jam-main').classList.toggle('joined', jamJoined)
+  if (jamJoined) jamChatRender()
   $('#jam-native-row').hidden = !cfg.nativeMic
   if (cfg.nativeMic) $('#jam-native').disabled = !!filterMode
   clearInterval(fixedTimer)
@@ -2147,21 +2151,24 @@ const jamRow = id => {
   return row
 }
 
+// chat da sala: mensagens vivem só na sessão (o relay do servidor não guarda
+// histórico); as próprias mensagens entram no log na hora do envio
+let jamChatLog = []
+function jamChatRender () {
+  const box = $('#jam-msgs')
+  box.replaceChildren(...jamChatLog.map(m => {
+    const row = document.createElement('div')
+    row.className = 'jam-msg' + (m.from === nick ? ' me' : '')
+    row.append(Object.assign(document.createElement('b'), { textContent: m.from }),
+               Object.assign(document.createElement('span'), { textContent: m.text }))
+    return row
+  }))
+  box.scrollTop = box.scrollHeight
+}
+
 function jamRender () {
   if (!jam) return
   const st = jam.state
-  // centro: com quem está conectado e como está a conexão
-  $('#ji-nick').textContent = st.nick
-  const con = st.peers.filter(p => p.connected)
-  $('#ji-grid').hidden = !con.length
-  if (con.length) {
-    const rtts = con.filter(p => p.rtt != null).map(p => p.rtt)
-    $('#ji-rtt').textContent = rtts.length
-      ? Math.round(rtts.reduce((a, b) => a + b, 0) / rtts.length) + 'ms' : '—'
-    $('#ji-buf').textContent =
-      Math.round(con.reduce((a, p) => a + (p.bufferMs ?? 0), 0) / con.length) + 'ms'
-    $('#ji-fail').textContent = con.reduce((a, p) => a + (p.underruns ?? 0), 0)
-  }
   // painel da direita: quem está na sala
   const status = $('#jam-status')
   if (jamJoined) {
@@ -2189,7 +2196,7 @@ function jamRender () {
 }
 
 
-$('#jam-toggle').onclick = async () => {
+async function jamToggleJoin () {
   const btn = $('#jam-toggle')
   jamErrSet(null)
   try {
@@ -2201,13 +2208,17 @@ $('#jam-toggle').onclick = async () => {
       $('#jam-peers').replaceChildren()
       btn.textContent = 'Entrar'
       $('#jam-entry').hidden = false
-      $('#jam-info').hidden = true
       $('#jam-status').hidden = true
+      $('#jam-card').hidden = false
+      $('#jam-chat').hidden = true
+      $('#jam-leave').hidden = true
+      $('#jam-main').classList.remove('joined')
       return
     }
     // sala única do canal: entrar nele É entrar na sala (sem nome pra digitar)
     const room = 'sala'
     jam ??= await import('./jam.js?v=2').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+      .then(j => { j.onChat(m => { jamChatLog.push(m); jamChatRender() }); return j })
     // captura nativa quando disponível e o filtro de stream não estiver usando
     // o helper; falhando, cai pro getUserMedia sem processamento de voz
     let ms = null
@@ -2219,13 +2230,32 @@ $('#jam-toggle').onclick = async () => {
     jamJoined = true
     btn.textContent = 'Sair'
     $('#jam-entry').hidden = true
-    $('#jam-info').hidden = false
+    $('#jam-card').hidden = true
+    $('#jam-chat').hidden = false
+    $('#jam-leave').hidden = false
+    $('#jam-main').classList.add('joined')
+    jamChatLog = []
+    jamChatRender()
+    $('#jam-msg').focus()
     jamRender()
     jamTimer = setInterval(jamRender, 1000)
     // dialog fica aberto: é o painel da sala (peers, ganho, latência ao vivo)
     toast('Você entrou na sala. Fones de ouvido!')
   } catch (e) { jamNativeStop(); jamErrSet(e.message) }
 }
+$('#jam-toggle').onclick = jamToggleJoin
+$('#jam-msg-form').addEventListener('submit', e => {
+  e.preventDefault()
+  const input = $('#jam-msg')
+  const text = input.value.trim()
+  if (!text || !jamJoined) return
+  jam.sendChat(text)
+  jamChatLog.push({ from: nick, text })
+  input.value = ''
+  jamChatRender()
+})
+$('#jam-leave').onclick = () => $('#jam-toggle').click()
+
 function jamErrSet (msg) {
   const el = $('#jam-err')
   el.hidden = !msg

@@ -23,6 +23,7 @@ export async function initJam ({ serverUrl }) {
   let me = null
   let room = null
   let onState = () => {}
+  let onChat = () => {}
 
   const ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 })
   await ctx.audioWorklet.addModule(new URL('./jam-worklet.js', import.meta.url))
@@ -235,6 +236,7 @@ export async function initJam ({ serverUrl }) {
       if (p) { p.close(); peers.delete(msg.nick) }
       return emit()
     }
+    if (msg.type === 'chat') return onChat(msg)
     if (msg.type === 'evicted') {
       // outro cliente assumiu o nick: desconecta em silêncio
       room = null
@@ -320,6 +322,11 @@ export async function initJam ({ serverUrl }) {
       ctx.createMediaStreamSource(stream).connect(tap)
     },
 
+    sendChat (text) {
+      if (ws?.readyState === WebSocket.OPEN)
+        ws.send(JSON.stringify({ type: 'chat', text: String(text).slice(0, 500) }))
+    },
+    onChat (cb) { onChat = cb },
     setGain (id, v) { mixNode.port.postMessage({ type: 'gain', id, v }) },
     setTargetMs (ms) { mixNode.port.postMessage({ type: 'target', ms }) },
 
