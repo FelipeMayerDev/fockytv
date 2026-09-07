@@ -17,6 +17,9 @@ class JamTap extends AudioWorkletProcessor {
     super()
     this.acc = null   // Float32Array interleaved acumulando 480 frames
     this.pos = 0
+    this.gain = 1     // ganho do músico: sem AGC do navegador, entrada de
+                      // instrumento (DI, interface) precisa de boost manual
+    this.port.onmessage = e => { if (e.data.type === 'gain') this.gain = e.data.v }
   }
 
   process (inputs) {
@@ -28,7 +31,7 @@ class JamTap extends AudioWorkletProcessor {
     let peak = 0
     for (let i = 0; i < n; i++) {
       for (let c = 0; c < 2; c++) {
-        const v = nch === 2 ? chs[Math.min(c, nch - 1)][i] : chs[0][i]
+        const v = (nch === 2 ? chs[Math.min(c, nch - 1)][i] : chs[0][i]) * this.gain
         this.acc[this.pos++] = v
         const a = v < 0 ? -v : v
         if (a > peak) peak = a

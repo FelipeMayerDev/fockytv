@@ -344,6 +344,7 @@ export async function initJam ({ serverUrl }) {
         ws.send(JSON.stringify({ type: 'yt', ...payload }))
     },
     onChat (cb) { onChat = cb },
+    setMicGain (v) { tap?.port.postMessage({ type: 'gain', v }) },
     onLevels (cb) { onLevels = cb },
     setGain (id, v) { mixNode.port.postMessage({ type: 'gain', id, v }) },
     setTargetMs (ms) { mixNode.port.postMessage({ type: 'target', ms }) },

@@ -278,6 +278,11 @@ dialog .desc { font-size:13px; color:hsl(var(--muted-foreground)); margin-bottom
   background:hsl(var(--muted-foreground)); transition:background .12s }
 .pill-jam.talking { border-color:hsl(142 71% 45%); box-shadow:0 0 8px hsl(142 71% 45% / .35) }
 .pill-jam.talking .pdot { background:hsl(142 71% 45%) }
+.pill-jam input[type=range] { display:none; width:64px; height:4px; padding:0; border:0;
+  appearance:none; background:hsl(var(--border)); border-radius:999px }
+.pill-jam input[type=range]::-webkit-slider-thumb { appearance:none; width:10px; height:10px;
+  border-radius:50%; background:hsl(var(--foreground)) }
+.pill-jam:hover input[type=range] { display:inline }
 /* canal 🎸 Sala: conexão no centro, quem está na sala no painel da direita
    (mesmo esquema do #music-view + #fixed-panel) */
 #jam-view { position:absolute; left:0; top:0; bottom:0; right:372px; z-index:3;
@@ -290,6 +295,15 @@ dialog .desc { font-size:13px; color:hsl(var(--muted-foreground)); margin-bottom
   background:hsl(var(--card)); border-left:1px solid hsl(var(--border));
   padding:16px; overflow:auto; z-index:4 }
 #jam-panel h3 { font-size:15px; font-weight:600; margin-bottom:2px }
+.jam-gain { display:flex; align-items:center; gap:8px }
+.jam-gain input[type=range] { flex:1; height:4px; padding:0; border:0;
+  appearance:none; background:hsl(var(--border)); border-radius:999px }
+.jam-gain input[type=range]::-webkit-slider-thumb { appearance:none; width:12px; height:12px;
+  border-radius:50%; background:hsl(var(--foreground)) }
+.jam-gain .jg-val { font-size:12px; width:34px; text-align:center; flex:none }
+.jg-meter { width:56px; height:4px; border-radius:999px; background:hsl(var(--border));
+  overflow:hidden; flex:none }
+.jg-meter i { display:block; height:100%; width:0; background:hsl(142 71% 45%); transition:width .12s }
 #jam-chat { width:min(560px,100%); flex:1; min-height:0; display:flex; flex-direction:column; padding:0 }
 #jam-msgs { flex:1; overflow:auto; display:flex; flex-direction:column; gap:4px; padding:12px }
 .jam-msg { font-size:13px; line-height:1.45; word-wrap:break-word }
@@ -568,7 +582,14 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
       </div>
     </div>
     <aside id="jam-panel" hidden>
-      <h3>Quem está na sala</h3>
+      <h3>Minha entrada</h3>
+      <p class="desc" style="margin-bottom:8px">Instrumento saindo baixo? Suba o ganho até o medidor reagir.</p>
+      <div class="jam-gain">
+        <input type="range" id="jam-micgain" min="0.5" max="8" step="0.1" value="1" title="Ganho da minha entrada">
+        <span class="jg-val muted">1.0×</span>
+        <span class="jg-meter"><i id="jam-selfmeter"></i></span>
+      </div>
+      <h3 style="margin-top:16px">Quem está na sala</h3>
       <button id="jam-leave" hidden style="width:100%;margin-bottom:10px">Sair da sala</button>
       <div id="jam-pills"></div>
     </aside>
@@ -1554,6 +1575,10 @@ function openJam () {
   $('#jam-native-row').hidden = !cfg.nativeMic
   if (cfg.nativeMic) $('#jam-native').disabled = !!filterMode
   $('#jam-dev').disabled = $('#jam-native').checked
+  const g = +localStorage.getItem('jam-micgain') || 1
+  $('#jam-micgain').value = g
+  $('#jam-panel .jg-val').textContent = g.toFixed(1) + '×'
+  jam?.setMicGain(g)
   jamListMics()
   clearInterval(fixedTimer)
   fixedTick()
@@ -2173,6 +2198,11 @@ function jamRender () {
         pill.dataset.peer = id
         pill.innerHTML = '<span class="pdot"></span>'
         pill.append(Object.assign(document.createElement('span'), { textContent: id }))
+        const vol = document.createElement('input')
+        vol.type = 'range'; vol.min = 0; vol.max = 2; vol.step = 0.05; vol.value = 1
+        vol.title = 'Volume dessa pessoa'
+        vol.oninput = () => jam.setGain(id, +vol.value)
+        pill.append(vol)
         list.append(pill)
       }
     }
@@ -2344,6 +2374,7 @@ function jamLevels ({ self, peers }) {
     const level = id === nick ? (self ?? 0) : (peers[id]?.level ?? 0)
     pill.classList.toggle('talking', level > TALK_THRESHOLD)
   }
+  $('#jam-selfmeter').style.width = Math.min(100, (self ?? 0) * 160) + '%'
 }
 
 
@@ -2387,6 +2418,7 @@ async function jamToggleJoin () {
     }
     await jam.join(room, nick, () => {},
       ms ? { micStream: ms } : { deviceId: $('#jam-dev').value || undefined })
+    jam.setMicGain(+localStorage.getItem('jam-micgain') || 1)
     jamJoined = true
     btn.textContent = 'Sair'
     $('#jam-entry').hidden = true
@@ -2433,6 +2465,12 @@ $('#jam-dev').addEventListener('change', () =>
   localStorage.setItem('jam-device', $('#jam-dev').value))
 $('#jam-native').addEventListener('change', () =>
   $('#jam-dev').disabled = $('#jam-native').checked)
+$('#jam-micgain').addEventListener('input', () => {
+  const v = +$('#jam-micgain').value
+  $('#jam-panel .jg-val').textContent = v.toFixed(1) + '×'
+  localStorage.setItem('jam-micgain', v)
+  jam?.setMicGain(v)
+})
 
 $('#jam-msg-form').addEventListener('submit', e => {
   e.preventDefault()

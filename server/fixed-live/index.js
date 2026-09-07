@@ -961,7 +961,11 @@ const jamRooms = new Map()
 
 const jamSend = (ws, obj) => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj)) }
 
+jamWss.on("error", e => log("[jam] wss error:", e.message))
+
 jamWss.on("connection", (ws, req) => {
+  // frame malformado/reset: mata a conexão, nunca o processo
+  ws.on("error", e => log(`[jam] ws error (${req?.url?.slice(0, 40)}):`, e.message))
   const u = new URL(req.url, "http://x")
   const room = (u.searchParams.get("room") ?? "").trim().slice(0, 64)
   const nick = (u.searchParams.get("nick") ?? "").trim().slice(0, 32)
