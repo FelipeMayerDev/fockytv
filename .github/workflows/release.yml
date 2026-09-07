@@ -5,6 +5,8 @@ name: release
 on:
   push:
     tags: ['v*']
+permissions:
+  contents: write   # anexar assets na release da tag
 jobs:
   win:
     runs-on: windows-latest
