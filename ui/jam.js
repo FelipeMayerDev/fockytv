@@ -13,8 +13,8 @@
 //
 // Uso: const jam = await initJam({ serverUrl }); await jam.join(room, nick, onState)
 
-const FRAME_MS = 10
-const FRAME_48 = 480
+const FRAME_MS = 5
+const FRAME_48 = 240
 const BITRATE = 256_000   // Opus estéreo música; DTX/FEC fora de propósito
 
 export async function initJam ({ serverUrl }) {
@@ -28,7 +28,7 @@ export async function initJam ({ serverUrl }) {
   let selfLevel = 0
 
   const ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 })
-  await ctx.audioWorklet.addModule(new URL('./jam-worklet.js?v=3', import.meta.url))
+  await ctx.audioWorklet.addModule(new URL('./jam-worklet.js?v=5', import.meta.url))
 
   const mixNode = new AudioWorkletNode(ctx, 'jam-mix', { outputChannelCount: [2] })
   mixNode.connect(ctx.destination)                    // monitor local

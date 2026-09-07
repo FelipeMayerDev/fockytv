@@ -1,7 +1,7 @@
 // AudioWorklets da sala de músicos. Dois processadores:
 //
 //  jam-tap: na captura — puxa o áudio do microfone fora da pipeline de voz do
-//  Chromium e entrega blocos interleaved de 480 frames (10ms @48k) pro main
+//  Chromium e entrega blocos interleaved de 240 frames (5ms @48k) pro main
 //  thread, que alimenta o AudioEncoder (WebCodecs).
 //
 //  jam-mix: na saída — um ring buffer por músico remoto, consumido no ritmo do
@@ -15,7 +15,7 @@ const FRAME = 128   // quantum do render (samples por canal)
 class JamTap extends AudioWorkletProcessor {
   constructor () {
     super()
-    this.acc = null   // Float32Array interleaved acumulando 480 frames
+    this.acc = null   // Float32Array interleaved acumulando 240 frames
     this.pos = 0
     this.gain = 1     // ganho do músico: sem AGC do navegador, entrada de
                       // instrumento (DI, interface) precisa de boost manual
@@ -27,7 +27,7 @@ class JamTap extends AudioWorkletProcessor {
     if (!chs || !chs.length) return true
     const n = chs[0].length
     const nch = Math.min(chs.length, 2)
-    if (!this.acc || this.acc.length / 2 !== 480 * 2) this.acc = new Float32Array(480 * 2)
+    if (!this.acc || this.acc.length !== 240 * 2) this.acc = new Float32Array(240 * 2)
     let peak = 0
     for (let i = 0; i < n; i++) {
       for (let c = 0; c < 2; c++) {
