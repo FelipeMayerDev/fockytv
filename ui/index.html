@@ -282,10 +282,24 @@ dialog .desc { font-size:13px; color:hsl(var(--muted-foreground)); margin-bottom
   appearance:none; background:hsl(var(--border)); border-radius:999px }
 .jam-peer input[type=range]::-webkit-slider-thumb { appearance:none; width:12px; height:12px;
   border-radius:50%; background:hsl(var(--foreground)) }
-/* canal 🎸 Sala dentro do player (mesmo padrão do #music-view) */
-#jam-view { position:absolute; inset:0; z-index:4; display:none; place-items:center;
-            background:#000; overflow:auto; padding:24px }
-#jam-view.on { display:grid }
+/* canal 🎸 Sala: conexão no centro, quem está na sala no painel da direita
+   (mesmo esquema do #music-view + #fixed-panel) */
+#jam-view { position:absolute; left:0; top:0; bottom:0; right:372px; z-index:3;
+  display:none; background:linear-gradient(180deg, hsl(240 10% 9%), hsl(var(--background)) 70%) }
+#jam-view.on { display:flex }
+#jam-main { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center;
+  justify-content:center; gap:14px; padding:28px 24px; overflow:auto }
+#jam-card { width:min(420px, 100%) }
+#jam-panel { position:absolute; top:0; right:0; bottom:0; width:min(360px, 92vw);
+  background:hsl(var(--card)); border-left:1px solid hsl(var(--border));
+  padding:16px; overflow:auto; z-index:4 }
+#jam-panel h3 { font-size:15px; font-weight:600; margin-bottom:2px }
+.ji { display:flex; justify-content:space-between; align-items:baseline; padding:6px 0 }
+.ji b { font-size:14px }
+#ji-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:14px }
+.ji-stat { background:hsl(var(--muted)); border-radius:8px; padding:10px 8px; text-align:center }
+.ji-stat b { display:block; font-size:22px; font-variant-numeric:tabular-nums }
+.ji-stat span { font-size:11px; color:hsl(var(--muted-foreground)) }
 
 #sources { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
            gap:10px; margin:16px 0; max-height:230px; overflow:auto }
@@ -503,37 +517,53 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
     <button class="ghost icon" id="fixed-panel-toggle" hidden title="Ocultar busca" aria-label="Ocultar busca">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16M11 9l-3 3 3 3"/></svg>
     </button>
-    <!-- canal 🎸 Sala: vista própria dentro do player, como #music-view -->
+    <!-- canal 🎸 Sala: conexão no centro, quem está na sala no painel da direita -->
     <div id="jam-view">
-      <div class="card" style="width:min(480px,92vw)">
-        <h3>Sala de músicos</h3>
-        <p class="desc">Áudio P2P direto entre os músicos, sem servidor no meio e sem
-           processamento de voz. Latência típica: 30–80&nbsp;ms em rede boa.</p>
-
-        <div class="jam-warn" id="jam-warn">
+      <div id="jam-main">
+        <div class="jam-warn" style="width:min(420px,100%)">
           <strong>Use fones de ouvido.</strong> Sem cancelamento de eco — quem usar
           caixa de som vai levar o áudio dos outros de volta.
         </div>
 
-        <div class="field" id="jam-entry">
-          <label for="jam-room">Sala</label>
-          <input id="jam-room" maxlength="64" placeholder="ex.: ensaio-terca">
-        </div>
+        <div class="card" id="jam-card">
+          <h3>Sala de músicos</h3>
+          <p class="desc">Áudio P2P direto, sem servidor no meio e sem processamento de voz.
+             Latência típica: 30–80&nbsp;ms em rede boa.</p>
 
-        <div class="row" id="jam-native-row" hidden>
-          <label for="jam-native" style="font-size:13px">Captura nativa (WASAPI exclusivo, menos latência)</label>
-          <span class="switch"><input type="checkbox" id="jam-native" checked><span></span></span>
-        </div>
+          <div id="jam-entry">
+            <div class="field">
+              <label for="jam-room">Sala</label>
+              <input id="jam-room" maxlength="64" placeholder="ex.: ensaio-terca">
+            </div>
+            <div class="row" id="jam-native-row" hidden>
+              <label for="jam-native" style="font-size:13px">Captura nativa (WASAPI exclusivo, menos latência)</label>
+              <span class="switch"><input type="checkbox" id="jam-native" checked><span></span></span>
+            </div>
+            <p class="err" id="jam-err" hidden></p>
+          </div>
 
-        <div id="jam-peers"></div>
-        <p class="desc" id="jam-status" hidden></p>
+          <div id="jam-info" hidden>
+            <div class="ji"><span class="muted">Sala</span><b id="ji-room"></b></div>
+            <div class="ji"><span class="muted">Você</span><b id="ji-nick"></b></div>
+            <div id="ji-grid" hidden>
+              <div class="ji-stat"><b id="ji-rtt">—</b><span>RTT médio</span></div>
+              <div class="ji-stat"><b id="ji-buf">—</b><span>buffer</span></div>
+              <div class="ji-stat"><b id="ji-fail">—</b><span>falhas</span></div>
+            </div>
+          </div>
 
-        <p class="err" id="jam-err" hidden></p>
-        <div class="actions" style="margin-top:8px">
-          <button id="jam-toggle">Entrar</button>
+          <div class="actions" style="margin-top:8px">
+            <button id="jam-toggle">Entrar</button>
+          </div>
         </div>
       </div>
     </div>
+    <aside id="jam-panel" hidden>
+      <h3>Quem está na sala</h3>
+      <p class="desc" id="jam-status" hidden></p>
+      <div id="jam-peers"></div>
+      <p class="muted" id="jam-empty" hidden style="font-size:13px">só você — compartilhe o nome da sala</p>
+    </aside>
   </div>
   <div id="stage-wrap">
     <canvas id="stage"></canvas>
@@ -1506,6 +1536,9 @@ function openJam () {
   $('#fixed-loading').hidden = true
   $('#music-view').classList.remove('on')
   $('#jam-view').classList.add('on')
+  $('#jam-panel').hidden = false
+  $('#jam-entry').hidden = jamJoined
+  $('#jam-info').hidden = !jamJoined
   $('#jam-native-row').hidden = !cfg.nativeMic
   if (cfg.nativeMic) $('#jam-native').disabled = !!filterMode
   $('#jam-room').value ||= localStorage.getItem('jam-room') ?? ''
@@ -1986,6 +2019,7 @@ function closeFixed () {
   setVideoControls(false)
   $('#music-view').classList.remove('on')
   $('#jam-view').classList.remove('on')
+  $('#jam-panel').hidden = true
 }
 
 // ── barra de player (seek arrastável + prev/play/next) ──────────────────
@@ -2122,14 +2156,28 @@ const jamRow = id => {
 function jamRender () {
   if (!jam) return
   const st = jam.state
-  // cabeçalho do painel: qual sala e quantos conectados
+  // centro: com quem está conectado e como está a conexão
+  $('#ji-room').textContent = st.room
+  $('#ji-nick').textContent = st.nick
+  const con = st.peers.filter(p => p.connected)
+  $('#ji-grid').hidden = !con.length
+  if (con.length) {
+    const rtts = con.filter(p => p.rtt != null).map(p => p.rtt)
+    $('#ji-rtt').textContent = rtts.length
+      ? Math.round(rtts.reduce((a, b) => a + b, 0) / rtts.length) + 'ms' : '—'
+    $('#ji-buf').textContent =
+      Math.round(con.reduce((a, p) => a + (p.bufferMs ?? 0), 0) / con.length) + 'ms'
+    $('#ji-fail').textContent = con.reduce((a, p) => a + (p.underruns ?? 0), 0)
+  }
+  // painel da direita: quem está na sala
   const status = $('#jam-status')
   if (jamJoined) {
     status.hidden = false
     status.textContent = st.peers.length
-      ? `Sala: ${st.room} · ${st.peers.length} músico${st.peers.length > 1 ? 's' : ''} conectado${st.peers.length > 1 ? 's' : ''}`
-      : `Sala: ${st.room} · só você — compartilhe o nome da sala`
+      ? `Sala: ${st.room} · ${st.peers.length} músico${st.peers.length > 1 ? 's' : ''}`
+      : `Sala: ${st.room} · só você`
   } else status.hidden = true
+  $('#jam-empty').hidden = !(jamJoined && !st.peers.length)
   const list = $('#jam-peers')
   for (const p of st.peers) {
     let row = list.querySelector(`[data-peer="${CSS.escape(p.id)}"]`)
@@ -2160,6 +2208,7 @@ $('#jam-toggle').onclick = async () => {
       $('#jam-peers').replaceChildren()
       btn.textContent = 'Entrar'
       $('#jam-entry').hidden = false
+      $('#jam-info').hidden = true
       $('#jam-status').hidden = true
       return
     }
@@ -2178,6 +2227,7 @@ $('#jam-toggle').onclick = async () => {
     localStorage.setItem('jam-room', room)
     btn.textContent = 'Sair'
     $('#jam-entry').hidden = true
+    $('#jam-info').hidden = false
     jamRender()
     jamTimer = setInterval(jamRender, 1000)
     // dialog fica aberto: é o painel da sala (peers, ganho, latência ao vivo)
