@@ -8,6 +8,7 @@ import { createWriteStream, existsSync, mkdtempSync, readdirSync, readFileSync, 
 import { open, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { WebSocketServer } from "ws"
 import express from "express"
 import { MediaStreamTrackFactory, RTCPeerConnection, useH264, useOPUS } from "werift"
 
@@ -901,7 +902,67 @@ app.post("/api/fixed/music/stop", wrap(async (req, res) => {
   res.json(musicState())
 }))
 
-app.listen(PORT, () => log(`fixed-live na porta ${PORT}, broadcast-box em ${BB_URL}`))
+// ── sala de músicos: sinalização P2P ────────────────────────────────────
+// A sala é mesh: cada músico abre RTCPeerConnection direto pra cada outro
+// (só DataChannel, áudio via WebCodecs neles). Aqui é só o maestro de SDP/ICE:
+// WebSocket retransmite mensagens entre os pares da sala. Nada de mídia passa
+// por este servidor, salas são efêmeras (somem quando o último sai).
+const jamWss = new WebSocketServer({ noServer: true })
+// sala -> Map(nick -> ws). Reuso de nick derruba o antigo (reconexão).
+const jamRooms = new Map()
+
+const jamSend = (ws, obj) => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj)) }
+
+jamWss.on("connection", (ws, req) => {
+  const u = new URL(req.url, "http://x")
+  const room = (u.searchParams.get("room") ?? "").trim().slice(0, 64)
+  const nick = (u.searchParams.get("nick") ?? "").trim().slice(0, 32)
+  if (!room || !nick) return ws.close(4001, "room e nick obrigatórios")
+
+  const members = jamRooms.get(room) ?? new Map()
+  const old = members.get(nick)
+  if (old && old !== ws) { jamSend(old, { type: "evicted" }); old.close() }
+  members.set(nick, ws)
+  jamRooms.set(room, members)
+  log(`[jam] ${nick} entrou em "${room}" (${members.size})`)
+
+  // quem já está na sala aprende sobre o novo; o novo recebe a lista pra abrir
+  // as offers (joiner conecta aos veteranos — evita offer dupla no par)
+  for (const [other, ows] of members) if (ows !== ws) jamSend(ows, { type: "peer-joined", nick })
+  jamSend(ws, { type: "peers", peers: [...members.keys()].filter(n => n !== nick) })
+
+  ws.on("message", data => {
+    let msg
+    try { msg = JSON.parse(data) } catch { return }
+    if (msg.type === "ping") return jamSend(ws, { type: "pong", t: msg.t })
+    // offer/answer/ice vão endereçados; relay cego pro destino
+    const dst = typeof msg.to === "string" ? members.get(msg.to) : null
+    if (dst) jamSend(dst, { ...msg, from: nick })
+  })
+
+  const leave = () => {
+    if (members.get(nick) !== ws) return // reconexão já assumiu o nick
+    members.delete(nick)
+    if (members.size) jamRooms.set(room, members)
+    else jamRooms.delete(room)
+    for (const ows of members.values()) jamSend(ows, { type: "peer-left", nick })
+    log(`[jam] ${nick} saiu de "${room}" (${members.size})`)
+  }
+  ws.on("close", leave)
+})
+
+// upgrade do WebSocket na mesma porta do express
+const httpServer = app.listen(PORT, () => log(`fixed-live na porta ${PORT}, broadcast-box em ${BB_URL}`))
+httpServer.on("upgrade", (req, sock, head) => {
+  if (!req.url.startsWith("/ws/jam")) return sock.destroy()
+  jamWss.handleUpgrade(req, sock, head, ws => jamWss.emit("connection", ws, req))
+})
+
+// lista de salas pra UI
+app.get("/api/fixed/jam/rooms", (req, res) => res.json(
+  [...jamRooms.entries()].map(([room, members]) => ({ room, members: [...members.keys()] }))
+))
+
 
 // docker stop/recreate: mata os hosts com DELETE, senão o broadcast-box fica
 // com sessão fantasma ("already has a host"). Registrado UMA vez aqui — no
