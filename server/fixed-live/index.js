@@ -756,6 +756,54 @@ const app = express()
 app.use(express.json({ limit: "256kb" }))
 const wrap = fn => (req, res) => fn(req, res).catch(e => res.status(500).json({ error: e.message }))
 
+// dev: quando o app aponta direto pro sidecar (sem broadcast-box na frente),
+// /api/status precisa existir pra UI não quebrar com 404 de HTML
+app.get("/api/status", (req, res) => res.json([]))
+
+// ── /yt da sala: áudio do YouTube pelo mesmo pipeline do canal de música ──
+// yt-dlp extrai a URL do bestaudio; o stream é proxado pra evitar o 403 de
+// IP-lock do googlevideo nos clientes e dar suporte a Range (seek).
+const ytCache = new Map()      // videoId -> { at, title, duration, url }
+const ytPending = new Map()    // videoId -> Promise (dedup entre os membros)
+
+async function jamYtMeta (id) {
+  const hit = ytCache.get(id)
+  if (hit && Date.now() - hit.at < 60 * 60_000) return hit
+  const prom = ytPending.get(id) ?? (async () => {
+    const j = await ytdlJson(["-J", "--no-playlist", "-f", "ba/b", ...cookieFlags(),
+                              `https://www.youtube.com/watch?v=${id}`])
+    const url = j.requested_formats?.[0]?.url ?? j.url
+    if (!url) throw new Error("sem stream de áudio")
+    const meta = { at: Date.now(), title: j.title ?? id, duration: j.duration ?? 0, url }
+    ytCache.set(id, meta)
+    return meta
+  })()
+  ytPending.set(id, prom)
+  try { return await prom } finally { ytPending.delete(id) }
+}
+
+app.get("/api/fixed/jam/yt", wrap(async (req, res) => {
+  const id = (req.query.id ?? "").toString()
+  if (!/^[\w-]{11}$/.test(id)) return res.status(400).json({ error: "id inválido" })
+  const meta = await jamYtMeta(id)
+  res.json({ title: meta.title, duration: meta.duration, url: meta.url })
+}))
+
+app.get("/api/fixed/jam/yt/stream", wrap(async (req, res) => {
+  let u
+  try { u = new URL((req.query.u ?? "").toString()) } catch { return res.status(400).json({ error: "url inválida" }) }
+  if (!u.hostname.endsWith(".googlevideo.com")) return res.status(400).json({ error: "host não permitido" })
+  const headers = {}
+  if (req.headers.range) headers.Range = req.headers.range
+  const r = await fetch(u, { headers, signal: AbortSignal.timeout(30_000) })
+  const pass = {}
+  for (const h of ["content-type", "content-length", "content-range", "accept-ranges"])
+    if (r.headers.get(h)) pass[h] = r.headers.get(h)
+  res.writeHead(r.status, pass)
+  if (r.body) Readable.fromWeb(r.body).pipe(res)
+  else res.end()
+}))
+
 app.get("/api/fixed/search", wrap(async (req, res) => {
   const q = (req.query.q ?? "").toString().trim()
   if (q.length < 2) return res.json([])

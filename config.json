@@ -1,4 +1,4 @@
 {
-  "serverUrl": "https://fockytv.felipemayer.com.br",
+  "serverUrl": "http://localhost:3999",
   "displayName": "focky"
 }
