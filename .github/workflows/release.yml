@@ -1,0 +1,19 @@
+# Release Windows: instalador NSIS + feed de auto-update (latest.yml).
+# O AppImage do Linux é construído localmente; aqui só o que precisa de
+# Windows. Disparado pela tag (v*): compila e anexa na release da tag.
+name: release
+on:
+  push:
+    tags: ['v*']
+jobs:
+  win:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
