@@ -2400,7 +2400,7 @@ async function jamToggleJoin () {
     }
     // sala única do canal: entrar nele É entrar na sala (sem nome pra digitar)
     const room = 'sala'
-    jam ??= await import('./jam.js?v=2').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+    jam ??= await import('./jam.js?v=3').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
       .then(j => {
         j.onChat(m => {
           if (m.type === 'yt') return jamYtEvent(m)
