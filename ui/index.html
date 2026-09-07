@@ -1640,6 +1640,7 @@ $('#fixed-q').addEventListener('keydown', async e => {
 
 // ── player do canal fixo: vídeo à esquerda, painel de busca à direita ───
 let fixedKey = null          // 'tv' | 'music' enquanto o player estiver aberto
+let relightTried = null      // canal que já tentamos religar nesta visita
 let fixedTimer = null
 let lyrTimer = null
 let lyr = { id: null, lines: [] }     // letra da faixa atual
@@ -1707,6 +1708,7 @@ function openFixed (key) {
   $('#net-dot').style.background = ''
   release(viewer); viewer = null
   fixedKey = key
+  relightTried = null   // canal novo: pode religar de novo
   $('#fixed-title').textContent = FIXED_LABEL[key]
   $('#fixed-desc').textContent = key === 'tv'
     ? 'Canal do servidor: o que você tocar aqui, todo mundo assiste.'
@@ -1764,6 +1766,18 @@ async function fixedTick () {
   // canal vazio: sem barra de player — play/timeline sem nada tocando não
   // ajudam; ela volta sozinha quando uma faixa entrar
   $('#fixed-bar').hidden = st.status === 'idle'
+
+  // canal idle com conteúdo = o host caiu no meio (broadcast-box reiniciou):
+  // quem abrir religa — uma vez por visita, e nunca o que foi parado à força
+  if (st.status === 'idle' && relightTried !== fixedKey) {
+    const relightable = fixedKey === 'music'
+      ? (st.queue?.length && !st.stopped)
+      : !!st.current
+    if (relightable) {
+      relightTried = fixedKey
+      fixed(fixedKey + '/resume', { method: 'POST' }).then(fixedTick).catch(() => {})
+    }
+  }
 
   // canal música tem visual próprio (capa + letra); TV usa o card do painel
   $('#music-view').classList.toggle('on', !isTv)

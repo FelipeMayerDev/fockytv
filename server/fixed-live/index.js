@@ -605,7 +605,12 @@ tv.runner.ended = () => {
   tv.status = "idle"
   tv.runner.stop().catch(e => log("[tv]", e.message))
 }
-tv.runner.dead = () => { tv.current = null; tv.status = "idle" }
+// pc do host morreu (server reiniciou etc.): a TV continua de onde estava —
+// o resume religa a partir do idle. current só se perde no stop/fim.
+tv.runner.dead = () => {
+  if (tv.current) tv.current.position = Math.floor(tv.runner.position())
+  tv.status = "idle"
+}
 const tvState = () => ({
   status: tv.status,
   progress: tv.runner.downloadProgress,
@@ -646,12 +651,16 @@ function musicIdle () {
   music.status = "idle"
   music.runner.stop().catch(e => log("[music]", e.message))
 }
-// pc do host morreu (server reiniciou etc.): estado volta a idle, fila fica
-music.runner.dead = () => { music.status = "idle" }
+// pc do host morreu (server reiniciou etc.): estado volta a idle, fila fica.
+// diedAt marca a queda: a janela de 15 min sem zerar a fila dá tempo do
+// broadcast-box voltar e um ouvinte religar o canal.
+music.runner.dead = () => { music.status = "idle"; music.diedAt = Date.now() }
 async function playCurrent () {
   const item = music.queue[music.index]
   if (!item) return musicIdle()
   music.status = "starting"
+  music.diedAt = null
+  music.stopped = false
   // a meta veio no add (ou já está em cache): sem mais um round-trip de yt-dlp
   const meta = item.meta ?? await metaOf(item.id, true)
   try {
@@ -669,6 +678,8 @@ const musicState = () => ({
   index: music.index,
   position: Math.floor(music.runner.position()),
   duration: music.queue[music.index]?.duration ?? 0,
+  // religar automático: só se caiu por queda do host (não por stop explícito)
+  stopped: !!music.stopped && !music.diedAt,
 })
 
 // ── vigia de viewers: 0 espectadores por 60 s = stream desligada ────────
@@ -706,8 +717,10 @@ setInterval(async () => {
     if (!runner.live) {
       // canal desligado sem ouvintes: a fila morre junto — mas com a mesma
       // janela de 60s, senão o zera-fila atira no add que ainda está ligando
-      // (runner "not live" por ~3s entre o clique e o pc subir)
-      if (key === "music" && viewers === 0 && music.queue.length) {
+      // (runner "not live" por ~3s entre o clique e o pc subir). Queda do
+      // host (diedAt) tem janela própria de 15 min: dá tempo de religar.
+      const diedRecently = music.diedAt && Date.now() - music.diedAt < 15 * 60_000
+      if (key === "music" && viewers === 0 && music.queue.length && !diedRecently) {
         zeroSince[key] ??= Date.now()
         if (Date.now() - zeroSince[key] >= IDLE_MS) {
           zeroSince[key] = null
@@ -791,9 +804,13 @@ app.post("/api/fixed/tv/pause", (req, res) => {
   res.json(tvState())
 })
 app.post("/api/fixed/tv/resume", wrap(async (req, res) => {
-  if (tv.status === "paused") {
+  if (tv.status === "paused" || (tv.status === "idle" && tv.current)) {
+    // idle+current = o host caiu no meio (broadcast-box reiniciou): religa
+    // de onde parou, ou do começo se a posição não sobreviveu
+    const off = tv.status === "paused" ? tv.runner.position()
+      : Math.min(tv.current.position ?? 0, Math.max(0, tv.current.duration - 5))
     await tv.runner.startMedia(await metaOf(tv.current.id),
-      { offset: tv.runner.position(), video: true, preload: true })
+      { offset: off, video: true, preload: true })
     tv.status = "live"
   }
   res.json(tvState())
@@ -880,6 +897,7 @@ app.post("/api/fixed/music/resume", wrap(async (req, res) => {
 app.post("/api/fixed/music/stop", wrap(async (req, res) => {
   musicIdle()
   music.index = 0 // para de vez: a próxima toca do começo da fila
+  music.stopped = true   // não religa sozinho: foi escolha de quem parou
   res.json(musicState())
 }))
 
