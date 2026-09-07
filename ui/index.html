@@ -528,8 +528,12 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
              Latência típica: 30–80&nbsp;ms em rede boa.</p>
 
           <div id="jam-entry">
+            <div class="field">
+              <label for="jam-dev">Dispositivo de entrada</label>
+              <select id="jam-dev"></select>
+            </div>
             <div class="row" id="jam-native-row" hidden>
-              <label for="jam-native" style="font-size:13px">Captura nativa (WASAPI exclusivo, menos latência)</label>
+              <label for="jam-native" style="font-size:13px">Captura nativa (WASAPI exclusivo, dispositivo padrão)</label>
               <span class="switch"><input type="checkbox" id="jam-native" checked><span></span></span>
             </div>
             <p class="err" id="jam-err" hidden></p>
@@ -1534,6 +1538,8 @@ function openJam () {
   if (jamJoined) jamChatRender()
   $('#jam-native-row').hidden = !cfg.nativeMic
   if (cfg.nativeMic) $('#jam-native').disabled = !!filterMode
+  $('#jam-dev').disabled = $('#jam-native').checked
+  jamListMics()
   clearInterval(fixedTimer)
   fixedTick()
   fixedTimer = setInterval(fixedTick, 500)
@@ -2204,7 +2210,8 @@ async function jamToggleJoin () {
       try { ms = await jamNativeStart() }
       catch (e) { toast('Captura nativa indisponível, usando o mic do navegador.') }
     }
-    await jam.join(room, nick, () => {}, ms ? { micStream: ms } : {})
+    await jam.join(room, nick, () => {},
+      ms ? { micStream: ms } : { deviceId: $('#jam-dev').value || undefined })
     jamJoined = true
     btn.textContent = 'Sair'
     $('#jam-entry').hidden = true
@@ -2222,6 +2229,36 @@ async function jamToggleJoin () {
   } catch (e) { jamNativeStop(); jamErrSet(e.message) }
 }
 $('#jam-toggle').onclick = jamToggleJoin
+// lista os dispositivos de entrada; os nomes só vêm depois da permissão de
+// mic, então se vierem em branco pede um acesso descartável e lista de novo
+async function jamListMics () {
+  const sel = $('#jam-dev')
+  const fill = () => {
+    sel.replaceChildren(...devices.filter(d => d.kind === 'audioinput').map((d, i) => {
+      const opt = document.createElement('option')
+      opt.value = d.deviceId
+      opt.textContent = d.label || `Microfone ${i + 1}`
+      return opt
+    }))
+    const saved = localStorage.getItem('jam-device')
+    if (saved && [...sel.options].some(o => o.value === saved)) sel.value = saved
+  }
+  let devices = await navigator.mediaDevices.enumerateDevices()
+  fill()
+  if (devices.some(d => d.kind === 'audioinput' && !d.label)) {
+    try {
+      const probe = await navigator.mediaDevices.getUserMedia({ audio: true })
+      probe.getTracks().forEach(t => t.stop())
+      devices = await navigator.mediaDevices.enumerateDevices()
+      fill()
+    } catch {}
+  }
+}
+$('#jam-dev').addEventListener('change', () =>
+  localStorage.setItem('jam-device', $('#jam-dev').value))
+$('#jam-native').addEventListener('change', () =>
+  $('#jam-dev').disabled = $('#jam-native').checked)
+
 $('#jam-msg-form').addEventListener('submit', e => {
   e.preventDefault()
   const input = $('#jam-msg')
