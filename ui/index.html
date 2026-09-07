@@ -2186,7 +2186,9 @@ async function jamToggleJoin () {
       jamNativeStop()
       clearInterval(jamTimer)
       jamJoined = false
-      $('#jam-peers').replaceChildren()
+      $('#jam-pills').replaceChildren()
+      jamChatLog = []
+      jamChatRender()
       btn.textContent = 'Entrar'
       $('#jam-entry').hidden = false
       $('#jam-card').hidden = false
