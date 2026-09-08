@@ -311,6 +311,8 @@ dialog .desc { font-size:13px; color:hsl(var(--muted-foreground)); margin-bottom
 .jam-msg.me b { color:hsl(142 71% 45%) }
 #jam-msg-form { display:flex; gap:8px; padding:12px; border-top:1px solid hsl(var(--border)) }
 /* card do /yt: player compartilhado da sala */
+#jam-yt-dock { flex:none; border-bottom:1px solid hsl(var(--border)) }
+#jam-yt-dock .jam-yt { margin:0; border:0; border-radius:0 }
 .jam-yt { border:1px solid hsl(var(--border)); border-radius:10px; overflow:hidden;
   background:hsl(var(--card)); margin:4px 0 }
 .jam-yt .jy-title { font-size:12px; font-weight:600; padding:8px 10px 6px;
@@ -573,6 +575,7 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
         </div>
 
         <div class="card" id="jam-chat" hidden>
+          <div id="jam-yt-dock" hidden></div>
           <div id="jam-msgs"></div>
           <form id="jam-msg-form">
             <input id="jam-msg" maxlength="500" placeholder="mensagem pra sala…" autocomplete="off">
@@ -2241,6 +2244,7 @@ function jamYtClear () {
   clearTimeout(jamYt?.playTimer)
   jamYt?.audio?.pause()
   jamYt?.card?.remove()
+  $('#jam-yt-dock').hidden = true
   jamYt = window.__jamYt = null
 }
 
@@ -2266,8 +2270,9 @@ function jamYtLoad (videoId, host) {
       <input type="range" class="jy-seek" min="0" max="100" step="0.1" value="0">
       <span class="jy-dur muted">0:00</span>
     </div>`
-  $('#jam-msgs').append(card)
-  $('#jam-msgs').scrollTop = $('#jam-msgs').scrollHeight
+  const dock = $('#jam-yt-dock')
+  dock.hidden = false
+  dock.replaceChildren(card)
   jamYt = { videoId, host, playing: false, pos: 0, baseAt: Date.now(), card,
             player: null, seekDrag: false, wasUnstarted: 0 }
   const current = jamYt
