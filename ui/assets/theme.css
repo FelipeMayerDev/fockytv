@@ -1,0 +1,54 @@
+/* ─────────────────────────────────────────────────────────────────────
+   FockyTV — tokens do tema "Sala de Vidro".
+   Único lugar onde cor, tipo, raio e sombra são DEFINIDOS. Componentes
+   (assets/app.css) só consomem via var(). Documentação: docs/design-system.md
+   Formato dos tokens de cor: tripla HSL sem hsl() — use hsl(var(--x))
+   e hsl(var(--x) / .4) quando precisar de alfa. Os tokens de vidro já
+   vêm com alfa e entram direto (var(--glass)).
+   ───────────────────────────────────────────────────────────────────── */
+:root {
+  /* superfícies: violeta profundo, quase preto */
+  --background:258 32% 6%;         /* #0b0913 — fundo do app */
+  --surface-2:258 28% 9%;          /* barras e áreas elevadas opacas */
+  --card:258 28% 9%;
+  --card-foreground:258 30% 94%;
+  --muted:258 20% 14%;             /* chip/hover opaco */
+  --muted-foreground:258 12% 65%;  /* #9a94b5 — texto secundário */
+  --border:258 18% 20%;
+  --foreground:258 30% 94%;        /* #ece9f5 */
+
+  /* vidro: o material da casa. Painel, card, pílula e diálogo são vidro. */
+  --glass:hsl(0 0% 100% / .07);
+  --glass-strong:hsl(0 0% 100% / .12);
+  --glass-border:hsl(0 0% 100% / .13);
+  --blur:blur(16px);
+
+  /* acento em par: violeta → ciano, sempre no mesmo sentido (120deg) */
+  --accent:288 60% 64%;
+  --accent-2:212 65% 60%;
+  --grad-accent:linear-gradient(120deg, hsl(var(--accent)), hsl(var(--accent-2)));
+  --primary:288 60% 64%;
+  --primary-foreground:258 40% 8%;
+  --ring:288 60% 64%;
+
+  /* estados */
+  --destructive:0 72% 55%;         /* AO VIVO, parar, erro */
+  --success:152 60% 50%;           /* voz detectada na sala */
+  --warning:38 92% 55%;            /* avisos da sala de músicos */
+
+  /* tipografia — display em marca, títulos e números grandes */
+  --font-sans:"Public Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display:"Outfit", "Public Sans", ui-sans-serif, sans-serif;
+
+  /* forma — tudo mais macio que o Cinema Escuro */
+  --radius:14px;                   /* input, chip, linha de lista */
+  --radius-card:22px;              /* painel, card, miniatura, diálogo */
+  --radius-media:14px;             /* thumb pequena em lista */
+  --radius-pill:999px;             /* botão, pílula, avatar */
+
+  /* profundidade e atmosfera */
+  --shadow-card:0 18px 50px hsl(258 40% 2% / .55);
+  --glow-top:radial-gradient(circle at 12% 0%, hsl(var(--accent) / .28), transparent 46%),
+             radial-gradient(circle at 88% 100%, hsl(var(--accent-2) / .22), transparent 48%);
+  --scrim:hsl(258 40% 3% / .68);   /* véu sobre vídeo: overlays e backdrop */
+}
