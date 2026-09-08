@@ -167,6 +167,9 @@ main { flex:1; overflow:hidden; display:flex; flex-direction:column }
 #player-wrap { flex:1; background:#000; display:none; min-height:0; position:relative }
 #player-wrap.on { display:block }
 #player-wrap video { width:100%; height:100%; object-fit:contain; display:block }
+/* autoplay bloqueado (iframe do Discord): overlay de desbloqueio por clique */
+#watch-start { position:absolute; inset:0; display:grid; place-items:center; z-index:5;
+  background:#000a; color:#fff; font:inherit; font-weight:600 }
 #player-tools { position:absolute; top:12px; left:12px; z-index:6; display:flex; gap:4px }
 #player-tools .ghost { background:#0009 }
 #fixed-loading { position:absolute; inset:0 372px 0 0; z-index:7; display:grid; place-items:center;
@@ -491,6 +494,7 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
   <div id="grid-live"></div>
   <div id="player-wrap">
     <video autoplay playsinline></video>
+    <button id="watch-start" hidden>▶ Clique para assistir</button>
     <div id="fixed-loading" hidden><div><span id="fixed-loading-label"></span><i></i></div></div>
     <div id="player-tools" hidden>
       <button class="ghost icon" id="pip" title="Picture in picture" aria-label="Picture in picture">
@@ -837,7 +841,13 @@ async function watch (key, videoEl, viewer) {
   const pc = new RTCPeerConnection()
   pc.addTransceiver('video', { direction: 'recvonly' })
   pc.addTransceiver('audio', { direction: 'recvonly' })
-  pc.ontrack = e => { videoEl.srcObject = e.streams[0] }
+  pc.ontrack = e => {
+    videoEl.srcObject = e.streams[0]
+    // iframe do Discord pode negar autoplay: sem gesto, oferece o clique
+    videoEl.play?.().catch(() => { if (videoEl === vid) $('#watch-start').hidden = false })
+    if (discord) pc.oniceconnectionstatechange =
+      () => console.info('[fockytv/discord] viewer ice:', pc.iceConnectionState)
+  }
   // o nick vai junto: é ele que o host vê na listagem de quem está assistindo.
   // A miniatura não manda — sessão de prévia não é gente.
   await signal('/api/whep' + (viewer ? `?viewer=${encodeURIComponent(viewer)}` : ''), key, pc)
@@ -1662,11 +1672,18 @@ function closePlayer () {
   closeFixed()
   release(viewer); viewer = null
   $('#player-wrap video').srcObject = null
+  $('#watch-start').hidden = true
   showPlayer(null)
   refresh().catch(() => {})
 }
 
 $('#back').onclick = closePlayer
+
+// desbloqueio por gesto do overlay de autoplay negado
+$('#watch-start').onclick = () => {
+  $('#watch-start').hidden = true
+  vid.play().catch(() => {})
+}
 
 // ── controles do player (sem play/pause: numa live não há o que pausar) ──
 const vid = $('#player-wrap video')
