@@ -31,6 +31,14 @@
   <img src="assets/logo.png" alt="" style="width:22px;height:22px;flex:none">
   <h1 id="brand">FockyTV</h1>
 
+  <!-- abas principais: ao vivo (home), canais fixos e sala de baixa latência -->
+  <nav class="tabs" id="tabs">
+    <button class="tab on" data-tab="live">Ao vivo</button>
+    <button class="tab" data-tab="music">Música</button>
+    <button class="tab" data-tab="tv">Vídeo</button>
+    <button class="tab" data-tab="jam">Estúdio (baixa latência)</button>
+  </nav>
+
   <div class="pill" id="live-pill" hidden>
     <span class="dot"></span>
     <span>No ar</span>
@@ -86,6 +94,29 @@
   </button>
 </header>
 
+<!-- áudio do canal música: conexão própria, segue tocando fora da aba Música -->
+<audio id="music-audio" autoplay></audio>
+
+<!-- mini player: aparece quando o usuário entrou no canal música e saiu da aba -->
+<div id="mini-bar" hidden>
+  <img id="mb-art" alt="">
+  <i id="mb-progress"></i>
+  <div id="mb-info" title="Abrir o canal Música">
+    <span id="mb-title"></span>
+    <span class="muted" id="mb-sub">Tocando na sala</span>
+  </div>
+  <button class="skip" id="mb-prev" title="Anterior">
+    <svg viewBox="0 0 24 24"><path d="M19 20 9 12l10-8v16Z"/><rect x="5" y="4" width="2" height="16"/></svg>
+  </button>
+  <button id="mb-toggle" title="Tocar/Pausar">
+    <svg viewBox="0 0 24 24" id="mb-ico-play"><path d="M7 4.5l13 7.5-13 7.5v-15Z"/></svg>
+    <svg viewBox="0 0 24 24" id="mb-ico-pause" class="off"><path d="M7 4h3.6v16H7zM13.4 4H17v16h-3.6z"/></svg>
+  </button>
+  <button class="skip" id="mb-next" title="Próxima">
+    <svg viewBox="0 0 24 24"><path d="M5 4l10 8-10 8V4Z"/><rect x="17" y="4" width="2" height="16"/></svg>
+  </button>
+</div>
+
 <main>
   <div id="grid-live"></div>
   <div id="player-wrap">
@@ -110,6 +141,15 @@
         <div id="mv-sub" class="muted"></div>
         <div id="lyrics"><p class="muted" id="lyr-empty">sem letra pra esta música</p></div>
       </div>
+    </div>
+    <!-- canal sem nada tocando: convite discreto no lugar do player -->
+    <div id="fixed-empty" hidden>
+      <div class="fe-disc">
+        <svg viewBox="0 0 24 24" id="fixed-empty-ico"><path d="M9 18V5l12-2v13"/>
+          <circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+      </div>
+      <h4>Ainda não tem nada tocando</h4>
+      <p id="fixed-empty-sub" class="muted"></p>
     </div>
     <!-- barra de player estilo spotify: anterior/play/próxima + seek arrastável -->
     <div id="fixed-bar" hidden>
@@ -472,22 +512,32 @@ const sfx = {
 }
 
 // ── estado da UI ─────────────────────────────────────────────────────────
-const toast = (msg, action) => {
+// toast(msg) → erro (borda vermelha). toast(msg, {label, run}) → info com
+// ação (borda âmbar). toast(msg, null, 'warning') → aviso (borda amarela).
+const toast = (msg, action, type) => {
   const t = $('#toast')
-  t.classList.toggle('info', !!action)
+  t.className = 'on ' + (action ? 'info' : type ?? '')
   t.replaceChildren(Object.assign(document.createElement('span'), { textContent: msg }))
   clearTimeout(toast._t)
 
   if (!action) {
-    t.classList.add('on')
-    toast._t = setTimeout(() => t.classList.remove('on'), 5000)
+    // clique dispensa; tempo de leitura cresce com o texto (cap de 8 s)
+    toast._t = setTimeout(() => t.classList.remove('on'),
+      Math.min(8000, 3500 + msg.length * 50))
     return
   }
   const b = document.createElement('button')
   b.textContent = action.label
-  b.onclick = action.run
+  b.onclick = e => {
+    e.stopPropagation()
+    t.classList.remove('on')
+    action.run()
+  }
   t.append(b)
   t.classList.add('on')      // com ação, fica até o usuário decidir
+}
+$('#toast').onclick = () => {   // sem ação: clique no corpo dispensa
+  if (!$('#toast button')) $('#toast').classList.remove('on')
 }
 
 function setLive (on) {
@@ -501,13 +551,28 @@ function setLive (on) {
   $('#share-cam').hidden = on && camOnly
 }
 
+// ── abas do header: ativa a pílula e navega pra view correspondente ──────
+function setTab (tab) {
+  document.querySelectorAll('#tabs .tab').forEach(b =>
+    b.classList.toggle('on', b.dataset.tab === tab))
+}
+document.querySelectorAll('#tabs .tab').forEach(b => {
+  b.onclick = () => {
+    const t = b.dataset.tab
+    if (t === 'live') closePlayer()
+    else if (!FIXED_KEYS.includes(t)) return
+    else if (fixedKey !== t) openFixed(t)
+  }
+})
+
 function showPlayer (key) {
   $('#player-wrap').classList.toggle('on', !!key)
   $('#grid-live').style.display = key ? 'none' : ''
   $('#back').hidden = !key
   $('#player-ctl').hidden = !key
   setVideoControls(false)
-  $('#brand').textContent = key ?? 'FockyTV'
+  // aba do header acompanha a view: canais de pessoa não têm aba (só a home tem)
+  setTab(key === 'music' || key === 'tv' || key === 'jam' ? key : 'live')
   // assistindo canal fixo (Música/TV): compartilhar tela/câmera não faz
   // sentido aí — esconde; ao fechar, volta o estado de quem está transmitindo
   const watchFixed = FIXED_KEYS.includes(key)
@@ -1167,11 +1232,13 @@ function openJam () {
   release(viewer); viewer = null
   fixedKey = 'jam'
   showPlayer('jam')
-  $('#brand').textContent = FIXED_LABEL.jam
   $('#fixed-panel').hidden = true
   $('#fixed-panel-toggle').hidden = true
   $('#fixed-bar').hidden = true
   $('#fixed-loading').hidden = true
+  // o convite de canal vazio fica por cima da vista — o estúdio não pode herdar
+  $('#fixed-empty').hidden = true
+  $('#music-view').classList.remove('empty')
   $('#music-view').classList.remove('on')
   $('#jam-view').classList.add('on')
   $('#jam-panel').hidden = false
@@ -1215,8 +1282,20 @@ async function refresh () {
     $('#viewers-pill').title = names.join(', ')
   }
 
-  // os canais fixos têm tiles próprios: saem da listagem comum
+  // os canais fixos têm tiles próprios: saem da listagem comum.
+  // Sem ninguém transmitindo, a grade é só a mensagem — nem tiles fixos ficam
   const others = live.filter(st => !FIXED_KEYS.includes(st.streamKey))
+  if (!others.length) {
+    const empty = document.createElement('div')
+    empty.className = 'empty'
+    empty.innerHTML =
+      `<svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/>
+         <path d="m10 8.5 5 2.5-5 2.5z"/></svg>
+       <h4>Ninguém no ar agora</h4>
+       <p>Compartilhe sua tela e comece a transmissão!</p>`
+    $('#grid-live').replaceChildren(empty)
+    return
+  }
   $('#grid-live').replaceChildren(...FIXED_KEYS.map(fixedTile), ...others.map(st => {
     const el = document.createElement('div')
     el.className = 'vid'
@@ -1400,10 +1479,10 @@ $('#fixed-q').addEventListener('keydown', async e => {
         try {
           if (isTv) {
             await fixed('tv/play', { method: 'POST', body: JSON.stringify({ id: r.id }) })
-            toast(`Tocando na TV: ${saida}`)
+            toast(`Tocando na TV: ${saida}`, null, 'info')
           } else {
             await fixed('music/add', { method: 'POST', body: JSON.stringify({ id: r.id, addedBy: nick }) })
-            toast(`Adicionada à fila: ${saida}`)
+            toast(`Adicionada à fila: ${saida}`, null, 'info')
           }
           fixedTick()
         } catch (err) {
@@ -1491,6 +1570,7 @@ function openFixed (key) {
   $('#net-stats').textContent = '—'
   $('#net-dot').style.background = ''
   release(viewer); viewer = null
+  if (key === 'music') musicFollowing = true   // liga o mini player ao sair da aba
   fixedKey = key
   relightTried = null   // canal novo: pode religar de novo
   $('#fixed-title').textContent = FIXED_LABEL[key]
@@ -1503,7 +1583,6 @@ function openFixed (key) {
   lyr = { id: null, lines: [] }
   paintLyrics()
   showPlayer(key)
-  $('#brand').textContent = FIXED_LABEL[key]
   tvPanelHidden = false
   $('#player-wrap').classList.remove('tv-panel-hidden')
   $('#fixed-panel').hidden = false
@@ -1554,9 +1633,20 @@ async function fixedTick () {
   if (!isTv && st.cookiesNeeded) promptCookies()
   else if (!st.cookiesNeeded) cookiePrompted = false
 
-  // canal vazio: sem barra de player — play/timeline sem nada tocando não
-  // ajudam; ela volta sozinha quando uma faixa entrar
-  $('#fixed-bar').hidden = st.status === 'idle'
+  // canal vazio (nada tocando, na fila nem pausado): no lugar do player, um
+  // convite. Com qualquer coisa — fila no música, vídeo no tv — a barra volta.
+  const nothing = st.status === 'idle' &&
+    !(fixedKey === 'music' ? st.queue?.length : cur && !st.stopped)
+  $('#fixed-empty').hidden = !nothing
+  $('#fixed-empty-sub').textContent = fixedKey === 'music'
+    ? 'Busque uma música no painel ao lado e adicione à fila.'
+    : 'Busque um vídeo no painel ao lado pra começar.'
+  // nota musical no música, monitor com play no vídeo
+  $('#fixed-empty-ico').innerHTML = fixedKey === 'music'
+    ? '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>'
+    : '<rect x="2" y="4" width="20" height="14" rx="2"/><path d="m10 8.5 5 2.5-5 2.5z"/>'
+  $('#music-view').classList.toggle('empty', nothing)
+  $('#fixed-bar').hidden = nothing
 
   // canal idle com conteúdo = o host caiu no meio (broadcast-box reiniciou):
   // quem abrir religa — uma vez por visita, e nunca o que foi parado à força
@@ -1651,6 +1741,21 @@ async function fixedTick () {
     release(viewer); viewer = null
     $('#player-wrap video').srcObject = null
   }
+  if (key === 'music') {
+    // o áudio da música tem conexão própria (musicViewer): sobrevive a sair
+    // da aba e alimenta o mini player; o vídeo do player nem aparece aqui
+    if (musicViewer && ['failed', 'closed'].includes(musicViewer.connectionState)) {
+      release(musicViewer); musicViewer = null
+      musicAudio.srcObject = null
+    }
+    if (streaming && !musicViewer) {
+      watch(key, musicAudio, nick).then(p => { musicViewer = p }).catch(() => {})
+    } else if (!streaming && musicViewer) {
+      release(musicViewer); musicViewer = null
+      musicAudio.srcObject = null
+    }
+    return
+  }
   if (streaming && !viewer) {
     watch(key, $('#player-wrap video'), nick)
       .then(p => viewer = p)
@@ -1669,6 +1774,8 @@ function closeFixed () {
   $('#fixed-panel-toggle').hidden = true
   $('#player-wrap').classList.remove('tv-panel-hidden')
   $('#fixed-bar').hidden = true
+  $('#fixed-empty').hidden = true
+  $('#music-view').classList.remove('empty')
   $('#fixed-loading').hidden = true
   setVideoControls(false)
   $('#music-view').classList.remove('on')
@@ -1717,6 +1824,80 @@ $('#fb-prev').onclick = () => {
 }
 $('#tv-stop').onclick = () =>
   fixed('tv/stop', { method: 'POST' }).then(fixedTick).catch(e => toast(e.message))
+
+// ── mini player: o canal música segue tocando fora da aba Música ─────────
+// O áudio tem conexão própria (musicViewer, no <audio> dedicado): abrir outra
+// aba não derruba a música, e a barrinha fixa mostra o que está passando.
+let musicViewer = null        // pc dedicado do áudio da música
+let musicFollowing = false    // o usuário já entrou no canal música
+let mbPos = { pos: 0, at: 0, dur: 0 }
+let mbLastSt = null
+const musicAudio = $('#music-audio')
+
+const mbRefresh = () =>
+  fixed('music').then(s => { fixedStates.music = s }).catch(() => {})
+const setMbIcon = playing => {
+  $('#mb-ico-play').classList.toggle('off', playing)
+  $('#mb-ico-pause').classList.toggle('off', !playing)
+}
+
+function miniTick () {
+  const st = fixedStates.music
+  const active = musicFollowing && st && st.status !== 'idle'
+  $('#mini-bar').hidden = !active || fixedKey === 'music'
+  if (!active) {
+    // canal encerrado ou usuário nunca entrou: solta a conexão dedicada
+    if (musicViewer && (!musicFollowing || !st || st.status === 'idle')) {
+      release(musicViewer); musicViewer = null
+      musicAudio.srcObject = null
+    }
+    return
+  }
+  if (st !== mbLastSt) {
+    mbLastSt = st
+    const cur = st.queue?.[st.index]
+    if (cur) {
+      $('#mb-art').src = imgSrc(cur.thumb)
+      $('#mb-title').textContent = cur.title
+      $('#mb-sub').textContent = `Tocando na sala${cur.addedBy ? ' · ' + cur.addedBy : ''}`
+      mbPos = { pos: st.position ?? 0, at: Date.now(), dur: cur.duration ?? 0 }
+    }
+  }
+  const pos = st.status === 'live' ? mbPos.pos + (Date.now() - mbPos.at) / 1000 : mbPos.pos
+  $('#mb-progress').style.width = mbPos.dur ? `${Math.min(100, 100 * pos / mbPos.dur)}%` : '0'
+  setMbIcon(st.status === 'live')
+
+  // áudio: reconecta se caiu ou voltou do pause; solta enquanto pausado
+  if (musicViewer && ['failed', 'closed'].includes(musicViewer.connectionState)) {
+    release(musicViewer); musicViewer = null
+    musicAudio.srcObject = null
+  }
+  if (st.status === 'live' && !musicViewer) {
+    watch('music', musicAudio, nick).then(p => { musicViewer = p }).catch(() => {})
+  } else if (st.status !== 'live' && musicViewer) {
+    release(musicViewer); musicViewer = null
+    musicAudio.srcObject = null
+  }
+}
+setInterval(miniTick, 1000)
+
+$('#mb-toggle').onclick = () => {
+  const resume = fixedStates.music?.status !== 'live'
+  setMbIcon(resume)                        // resposta imediata; o tick confirma
+  fixed('music/' + (resume ? 'resume' : 'pause'), { method: 'POST' })
+    .then(mbRefresh).catch(e => { setMbIcon(!resume); toast(e.message) })
+}
+$('#mb-next').onclick = () =>
+  fixed('music/next', { method: 'POST' }).then(mbRefresh).catch(e => toast(e.message))
+$('#mb-prev').onclick = () => {
+  const idx = fixedStates.music?.index ?? 0
+  // igual à barra do canal: comeu mais de 3 s, volta pro início
+  const back = mbPos.pos > 3 || idx <= 0
+    ? fixed('music/seek', { method: 'POST', body: JSON.stringify({ position: 0 }) })
+    : fixed('music/jump', { method: 'POST', body: JSON.stringify({ index: idx - 1 }) })
+  back.then(mbRefresh).catch(e => toast(e.message))
+}
+$('#mb-info').onclick = () => openFixed('music')
 
 // ── boot ─────────────────────────────────────────────────────────────────
 if (localStorage.getItem('noIntro') !== '1') {
@@ -2069,7 +2250,7 @@ async function jamToggleJoin () {
     let ms = null
     if ($('#jam-native').checked && cfg.nativeMic && !filterMode) {
       try { ms = await jamNativeStart() }
-      catch (e) { toast('Captura nativa indisponível, usando o mic do navegador.') }
+      catch (e) { toast('Captura nativa indisponível, usando o mic do navegador.', null, 'warning') }
     }
     await jam.join(room, nick, jamRender,
       ms ? { micStream: ms } : { deviceId: $('#jam-dev').value || undefined })
@@ -2193,7 +2374,7 @@ function jamNativeStop () {
 
 
 fockyApi.onUpdate(({ state, version, notes }) => {
-  if (state === 'available') toast(`Baixando a versão ${version}…`)
+  if (state === 'available') toast(`Baixando a versão ${version}…`, null, 'info')
   if (state === 'ready') {
     localStorage.setItem('news', JSON.stringify({ version, notes: notes ?? '' }))
     toast(`Versão ${version} pronta para instalar.`, {

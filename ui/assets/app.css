@@ -74,6 +74,22 @@ button svg { width:16px; height:16px; flex:none; fill:none;
 button.icon { width:36px; padding:0 }
 .player-ctl { display:flex; align-items:center; gap:4px }
 
+/* abas do header: pílula na ativa, texto apagado nas demais */
+.tabs { display:flex; align-items:center; gap:4px; margin-left:8px }
+.tab {
+  background:transparent; border:none; height:32px; padding:0 14px;
+  border-radius:999px; font-size:13px; font-weight:500; font-family:var(--font-sans);
+  color:hsl(var(--muted-foreground)); white-space:nowrap;
+}
+.tab:hover { background:hsl(var(--muted)); color:hsl(var(--foreground)); opacity:1 }
+.tab.on { background:hsl(var(--muted)); color:hsl(var(--foreground)) }
+@media (max-width:1000px) { .tab { padding:0 10px } }
+@media (max-width:780px) {
+  .tabs { margin-left:2px; gap:2px }
+  .tab { padding:0 8px; font-size:12px }
+  .tab[data-tab="jam"] { display:none }   /* apelido longo sai em telas estreitas */
+}
+
 /* header apertado: cai por etapas em vez de estourar */
 @media (max-width:1000px) {
   #live-stats, #net-stats, .pill .sep { display:none }
@@ -116,6 +132,12 @@ button.icon { width:36px; padding:0 }
   height:36px; padding:0 12px 0 6px; gap:8px; font-size:13px; font-weight:500;
 }
 .user:hover { background:hsl(var(--muted)); opacity:1 }
+/* CTA principal do header: pílula âmbar, como no design */
+#share {
+  height:38px; padding:0 18px; border-radius:var(--radius-pill);
+  background:hsl(var(--accent)); color:hsl(var(--primary-foreground)); font-weight:600;
+}
+#share:hover { opacity:.9 }
 main { flex:1; overflow:hidden; display:flex; flex-direction:column }
 
 /* grade estilo youtube */
@@ -142,9 +164,16 @@ main { flex:1; overflow:hidden; display:flex; flex-direction:column }
 }
 .vid .title { font-size:15px; font-weight:600; letter-spacing:-.01em }
 .vid .sub { font-size:12px; color:hsl(var(--muted-foreground)) }
-.empty { grid-column:1/-1; text-align:center; padding:100px 0;
-         font-family:var(--font-display); font-size:18px; font-weight:600;
-         letter-spacing:-.02em; color:hsl(var(--muted-foreground)) }
+.empty {
+  grid-column:1/-1; display:flex; flex-direction:column; align-items:center;
+  justify-content:center; text-align:center; min-height:60vh; padding:24px;
+  background:var(--glow-top); border-radius:var(--radius-card);
+}
+.empty svg { width:56px; height:56px; fill:none; stroke:hsl(var(--accent) / .8);
+  stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; margin-bottom:20px }
+.empty h4 { font-family:var(--font-display); font-size:28px; font-weight:800;
+  letter-spacing:-.02em }
+.empty p { font-size:14px; color:hsl(var(--muted-foreground)); margin-top:8px }
 
 /* palco: a composição publicada, do jeito que quem assiste vê */
 #stage-wrap { flex:1; display:none; flex-direction:column; align-items:center;
@@ -206,6 +235,35 @@ main { flex:1; overflow:hidden; display:flex; flex-direction:column }
 /* ligando a faixa: capa esmaece pulsando até o áudio entrar */
 #music-view.loading #mv-art { animation:mv-load 1.2s ease-in-out infinite }
 @keyframes mv-load { 50% { opacity:.35; filter:saturate(.3) } }
+/* canal sem nada tocando: o conteúdo do música sai de cena, fica o convite */
+#music-view.empty #mv-main { visibility:hidden }
+#fixed-empty {
+  position:absolute; inset:0 372px 0 0; z-index:6;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  text-align:center; padding:24px;
+  /* brilho centrado do convite sobre o gradiente quente do tema */
+  background:
+    radial-gradient(ellipse at 50% 42%, hsl(var(--accent) / .08), transparent 55%),
+    var(--glow-top),
+    hsl(var(--background));
+}
+#player-wrap.tv-panel-hidden #fixed-empty { inset:0 }
+#fixed-empty[hidden] { display:none }
+#fixed-empty h4 { font-family:var(--font-display); font-size:24px; font-weight:800;
+                  letter-spacing:-.02em }
+#fixed-empty p { font-size:13px; margin-top:6px }
+.fe-disc {
+  width:88px; height:88px; border-radius:50%; display:grid; place-items:center;
+  margin-bottom:18px; border:1px solid hsl(var(--border));
+  background:hsl(var(--surface-2));
+  animation:fe-pulse 2.6s ease-in-out infinite;
+}
+.fe-disc svg { width:34px; height:34px; fill:none; stroke:hsl(var(--accent));
+  stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round }
+@keyframes fe-pulse {
+  0%, 100% { box-shadow:0 0 0 0 hsl(var(--accent) / .22); transform:scale(1) }
+  50% { box-shadow:0 0 0 20px hsl(var(--accent) / 0); transform:scale(1.05) }
+}
 #fixed-bar button:disabled { opacity:.4; cursor:default; transform:none }
 #fb-seek:disabled { opacity:.4 }
 .lyr { padding:7px 0; font-size:15px; color:hsl(var(--muted-foreground));
@@ -245,6 +303,37 @@ main { flex:1; overflow:hidden; display:flex; flex-direction:column }
 @keyframes fb-spin { to { transform:rotate(360deg) } }
 #fb-seek { flex:1 }
 #fixed-bar .muted { font-size:12px; flex:none; width:44px; text-align:center }
+
+/* mini player do canal música: segue tocando fora da aba Música */
+#mini-bar {
+  position:fixed; left:50%; bottom:16px; transform:translateX(-50%); z-index:8;
+  display:flex; align-items:center; gap:12px; padding:10px 14px;
+  width:min(560px, calc(100vw - 32px));
+  background:hsl(var(--card)); border:1px solid hsl(var(--border));
+  border-radius:var(--radius-card); box-shadow:var(--shadow-card);
+  overflow:hidden;
+}
+#mini-bar[hidden] { display:none }
+#mb-art { width:44px; height:44px; border-radius:8px; object-fit:cover; flex:none;
+  background:hsl(var(--muted)) }
+#mb-progress { position:absolute; left:0; top:0; height:3px; width:0;
+  background:hsl(var(--accent)); transition:width 1s linear }
+#mb-info { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; cursor:pointer }
+#mb-title { font-family:var(--font-display); font-size:14px; font-weight:600;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+#mb-sub { font-size:11px; color:hsl(var(--muted-foreground)) }
+#mini-bar .skip { background:transparent; border:none; height:36px; width:36px; padding:0;
+  color:hsl(var(--muted-foreground)) }
+#mini-bar .skip:hover { color:hsl(var(--foreground)); opacity:1 }
+#mini-bar .skip svg { width:20px; height:20px; fill:currentColor; stroke:none }
+#mb-toggle {
+  background:hsl(var(--accent)); color:hsl(var(--primary-foreground));
+  border:none; height:38px; width:38px; padding:0; border-radius:50%; flex:none;
+  transition:transform .12s;
+}
+#mb-toggle:hover { transform:scale(1.05); opacity:1 }
+#mb-toggle svg { width:18px; height:18px; fill:currentColor; stroke:none }
+#mb-toggle svg.off { display:none }
 
 /* dialog */
 dialog {
@@ -354,18 +443,28 @@ dialog .desc { font-size:13px; color:hsl(var(--muted-foreground)); margin-bottom
   background-size:200% 100%; animation:shimmer 1.4s infinite }
 @keyframes shimmer { to { background-position:-200% 0 } }
 
-/* toast */
+/* toast: um por vez; a borda esquerda conta o tipo (vermelho erro, âmbar
+   info/ação, amarelo aviso). Sem hex: só tokens do tema. */
 #toast {
-  position:fixed; bottom:20px; left:50%; transform:translate(-50%, 12px);
+  position:fixed; bottom:24px; left:50%; transform:translate(-50%, 12px) scale(.98);
+  display:flex; align-items:center; gap:14px;
   background:hsl(var(--surface-2)); border:1px solid hsl(var(--border));
-  border-left:3px solid hsl(var(--destructive)); box-shadow:var(--shadow-card);
-  border-radius:var(--radius); padding:12px 16px; font-size:13px; max-width:min(560px,90vw);
-  opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; z-index:20;
+  border-left:3px solid hsl(var(--destructive)); border-radius:var(--radius-card);
+  box-shadow:var(--shadow-card); padding:14px 18px; font-size:13px;
+  max-width:min(560px, calc(100vw - 32px));
+  opacity:0; pointer-events:none;
+  transition:opacity .18s ease, transform .18s ease; z-index:20;
 }
-#toast.on { opacity:1; transform:translate(-50%, 0); pointer-events:auto }
+#toast.on { opacity:1; transform:translate(-50%, 0); pointer-events:auto; cursor:pointer }
 #toast.info { border-left-color:hsl(var(--accent)) }
-#toast { display:flex; align-items:center; gap:14px }
-#toast button { height:28px; padding:0 12px; font-size:12px; flex:none }
+#toast.warning { border-left-color:hsl(var(--warning)) }
+#toast span { line-height:1.45 }
+#toast button {
+  height:32px; padding:0 14px; font-size:12px; font-weight:600; flex:none;
+  background:hsl(var(--accent)); color:hsl(var(--primary-foreground)); border:none;
+  border-radius:var(--radius);
+}
+#toast button:hover { opacity:.9 }
 /* tremidinha só enquanto toca a abertura */
 @keyframes shake {
   0%,100% { transform: translate(0,0) rotate(0) }
