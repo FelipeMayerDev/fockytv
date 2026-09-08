@@ -1,0 +1,42 @@
+/* ─────────────────────────────────────────────────────────────────────
+   FockyTV — tokens do tema "Cinema Escuro".
+   Único lugar onde cor, tipo, raio e sombra são DEFINIDOS. Componentes
+   (assets/app.css) só consomem via var(). Documentação: docs/design-system.md
+   Formato dos tokens de cor: tripla HSL sem hsl() — use hsl(var(--x))
+   e hsl(var(--x) / .4) quando precisar de alfa.
+   ───────────────────────────────────────────────────────────────────── */
+:root {
+  /* superfícies: preto quente, não azulado */
+  --background:240 6% 4%;          /* #0a0a0b — fundo do app */
+  --surface-2:240 6% 6.5%;         /* #0f0f11 — barras e cards elevados */
+  --card:240 6% 6.5%;
+  --card-foreground:36 12% 95%;
+  --muted:240 5% 10%;              /* #17171a — chip/hover */
+  --muted-foreground:40 3% 55%;    /* #8b8a88 — texto secundário */
+  --border:240 5% 14%;             /* #232327 — hairline */
+  --foreground:36 15% 95%;         /* #f4f2ef — off-white quente */
+
+  /* acento único: âmbar. É o CTA, o link e o progresso — nada mais. */
+  --accent:33 84% 60%;
+  --primary:33 84% 60%;
+  --primary-foreground:36 40% 7%;  /* texto sobre o âmbar */
+  --ring:33 84% 60%;
+
+  /* estados */
+  --destructive:0 72% 51%;         /* AO VIVO, parar, erro */
+  --success:142 71% 45%;           /* voz detectada na sala */
+  --warning:38 92% 50%;            /* avisos da sala de músicos */
+
+  /* tipografia — display só em marca e números grandes */
+  --font-sans:"IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display:"Bricolage Grotesque", "IBM Plex Sans", ui-sans-serif, sans-serif;
+
+  /* forma */
+  --radius:0.5rem;                 /* controles: botão, input, chip */
+  --radius-card:18px;              /* miniatura da grade, cards grandes */
+  --radius-pill:999px;
+
+  /* profundidade */
+  --shadow-card:0 12px 40px hsl(0 0% 0% / .45);
+  --glow-top:radial-gradient(ellipse at 30% -20%, hsl(var(--accent) / .16), transparent 62%);
+}

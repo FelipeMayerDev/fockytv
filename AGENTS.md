@@ -16,3 +16,10 @@ explicitamente. Commits e push na branch corrente não dependem disso.
   latest-linux.yml, latest.yml); o Windows compila no GitHub Actions
   (`.github/workflows/release.yml`, dispara na tag).
 - WS da sala de músicos passa por `/api/fixed/ws/jam` (proxy do broadcast-box).
+
+## Design
+
+O tema vive em `ui/assets/theme.css` (tokens) e `ui/assets/app.css`
+(componentes); `ui/index.html` não tem mais `<style>`. Regras e padrões:
+`docs/design-system.md`. Cor/raio/tipo novos entram como token, não como
+literal no componente.

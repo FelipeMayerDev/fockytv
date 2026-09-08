@@ -1,0 +1,403 @@
+* { box-sizing:border-box; margin:0 }
+[hidden] { display:none !important }
+a { color:hsl(var(--accent)); text-decoration:none }
+a:hover { color:hsl(var(--accent) / .8) }
+body {
+  font:14px/1.5 var(--font-sans);
+  -webkit-font-smoothing:antialiased;
+  background:hsl(var(--background)); color:hsl(var(--foreground));
+  height:100vh; overflow:hidden; display:flex; flex-direction:column;
+}
+button {
+  font:inherit; font-weight:500; cursor:pointer; border-radius:var(--radius);
+  border:1px solid transparent; padding:0 16px; height:36px;
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  background:hsl(var(--primary)); color:hsl(var(--primary-foreground));
+  transition:opacity .15s, background .15s;
+}
+button:hover { opacity:.9 }
+button.outline { background:transparent; color:hsl(var(--foreground)); border-color:hsl(var(--border)) }
+button.outline:hover { background:hsl(var(--muted)); opacity:1 }
+button.ghost { background:transparent; color:hsl(var(--muted-foreground)) }
+button.ghost:hover { background:hsl(var(--muted)); color:hsl(var(--foreground)); opacity:1 }
+
+/* scrollbar fina no tema do app (o padrão do navegador grita no escuro) */
+* { scrollbar-width:thin; scrollbar-color:hsl(var(--muted)) transparent }
+::-webkit-scrollbar { width:8px; height:8px }
+::-webkit-scrollbar-thumb { background:hsl(var(--muted)); border-radius:999px }
+::-webkit-scrollbar-track { background:transparent }
+::-webkit-scrollbar-corner { background:transparent }
+button.destructive { background:hsl(var(--destructive)); color:#fff }
+button:focus-visible { outline:2px solid hsl(var(--accent)); outline-offset:2px }
+
+input, select {
+  font:inherit; height:36px; padding:0 10px; border-radius:var(--radius);
+  background:hsl(var(--background)); color:hsl(var(--foreground));
+  border:1px solid hsl(var(--border)); width:100%;
+}
+input:focus, select:focus { outline:2px solid hsl(var(--ring)); outline-offset:-1px }
+label { font-size:13px; font-weight:500; color:hsl(var(--muted-foreground)) }
+
+.card {
+  background:hsl(var(--card)); border:1px solid hsl(var(--border));
+  border-radius:var(--radius-card); padding:24px;
+}
+.muted { color:hsl(var(--muted-foreground)) }
+
+/* switch */
+.switch { position:relative; width:40px; height:22px; flex:none; cursor:pointer }
+.switch input { position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer }
+.switch span {
+  position:absolute; inset:0; border-radius:999px; background:hsl(var(--muted));
+  transition:background .15s; pointer-events:none;
+}
+.switch span::after {
+  content:''; position:absolute; top:2px; left:2px; width:18px; height:18px;
+  border-radius:50%; background:hsl(var(--foreground)); transition:transform .15s;
+}
+.switch input:checked + span { background:hsl(var(--accent)) }
+.switch input:disabled { cursor:not-allowed }
+.switch input:disabled + span { opacity:.45 }
+.switch input:checked + span::after { transform:translateX(18px) }
+
+/* header */
+.bar {
+  display:flex; align-items:center; gap:10px; padding:10px 20px; flex:none;
+  border-bottom:1px solid hsl(var(--border));
+  background:hsl(var(--background)); position:sticky; top:0; z-index:5;
+}
+.bar h1 { font-family:var(--font-display); font-size:19px; font-weight:800;
+          letter-spacing:-.03em }
+.spacer { flex:1 }
+button svg { width:16px; height:16px; flex:none; fill:none;
+  stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round }
+button.icon { width:36px; padding:0 }
+.player-ctl { display:flex; align-items:center; gap:4px }
+
+/* header apertado: cai por etapas em vez de estourar */
+@media (max-width:1000px) {
+  #live-stats, #net-stats, .pill .sep { display:none }
+  #viewers-pill { max-width:200px }
+}
+@media (max-width:780px) {
+  #viewers-pill { display:none }
+}
+@media (max-width:780px) {
+  .pill span:not(.dot) { display:none }   /* sobra a bolinha piscando */
+  .pill { padding:0; width:30px; justify-content:center }
+  #who { display:none }                    /* sobra o avatar da inicial */
+  .user { padding:0; width:36px; justify-content:center }
+  #vol { width:56px }
+}
+#vol, #fb-seek {
+  height:4px; padding:0; border:0; border-radius:999px;
+  background:hsl(var(--muted)); appearance:none; cursor:pointer;
+}
+#vol { width:80px }
+#vol::-webkit-slider-thumb, #fb-seek::-webkit-slider-thumb {
+  appearance:none; width:12px; height:12px; border-radius:50%;
+  background:hsl(var(--accent)); cursor:pointer;
+}
+#vol:focus, #fb-seek:focus { outline:none }
+#vol:focus-visible, #fb-seek:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:4px }
+.pill {
+  display:flex; align-items:center; gap:8px; height:30px; padding:0 12px;
+  border:1px solid hsl(var(--border)); border-radius:999px; font-size:12px;
+}
+.pill .sep { width:1px; height:12px; background:hsl(var(--border)) }
+#viewers-pill { max-width:320px }
+#viewers-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.dot { width:7px; height:7px; border-radius:50%; background:hsl(var(--destructive));
+       animation:pulse 2s infinite }
+#net-dot { animation:none }   /* qualidade não pisca: a cor já diz tudo */
+@keyframes pulse { 50% { opacity:.25 } }
+.user {
+  background:transparent; border:1px solid hsl(var(--border)); color:hsl(var(--foreground));
+  height:36px; padding:0 12px 0 6px; gap:8px; font-size:13px; font-weight:500;
+}
+.user:hover { background:hsl(var(--muted)); opacity:1 }
+main { flex:1; overflow:hidden; display:flex; flex-direction:column }
+
+/* grade estilo youtube */
+#grid-live { flex:1; overflow:auto; padding:32px; display:grid; gap:26px 24px;
+             background:var(--glow-top);
+             grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); align-content:start }
+.vid { cursor:pointer }
+.vid .thumb {
+  position:relative; aspect-ratio:16/9; border-radius:var(--radius-card); overflow:hidden;
+  background:hsl(var(--muted)); border:1px solid hsl(var(--border));
+  display:grid; place-items:center;
+}
+.vid .thumb img { width:100%; height:100%; object-fit:cover; display:block }
+.vid:hover .thumb { border-color:hsl(var(--accent) / .55); box-shadow:var(--shadow-card) }
+.vid .badge {
+  position:absolute; left:12px; bottom:12px; background:hsl(var(--destructive));
+  color:#fff; font-size:11px; font-weight:600; padding:2px 6px; border-radius:4px;
+}
+.vid .meta { display:flex; gap:10px; margin-top:10px; align-items:center }
+.avatar.sm { width:24px; height:24px; font-size:11px }
+.avatar {
+  width:36px; height:36px; border-radius:50%; flex:none; display:grid; place-items:center;
+  background:hsl(var(--muted)); font-weight:600; font-size:14px; text-transform:uppercase;
+}
+.vid .title { font-size:15px; font-weight:600; letter-spacing:-.01em }
+.vid .sub { font-size:12px; color:hsl(var(--muted-foreground)) }
+.empty { grid-column:1/-1; text-align:center; padding:100px 0; color:hsl(var(--muted-foreground)) }
+
+/* palco: a composição publicada, do jeito que quem assiste vê */
+#stage-wrap { flex:1; display:none; flex-direction:column; align-items:center;
+              justify-content:center; gap:10px; padding:10px; background:#000; min-height:0 }
+#stage-wrap.on { display:flex }
+#stage { max-width:100%; min-height:0; flex:0 1 auto; touch-action:none; cursor:grab }
+#stage.drag { cursor:grabbing }
+#cam-ctl { display:flex; align-items:center; gap:12px; flex:none;
+           font-size:12px; color:hsl(var(--muted-foreground)) }
+#cam-ctl label { display:flex; align-items:center; gap:8px }
+
+#player-wrap { flex:1; background:#000; display:none; min-height:0; position:relative }
+#player-wrap.on { display:block }
+#player-wrap video { width:100%; height:100%; object-fit:contain; display:block }
+/* autoplay bloqueado (iframe do Discord): overlay de desbloqueio por clique */
+#watch-start { position:absolute; inset:0; display:grid; place-items:center; z-index:5;
+  background:#000a; color:#fff; font:inherit; font-weight:600 }
+#player-tools { position:absolute; top:12px; left:12px; z-index:6; display:flex; gap:4px }
+#player-tools .ghost { background:#0009 }
+#fixed-loading { position:absolute; inset:0 372px 0 0; z-index:7; display:grid; place-items:center;
+  background:#0008; pointer-events:none }
+#player-wrap.tv-panel-hidden #fixed-loading { right:0 }
+#fixed-loading div { width:min(520px, 72%); text-align:center; font-weight:600 }
+#fixed-loading i { display:block; height:12px; margin-top:10px; overflow:hidden; border-radius:999px;
+  background:hsl(var(--muted)) }
+#fixed-loading i::after { content:''; display:block; height:100%; width:var(--progress); background:hsl(var(--accent)) }
+#fixed-panel {
+  position:absolute; top:0; right:0; bottom:0; width:min(360px, 92vw);
+  background:hsl(var(--card)); border-left:1px solid hsl(var(--border));
+  border-radius:0; padding:16px; overflow:auto; z-index:4;
+}
+#fixed-panel h3 { font-size:15px; font-weight:600; margin-bottom:2px }
+#fixed-panel-toggle { position:absolute; top:12px; right:382px; z-index:6 }
+#player-wrap.tv-panel-hidden #fixed-panel-toggle { right:12px }
+
+/* canal música: visual centrado, letra rolando (spotify-like).
+   right acompanhando o painel lateral: o centro fica no espaço do vídeo,
+   não da tela toda (mesma margem da #fixed-bar) */
+#music-view { position:absolute; left:0; top:0; bottom:0; right:372px; z-index:3;
+  display:none; background:linear-gradient(180deg, hsl(var(--surface-2)), hsl(var(--background)) 70%) }
+#music-view.on { display:flex }
+#mv-main { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center;
+  padding:28px 24px 16px; overflow:hidden }
+#mv-art { width:min(240px, 26vh); aspect-ratio:1; border-radius:12px; object-fit:cover;
+  box-shadow:0 12px 40px #000a; flex:none }
+#mv-title { font-size:17px; font-weight:600; margin-top:18px; max-width:100%;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+#mv-sub { font-size:13px; margin-top:2px }
+#lyrics { flex:1; width:min(640px, 100%); overflow-y:auto; margin-top:14px;
+  /* referencial do offsetTop das linhas: sem isto o auto-scroll mede contra o
+     #music-view (absoluto) e rola além da linha atual — a certa fica acima */
+  position:relative;
+  text-align:center; padding:30vh 12px 96px; scrollbar-width:none }
+#lyrics::-webkit-scrollbar { display:none }
+/* ligando a faixa: capa esmaece pulsando até o áudio entrar */
+#music-view.loading #mv-art { animation:mv-load 1.2s ease-in-out infinite }
+@keyframes mv-load { 50% { opacity:.35; filter:saturate(.3) } }
+#fixed-bar button:disabled { opacity:.4; cursor:default; transform:none }
+#fb-seek:disabled { opacity:.4 }
+.lyr { padding:7px 0; font-size:15px; color:hsl(var(--muted-foreground));
+  cursor:pointer; border-radius:6px; transition:color .2s, transform .2s }
+.lyr:hover { color:hsl(var(--foreground)) }
+.lyr.on { color:hsl(var(--accent)); font-weight:600; transform:scale(1.04) }
+
+/* barra de player inferior (spotify-like) */
+#fixed-bar {
+  position:absolute; left:0; right:372px; bottom:0; z-index:5;
+  display:flex; align-items:center; gap:6px; padding:14px 20px 12px;
+  background:linear-gradient(transparent, hsl(var(--background)) 38%);
+}
+#player-wrap.tv-panel-hidden #fixed-bar { right:0 }
+#fixed-bar button { flex:none }
+#fixed-bar .skip {
+  background:transparent; border:none; height:44px; width:44px; padding:0;
+  color:hsl(var(--muted-foreground));
+}
+#fixed-bar .skip:hover { color:hsl(var(--foreground)); opacity:1 }
+#fixed-bar .skip svg { width:24px; height:24px; fill:currentColor; stroke:none }
+#fb-toggle {
+  background:hsl(var(--foreground)); color:hsl(var(--background));
+  border:none; height:46px; width:46px; padding:0; border-radius:50%;
+  transition:transform .12s;
+}
+#fb-toggle:hover { transform:scale(1.05); opacity:1 }
+#fb-toggle svg { width:22px; height:22px; fill:currentColor; stroke:none }
+/* SVG não tem a propriedade/atributo hidden utilizável do JS — classe na régua */
+#fb-toggle svg.off { display:none }
+#fb-toggle.busy svg { display:none }
+#fb-toggle.busy::after {
+  content:''; width:18px; height:18px; border-radius:50%;
+  border:2.5px solid hsl(var(--background) / .3); border-top-color:hsl(var(--background));
+  animation:fb-spin .8s linear infinite;
+}
+@keyframes fb-spin { to { transform:rotate(360deg) } }
+#fb-seek { flex:1 }
+#fixed-bar .muted { font-size:12px; flex:none; width:44px; text-align:center }
+
+/* dialog */
+dialog {
+  margin:auto;   /* o * { margin:0 } acima mata o padrão que centraliza */
+  border:1px solid hsl(var(--border)); border-radius:var(--radius-card);
+  background:hsl(var(--card)); color:hsl(var(--foreground));
+  padding:24px; width:min(560px, 92vw); max-height:86vh; overflow:auto;
+}
+dialog::backdrop { background:#000c; backdrop-filter:blur(2px) }
+dialog h3 { font-size:17px; font-weight:600; margin-bottom:4px }
+dialog .desc { font-size:13px; color:hsl(var(--muted-foreground)); margin-bottom:20px }
+.field { display:flex; flex-direction:column; gap:6px; margin-bottom:16px }
+.row { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:16px }
+.opts { display:grid; grid-template-columns:1fr 1fr; gap:16px }
+.actions { display:flex; justify-content:flex-end; gap:8px; margin-top:20px }
+
+/* sala de músicos */
+.jam-warn {
+  background:hsl(var(--warning) / .12); border:1px solid hsl(var(--warning) / .4);
+  border-radius:var(--radius); padding:10px 14px; font-size:13px; margin-bottom:16px;
+}
+/* pílulas de quem está na sala: acendem quando detecta voz */
+#jam-pills { display:flex; flex-wrap:wrap; gap:8px }
+.pill-jam {
+  display:inline-flex; align-items:center; gap:8px; padding:5px 14px 5px 10px;
+  border-radius:999px; background:hsl(var(--muted)); border:1px solid hsl(var(--border));
+  font-size:13px; font-weight:500; transition:border-color .12s, box-shadow .12s;
+}
+.pill-jam .pdot { width:8px; height:8px; border-radius:50%; flex:none;
+  background:hsl(var(--muted-foreground)); transition:background .12s }
+.pill-jam.talking { border-color:hsl(var(--success)); box-shadow:0 0 8px hsl(var(--success) / .35) }
+.pill-jam.talking .pdot { background:hsl(var(--success)) }
+.pill-jam input[type=range] { display:none; width:64px; height:4px; padding:0; border:0;
+  appearance:none; background:hsl(var(--border)); border-radius:999px }
+.pill-jam input[type=range]::-webkit-slider-thumb { appearance:none; width:10px; height:10px;
+  border-radius:50%; background:hsl(var(--foreground)) }
+.pill-jam:hover input[type=range] { display:inline }
+/* canal 🎸 Sala: conexão no centro, quem está na sala no painel da direita
+   (mesmo esquema do #music-view + #fixed-panel) */
+#jam-view { position:absolute; left:0; top:0; bottom:0; right:372px; z-index:3;
+  display:none; background:linear-gradient(180deg, hsl(var(--surface-2)), hsl(var(--background)) 70%) }
+#jam-view.on { display:flex }
+#jam-main { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center;
+  justify-content:center; gap:14px; padding:28px 24px; overflow:auto }
+#jam-card { width:min(420px, 100%) }
+#jam-panel { position:absolute; top:0; right:0; bottom:0; width:min(360px, 92vw);
+  background:hsl(var(--card)); border-left:1px solid hsl(var(--border));
+  padding:16px; overflow:auto; z-index:4 }
+#jam-panel h3 { font-size:15px; font-weight:600; margin-bottom:2px }
+.jam-gain { display:flex; align-items:center; gap:8px }
+.jam-gain input[type=range] { flex:1; height:4px; padding:0; border:0;
+  appearance:none; background:hsl(var(--border)); border-radius:999px }
+.jam-gain input[type=range]::-webkit-slider-thumb { appearance:none; width:12px; height:12px;
+  border-radius:50%; background:hsl(var(--foreground)) }
+.jam-gain .jg-val { font-size:12px; width:34px; text-align:center; flex:none }
+.jg-meter { width:56px; height:4px; border-radius:999px; background:hsl(var(--border));
+  overflow:hidden; flex:none }
+.jg-meter i { display:block; height:100%; width:0; background:hsl(var(--success)); transition:width .12s }
+#jam-chat { width:min(560px,100%); flex:1; min-height:0; display:flex; flex-direction:column; padding:0 }
+#jam-msgs { flex:1; overflow:auto; display:flex; flex-direction:column; gap:4px; padding:12px }
+.jam-msg { font-size:13px; line-height:1.45; word-wrap:break-word }
+.jam-msg b { margin-right:6px; color:hsl(var(--muted-foreground)) }
+.jam-msg.me b { color:hsl(var(--success)) }
+#jam-msg-form { display:flex; gap:8px; padding:12px; border-top:1px solid hsl(var(--border)) }
+/* card do /yt: player compartilhado da sala */
+#jam-yt-dock { flex:none; border-bottom:1px solid hsl(var(--border)) }
+#jam-yt-dock .jam-yt { margin:0; border:0; border-radius:0 }
+.jam-yt { border:1px solid hsl(var(--border)); border-radius:10px; overflow:hidden;
+  background:hsl(var(--card)); margin:4px 0 }
+.jam-yt .jy-title { font-size:12px; font-weight:600; padding:8px 10px 6px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.jam-yt .jy-frame { position:relative; aspect-ratio:16/9; background:#000 }
+.jam-yt .jy-frame iframe, .jam-yt .jy-frame img { width:100%; height:100%; object-fit:cover; display:block }
+.jam-yt .jy-start { position:absolute; inset:0; display:grid; place-items:center;
+  background:#000a; color:#fff; font:inherit; font-weight:600 }
+.jam-yt .jy-ctl { display:flex; align-items:center; gap:8px; padding:8px 10px; font-size:12px }
+.jam-yt .jy-ctl .jy-seek { flex:1; height:4px; padding:0; border:0; appearance:none;
+  background:hsl(var(--border)); border-radius:999px }
+.jam-yt .jy-ctl .jy-seek::-webkit-slider-thumb { appearance:none; width:12px; height:12px;
+  border-radius:50%; background:hsl(var(--foreground)) }
+.jam-yt .jy-ctl .muted { font-variant-numeric:tabular-nums; flex:none }
+#jam-main.joined { justify-content:flex-start }
+
+#sources { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+           gap:10px; margin:16px 0; max-height:230px; overflow:auto }
+#sources figure {
+  cursor:pointer; padding:6px; border-radius:var(--radius);
+  border:2px solid transparent; background:hsl(var(--muted));
+}
+#sources figure:hover, #sources figure.sel { border-color:hsl(var(--ring)) }
+#sources img { width:100%; aspect-ratio:16/10; object-fit:cover; border-radius:4px; background:#000 }
+#sources figcaption { font-size:11px; margin-top:5px; color:hsl(var(--muted-foreground));
+                      white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+#cookies-file { width:100%; color:hsl(var(--muted-foreground)) }
+.err { color:hsl(var(--destructive)); font-size:13px; min-height:1.2em }
+
+/* skeleton da miniatura */
+.skeleton { position:absolute; inset:0; background:
+  linear-gradient(90deg, hsl(var(--muted)) 25%, hsl(var(--border)) 50%, hsl(var(--muted)) 75%);
+  background-size:200% 100%; animation:shimmer 1.4s infinite }
+@keyframes shimmer { to { background-position:-200% 0 } }
+
+/* toast */
+#toast {
+  position:fixed; bottom:20px; left:50%; transform:translate(-50%, 12px);
+  background:hsl(var(--card)); border:1px solid hsl(var(--border));
+  border-left:3px solid hsl(var(--destructive));
+  border-radius:var(--radius); padding:12px 16px; font-size:13px; max-width:min(560px,90vw);
+  opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; z-index:20;
+}
+#toast.on { opacity:1; transform:translate(-50%, 0); pointer-events:auto }
+#toast.info { border-left-color:hsl(var(--ring)) }
+#toast { display:flex; align-items:center; gap:14px }
+#toast button { height:28px; padding:0 12px; font-size:12px; flex:none }
+/* tremidinha só enquanto toca a abertura */
+@keyframes shake {
+  0%,100% { transform: translate(0,0) rotate(0) }
+  25%     { transform: translate(-1.5px,1px) rotate(-1.5deg) }
+  50%     { transform: translate(1.5px,-1px) rotate(1.5deg) }
+  75%     { transform: translate(-1px,-1.5px) rotate(1deg) }
+}
+body.intro #brand, body.intro button { animation: shake .18s infinite }
+@media (prefers-reduced-motion: reduce) { body.intro #brand, body.intro button { animation: none } }
+
+/* lives fixas: busca e fila */
+.results { display:flex; flex-direction:column; gap:4px; margin-bottom:12px; max-height:240px; overflow:auto }
+.results button {
+  display:flex; gap:10px; align-items:center; justify-content:flex-start; height:auto; padding:6px;
+  background:transparent; color:hsl(var(--foreground)); border-color:transparent;
+  text-align:left; font-weight:400;
+}
+.results button:hover { background:hsl(var(--muted)); opacity:1 }
+.results img { width:80px; aspect-ratio:16/9; object-fit:cover; border-radius:4px; flex:none; background:#000 }
+.results .r-title { font-size:13px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.results .r-sub { font-size:12px; color:hsl(var(--muted-foreground)) }
+/* loading no botão de resultado: spinner no lugar da thumb enquanto add/toca */
+.results button:disabled { opacity:.6; cursor:default }
+.spinner { width:18px; height:18px; border-radius:50%; flex:none; margin:0 31px;
+  border:2px solid hsl(var(--muted-foreground)); border-top-color:transparent;
+  animation:spin .8s linear infinite }
+@keyframes spin { to { transform:rotate(1turn) } }
+.now {
+  display:flex; gap:10px; align-items:center; border:1px solid hsl(var(--border));
+  border-radius:var(--radius); padding:8px; margin-bottom:12px;
+}
+.now img { width:64px; aspect-ratio:16/9; object-fit:cover; border-radius:4px; flex:none; background:#000 }
+.now .bar-pos { height:4px; border-radius:999px; background:hsl(var(--muted)); margin-top:6px; overflow:hidden }
+.now .bar-pos i { display:block; height:100%; background:hsl(var(--accent)) }
+#music-queue { display:flex; flex-direction:column; gap:2px; overflow:visible; max-height:none }
+#music-queue .q-item {
+  display:flex; align-items:center; gap:10px; padding:6px; border-radius:var(--radius);
+  cursor:pointer;
+}
+#music-queue .q-item:hover, #music-queue .q-item.now { background:hsl(var(--muted)) }
+#music-queue .q-item.loading { animation:mv-load 1.2s ease-in-out infinite }
+#music-queue img { width:44px; height:44px; border-radius:6px; object-fit:cover; flex:none; background:#000 }
+#music-queue .q-title { display:block; min-width:0; font-size:13px; font-weight:500;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+#music-queue .q-sub { display:block; font-size:12px; color:hsl(var(--muted-foreground));
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+#music-queue .q-x { cursor:pointer; color:hsl(var(--muted-foreground)); padding:0 4px }
+#music-queue .q-x:hover { color:hsl(var(--destructive)) }
