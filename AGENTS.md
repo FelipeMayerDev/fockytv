@@ -19,7 +19,7 @@ explicitamente. Commits e push na branch corrente não dependem disso.
 
 ## Design
 
-O tema vive em `ui/assets/theme.css` (tokens) e `ui/assets/app.css`
+O tema ("Sala de Vidro") vive em `ui/assets/theme.css` (tokens) e `ui/assets/app.css`
 (componentes); `ui/index.html` não tem mais `<style>`. Regras e padrões:
 `docs/design-system.md`. Cor/raio/tipo novos entram como token, não como
 literal no componente.
