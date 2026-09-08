@@ -33,10 +33,12 @@
 
   /* forma */
   --radius:0.5rem;                 /* controles: botão, input, chip */
-  --radius-card:18px;              /* miniatura da grade, cards grandes */
+  --radius-card:18px;              /* miniatura da grade, cards grandes, diálogo */
+  --radius-media:10px;             /* thumb pequena em lista (busca, fila) */
   --radius-pill:999px;
 
   /* profundidade */
   --shadow-card:0 12px 40px hsl(0 0% 0% / .45);
   --glow-top:radial-gradient(ellipse at 30% -20%, hsl(var(--accent) / .16), transparent 62%);
+  --scrim:hsl(240 6% 2% / .72);    /* véu sobre vídeo: overlays e backdrop */
 }

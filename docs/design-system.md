@@ -37,9 +37,15 @@ Cor é tripla HSL sem `hsl()` — permite alfa: `hsl(var(--accent) / .4)`.
 - **Tipo**: `--font-sans` (IBM Plex Sans) em tudo; `--font-display`
   (Bricolage Grotesque) só em marca e números grandes.
 - **Forma**: `--radius` em controles (botão, input, chip, 36px de altura),
-  `--radius-card` (18px) em miniatura e card, `--radius-pill` em pílulas.
-- **Profundidade**: `--shadow-card` no hover da miniatura; `--glow-top` é
-  o brilho âmbar no topo da grade.
+  `--radius-card` (18px) em miniatura, card e diálogo, `--radius-media`
+  (10px) em thumb de lista, `--radius-pill` em pílulas.
+- **Profundidade**: `--shadow-card` no hover da miniatura, no diálogo, no
+  toast e na capa da música; `--glow-top` é o brilho âmbar no topo da
+  grade e dos canais música/sala; `--scrim` é o véu sobre vídeo (overlay
+  de play, loading, backdrop de diálogo) — um só, não três pretos.
+
+Único literal permitido: `background:#000` atrás de vídeo e thumbnail
+(letterbox), que é preto de verdade, não cor de tema.
 
 As fontes vêm do Google Fonts (`ui/index.html`, `<head>`). Sem rede o
 fallback é `system-ui` — o layout não quebra, só perde caráter.
@@ -58,8 +64,16 @@ fallback é `system-ui` — o layout não quebra, só perde caráter.
 - **Ícones**: SVG inline, grade 24, `stroke:currentColor`, `stroke-width:2`,
   pontas arredondadas. Sem emoji na interface.
 - **Progresso e seek** são âmbar; o play principal é branco sólido.
-- **Feedback**: erro no `#toast` (borda esquerda vermelha), info no mesmo
-  toast em âmbar. Diálogo só para decisão do usuário.
+- **Diálogo**: `--radius-card`, `--shadow-card`, backdrop `--scrim` com
+  blur; título em `--font-display` 20px; ações à direita, primário âmbar
+  por último. Só para decisão do usuário.
+- **Toast**: fundo `--surface-2`, borda esquerda de 3px — vermelha em erro,
+  âmbar em `.info`. Nunca mais de um por vez.
+- **Overlay sobre vídeo** (play bloqueado, loading, dock do /yt): `--scrim`,
+  texto em `--foreground`. Nada de preto solto com alfa.
+- **Painel lateral** de 360px: `--surface-2`, título em `--font-display` 17px.
+- **Marcação de "agora"** (fila de música): fundo `hsl(var(--accent) / .12)`
+  e título âmbar — nunca fundo âmbar sólido.
 
 ## Ao adicionar tela nova
 
