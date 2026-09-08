@@ -1,8 +1,11 @@
 const { app, BrowserWindow, Menu, Tray, ipcMain, desktopCapturer, session } = require('electron')
 const { autoUpdater } = require('electron-updater')
-const { spawn } = require('node:child_process')
+const { spawn, execFile, execFileSync } = require('node:child_process')
 const path = require('node:path')
 const fs = require('node:fs')
+
+const hasTool = t => { try { execFileSync('sh', ['-c', `command -v ${t}`], { stdio: 'ignore' }); return true } catch { return false } }
+const linuxAudio = process.platform === 'linux' && hasTool('pw-dump') && hasTool('pw-cat')
 
 // config.json editável fica ao lado do arquivo que o usuário abriu.
 // No AppImage, exe aponta pro mount temporário — o caminho real é $APPIMAGE.
@@ -24,10 +27,6 @@ let picked = null   // id escolhido no overlay
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null)   // sem File/Edit/View
-
-const { execFile, execFileSync } = require('node:child_process')
-const hasTool = t => { try { execFileSync('sh', ['-c', `command -v ${t}`], { stdio: 'ignore' }); return true } catch { return false } }
-const linuxAudio = process.platform === 'linux' && hasTool('pw-dump') && hasTool('pw-cat')
 
   ipcMain.handle('config', () => ({
     ...config,
