@@ -11,6 +11,7 @@ import { join } from "node:path"
 import { WebSocketServer } from "ws"
 import express from "express"
 import { MediaStreamTrackFactory, RTCPeerConnection, useH264, useOPUS } from "werift"
+import { logTrackPlayed, musicHistory } from "./db.js"
 
 const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
 const PORT = +(process.env.PORT ?? 3000)
@@ -667,6 +668,9 @@ async function playCurrent () {
   try {
     await music.runner.startMedia(meta, { video: false, preload: true })
     music.status = "live"
+    // histórico: só grava quando a faixa começou a tocar de verdade (não no add)
+    logTrackPlayed({ video_id: item.id, title: item.title, thumb: item.thumb,
+                     added_by: item.addedBy ?? null, played_at: Date.now() })
   } catch (e) {
     log("[music]", e.message)
     musicIdle()
@@ -928,6 +932,11 @@ app.get("/api/fixed/music/lyrics", wrap(async (req, res) => {
   if (!item) return res.json({ id: null, lines: [] })
   res.json({ id: item.id, lines: (await lyricsOf(item)) ?? [] })
 }))
+// histórico do canal de música: ?days=7 (padrão) limita a janela
+app.get("/api/fixed/music/history", (req, res) => {
+  const days = Math.min(90, Math.max(1, +(req.query.days ?? 7) || 7))
+  res.json(musicHistory(Date.now() - days * 86_400_000))
+})
 app.post("/api/fixed/music/resume", wrap(async (req, res) => {
   // broadcast-box reiniciou etc. deixou o canal em idle com a fila viva: o
   // resume tem que religar, senão o ouvinte fica controlando a timeline
