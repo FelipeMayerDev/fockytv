@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS chat (
   at   INTEGER NOT NULL
 );
 `)
+// tabela criada antes de existir sala por stream: coluna entra por ALTER
+try { db.exec(`ALTER TABLE chat ADD COLUMN room TEXT NOT NULL DEFAULT ''`) } catch {}
+
 
 // faixa que começou a tocar de fato no canal de música (playCurrent no "live")
 export const logTrackPlayed = t =>
@@ -39,12 +42,14 @@ export const musicHistory = (since, limit = 200) =>
               FROM music_history WHERE played_at >= ? ORDER BY played_at DESC LIMIT ?`)
     .all(since, limit)
 
-// chat global: insert + página de scrollback (mais antigas primeiro)
-export const addChatMsg = (nick, text, at) =>
-  db.prepare(`INSERT INTO chat (nick, text, at) VALUES (?, ?, ?)`).run(nick, text, at)
-export const chatPage = (beforeId, limit = 50) =>
+// chat por sala (streamKey): insert + página de scrollback (mais antigas primeiro)
+export const addChatMsg = (nick, text, at, room) =>
+  db.prepare(`INSERT INTO chat (nick, text, at, room) VALUES (?, ?, ?, ?)`)
+    .run(nick, text, at, room)
+export const chatPage = (room, beforeId, limit = 50) =>
   db.prepare(`SELECT id, nick AS "from", text, at FROM chat
-              WHERE id < ? ORDER BY id DESC LIMIT ?`).all(beforeId, limit).reverse()
-export const chatLatest = (limit = 50) =>
+              WHERE room = ? AND id < ? ORDER BY id DESC LIMIT ?`)
+    .all(room, beforeId, limit).reverse()
+export const chatLatest = (room, limit = 50) =>
   db.prepare(`SELECT id, nick AS "from", text, at FROM chat
-              ORDER BY id DESC LIMIT ?`).all(limit).reverse()
+              WHERE room = ? ORDER BY id DESC LIMIT ?`).all(room, limit).reverse()

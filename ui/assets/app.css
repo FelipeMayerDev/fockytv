@@ -145,8 +145,7 @@ button.icon { width:36px; padding:0 }
   70%, 100% { box-shadow:0 0 0 9px hsl(var(--accent) / 0) }
 }
 @media (prefers-reduced-motion: reduce) { #share { animation:none } }
-/* linha: grade/player + chat-dock (quando aberto) dividem a largura */
-main { flex:1; overflow:hidden; display:flex; flex-direction:row }
+main { flex:1; overflow:hidden; display:flex; flex-direction:column }
 
 /* grade estilo youtube */
 #grid-live { flex:1; overflow:auto; padding:32px; display:grid; gap:26px 24px;
@@ -537,28 +536,24 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
 #music-history-list .q-item { text-decoration:none; color:inherit }
 
 
-/* ── chat global: dock à direita da grade/player ────────────────────────── */
-#chat-dock {
-  width:min(300px, 80vw); flex:none; min-height:0; display:flex; flex-direction:column;
+/* ── chat por transmissão: seção no painel fixo + painel próprio pra ──────
+   streams de pessoas (mesmo encaixe/visual do #fixed-panel) ────────────── */
+#chat-panel {
+  position:absolute; top:0; right:0; bottom:0; width:min(360px, 92vw);
   background:hsl(var(--surface-2)); border-left:1px solid hsl(var(--border));
+  padding:20px 16px; overflow:auto; z-index:4;
+  display:flex; flex-direction:column;
 }
-#chat-dock[hidden] { display:none }
-#chat-head { display:flex; align-items:baseline; gap:8px; padding:14px 14px 10px;
-             border-bottom:1px solid hsl(var(--border)) }
-#chat-head h3 { font-family:var(--font-display); font-size:16px; font-weight:800;
-                letter-spacing:-.02em }
-#chat-head .muted { font-size:12px }
-#chat-msgs { flex:1; overflow:auto; padding:10px 14px; display:flex;
-             flex-direction:column; gap:6px }
+#chat-panel[hidden], #fixed-chat[hidden] { display:none }
+#chat-panel h3 { font-family:var(--font-display); font-size:17px; font-weight:800;
+                 letter-spacing:-.02em; margin-bottom:2px }
+#chat-panel .desc { font-size:12px }
+.chat-msgs { flex:1; min-height:120px; overflow:auto; display:flex;
+             flex-direction:column; gap:6px; padding:6px 0 }
+#chat-panel .chat-msgs { flex:1 }
+#fixed-chat .chat-msgs { max-height:260px }
 .chat-msg { font-size:13px; line-height:1.45; overflow-wrap:anywhere }
 .chat-msg b { margin-right:6px; color:hsl(var(--foreground)) }
-#chat-form { display:flex; gap:8px; padding:10px; border-top:1px solid hsl(var(--border)) }
-#chat-form input { flex:1; min-width:0 }
-#chat-form button { flex:none }
-/* botão do header: badge de não-lidas no canto */
-#chat-btn { position:relative }
-#chat-btn .badge {
-  position:absolute; top:2px; right:2px; min-width:16px; height:16px;
-  display:grid; place-items:center; padding:0 4px; border-radius:999px;
-  background:hsl(var(--destructive)); color:#fff; font-size:10px; font-weight:700;
-}
+.chat-form { display:flex; gap:8px; padding-top:8px }
+.chat-form input { flex:1; min-width:0 }
+.chat-form button { flex:none }

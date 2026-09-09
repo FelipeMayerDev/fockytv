@@ -66,11 +66,6 @@
            title="Volume" aria-label="Volume">
   </div>
 
-  <button class="ghost icon" id="chat-btn" hidden title="Chat" aria-label="Chat">
-    <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-    <span class="badge" id="chat-badge" hidden></span>
-  </button>
-
   <button class="outline icon" id="swap" hidden title="Trocar janela" aria-label="Trocar janela">
     <svg viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M10 20H4v-6"/>
       <path d="M20 4 13 11"/><path d="M4 20l7-7"/></svg>
@@ -188,6 +183,15 @@
         <h3 style="margin:14px 0 6px;font-size:14px">Tocou essa semana</h3>
         <div id="music-history-list"></div>
       </div>
+      <div id="fixed-chat" hidden>
+        <h3 style="margin:14px 0 6px;font-size:14px">Chat</h3>
+        <p class="desc" id="fixed-chat-online" style="margin:0 0 6px"></p>
+        <div class="chat-msgs" id="fixed-chat-msgs"></div>
+        <form class="chat-form" id="fixed-chat-form">
+          <input id="fixed-chat-input" maxlength="500" placeholder="fala com a galera…" autocomplete="off">
+          <button>Enviar</button>
+        </form>
+      </div>
       <button class="outline destructive" id="tv-stop" hidden style="width:100%">Parar vídeo</button>
       <p class="err" id="fixed-err"></p>
     </aside>
@@ -246,14 +250,12 @@
       <div id="jam-pills"></div>
     </aside>
 
-    <!-- chat global: todas as streams, com histórico no servidor -->
-    <aside id="chat-dock" hidden>
-      <div id="chat-head">
-        <h3>Chat</h3>
-        <span class="muted" id="chat-online"></span>
-      </div>
-      <div id="chat-msgs"></div>
-      <form id="chat-form">
+    <!-- chat de streams de pessoas (sem sidesheet): mesmo visual do painel fixo -->
+    <aside id="chat-panel" hidden>
+      <h3>Chat</h3>
+      <p class="desc" id="chat-online"></p>
+      <div class="chat-msgs" id="chat-msgs"></div>
+      <form class="chat-form" id="chat-form">
         <input id="chat-input" maxlength="500" placeholder="fala com a galera…" autocomplete="off">
         <button>Enviar</button>
       </form>
@@ -300,8 +302,8 @@
 
   <div class="row" style="margin:12px 0 0">
     <div>
-      <label style="color:hsl(var(--foreground))">Chat global nos canais</label>
-      <p class="desc" style="margin:2px 0 0">conversa ao lado do player, vale pra todas as streams</p>
+      <label style="color:hsl(var(--foreground))">Chat na transmissão</label>
+      <p class="desc" style="margin:2px 0 0">um chat por stream, no painel lateral, aberto junto do player</p>
     </div>
     <label class="switch"><input type="checkbox" id="cfg-chat" data-set="chat" checked><span></span></label>
   </div>
@@ -693,6 +695,10 @@ function showPlayer (key) {
   $('#share-cam').hidden = watchFixed || (!!pc && camOnly)
   clearInterval(poll)
   poll = setInterval(() => (key ? watchdog(key) : refresh()).catch(() => {}), 5000)
+  // chat acompanha o player: streams de pessoas e canais fixos abrem o seu;
+  // estúdio tem chat próprio e a home não tem chat
+  nowWatching = key
+  if (!key || key === 'jam') chatClose()
 }
 
 // Quem assiste não recebe sinal quando o host sai: o WHEP continua de pé, só
@@ -982,21 +988,26 @@ document.querySelectorAll('#dlg-cfg [data-set]').forEach(el =>
   el.onchange = e => localStorage.setItem('set:' + e.target.dataset.set, e.target.checked ? '1' : '0'))
 $('#cfg-close').onclick = () => $('#dlg-cfg').close()
 
-// ── chat global: WS do sidecar, histórico no servidor ────────────────────
-// A mensagem própria renderiza pelo eco do servidor (nunca localmente):
-// uma fonte só de verdade, e o id do banco viabiliza o scrollback.
-const chat = { ws: null, enabled: false, unread: 0, oldest: null, timer: null }
+// ── chat por transmissão: uma sala por stream, aberta junto do player ────
+// Canais fixos: o chat mora no fim do painel lateral; streams de pessoas:
+// painel próprio (#chat-panel, mesmo visual). A mensagem própria renderiza
+// pelo eco do servidor — uma fonte só de verdade, e o id do banco viabiliza
+// o scrollback.
+const chat = { ws: null, room: null, oldest: null, timer: null }
+let nowWatching = null   // streamKey aberto no player (showPlayer) pra religar no toggle
 
-const chatUrl = () => cfg.serverUrl.replace(/^http/, 'ws') + '/api/fixed/ws/chat?nick=' + encodeURIComponent(nick)
+const chatEls = room => FIXED_KEYS.includes(room) && room !== 'jam'
+  ? { msgs: $('#fixed-chat-msgs'), online: $('#fixed-chat-online'), input: $('#fixed-chat-input') }
+  : { msgs: $('#chat-msgs'), online: $('#chat-online'), input: $('#chat-input') }
 
 function chatRender (m, append = true) {
-  const box = $('#chat-msgs')
+  if (!chat.room) return
+  const box = chatEls(chat.room).msgs
   const stick = append && box.scrollHeight - box.scrollTop - box.clientHeight < 40
   const el = document.createElement('div')
   el.className = 'chat-msg'
   el.dataset.id = m.id
-  const t = new Date(m.at)
-  el.title = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  el.title = new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   const who = document.createElement('b')
   who.textContent = m.from
   const txt = document.createElement('span')
@@ -1005,81 +1016,75 @@ function chatRender (m, append = true) {
   if (append) {
     box.append(el)
     if (stick) box.scrollTop = box.scrollHeight
+    chat.oldest ??= m.id
   } else {
     box.prepend(el)
-    if (chat.oldest === null) chat.oldest = m.id
+    chat.oldest = m.id
   }
-  if (append && m.id) chat.oldest ??= m.id
 }
 
-const chatBadge = () => {
-  $('#chat-badge').hidden = !chat.unread || !$('#chat-dock').hidden
-  $('#chat-badge').textContent = chat.unread > 99 ? '99+' : chat.unread || ''
-}
+const chatUrl = room =>
+  cfg.serverUrl.replace(/^http/, 'ws') + '/api/fixed/ws/chat?nick=' +
+  encodeURIComponent(nick) + '&room=' + encodeURIComponent(room)
 
 function chatConnect () {
-  if (!chat.enabled || chat.ws) return
+  const room = chat.room
+  if (!room || chat.ws) return
   let opened = false
-  const ws = new WebSocket(chatUrl())
+  const ws = new WebSocket(chatUrl(room))
   chat.ws = ws
   ws.onopen = () => { opened = true }
   ws.onmessage = e => {
+    if (chat.room !== room) return            // já trocou de stream
     let m
     try { m = JSON.parse(e.data) } catch { return }
     if (m.type === 'history') {
-      $('#chat-msgs').replaceChildren()
+      const box = chatEls(room).msgs
+      box.replaceChildren()
       chat.oldest = null
-      for (const c of m.msgs) { chatRender(c); chat.oldest ??= c.id }
-      $('#chat-msgs').scrollTop = $('#chat-msgs').scrollHeight
+      for (const c of m.msgs) chatRender(c)
+      box.scrollTop = box.scrollHeight
     } else if (m.type === 'count') {
-      $('#chat-online').textContent = m.n > 1 ? `${m.n} online` : 'só você'
-    } else if (m.type === 'chat') {
-      chatRender(m)
-      if ($('#chat-dock').hidden) { chat.unread++; chatBadge(); sfx.chat?.() }
-    }
+      chatEls(room).online.textContent = m.n > 1 ? `${m.n} pessoas aqui` : 'só você por enquanto'
+    } else if (m.type === 'chat') chatRender(m)
   }
   ws.onclose = () => {
-    chat.ws = null
-    if (chat.enabled) chat.timer = setTimeout(chatConnect, opened ? 5000 : 15000)
+    if (chat.ws === ws) chat.ws = null
+    if (chat.room === room && !chat.timer)
+      chat.timer = setTimeout(() => { chat.timer = null; chatConnect() }, opened ? 5000 : 15000)
   }
 }
 
-function chatDisconnect () {
-  clearTimeout(chat.timer)
-  const ws = chat.ws
-  chat.ws = null
-  chat.enabled = false
-  ws?.close()
-  $('#chat-btn').hidden = true
-  $('#chat-dock').hidden = true
+// abre (ou troca) o chat da stream; fecha o anterior se houver
+function chatOpen (room) {
+  if (!setOn('chat') || room === 'jam') return chatClose()
+  if (chat.room === room) return
+  chatClose(true)
+  chat.room = room
+  if (FIXED_KEYS.includes(room)) $('#fixed-chat').hidden = false
+  else $('#chat-panel').hidden = false
+  chatConnect()
+}
+
+function chatClose (keepRoom = false) {
+  clearTimeout(chat.timer); chat.timer = null
+  chat.ws?.close(); chat.ws = null
+  $('#fixed-chat').hidden = true
+  $('#chat-panel').hidden = true
+  if (!keepRoom) chat.room = null
 }
 
 function chatApplySetting () {
-  const on = setOn('chat')
-  $('#chat-btn').hidden = !on
-  if (on && !chat.enabled) {
-    chat.enabled = true
-    chatConnect()
-  } else if (!on && chat.enabled) chatDisconnect()
-}
-
-$('#chat-btn').onclick = () => {
-  const dock = $('#chat-dock')
-  dock.hidden = !dock.hidden
-  if (!dock.hidden) {
-    chat.unread = 0
-    chatBadge()
-    $('#chat-input').focus()
-    $('#chat-msgs').scrollTop = $('#chat-msgs').scrollHeight
-  }
+  if (setOn('chat') && nowWatching) chatOpen(nowWatching)
+  else if (!setOn('chat')) chatClose()
 }
 
 // scrollback: chegou no topo, pagina 50 mais antigas (uma vez por página)
-$('#chat-msgs').onscroll = () => {
-  const box = $('#chat-msgs')
-  if (box.scrollTop > 0 || !chat.oldest || box.dataset.loading) return
+$('#chat-msgs').onscroll = $('#fixed-chat-msgs').onscroll = e => {
+  const box = e.target
+  if (box.scrollTop > 0 || !chat.oldest || box.dataset.loading || !chat.room) return
   box.dataset.loading = '1'
-  fetch(`${cfg.serverUrl}/api/fixed/chat?before=${chat.oldest}`)
+  fetch(`${cfg.serverUrl}/api/fixed/chat?room=${encodeURIComponent(chat.room)}&before=${chat.oldest}`)
     .then(r => r.json())
     .then(rows => {
       const top = box.scrollHeight
@@ -1090,16 +1095,15 @@ $('#chat-msgs').onscroll = () => {
     .finally(() => { delete box.dataset.loading })
 }
 
-$('#chat-form').onsubmit = e => {
-  e.preventDefault()
-  const input = $('#chat-input')
-  const text = input.value.trim()
-  if (!text || !chat.ws || chat.ws.readyState !== WebSocket.OPEN) return
-  chat.ws.send(JSON.stringify({ type: 'chat', text }))
-  input.value = ''
-}
+for (const [form, input] of [['#chat-form', '#chat-input'], ['#fixed-chat-form', '#fixed-chat-input']])
+  $(form).onsubmit = e => {
+    e.preventDefault()
+    const text = $(input).value.trim()
+    if (!text || !chat.ws || chat.ws.readyState !== WebSocket.OPEN) return
+    chat.ws.send(JSON.stringify({ type: 'chat', text }))
+    $(input).value = ''
+  }
 
-chatApplySetting()
 // religar o chat se o toggle mudou nas configurações
 document.querySelectorAll('#dlg-cfg [data-set]').forEach(el =>
   el.addEventListener('change', () => el.dataset.set === 'chat' && chatApplySetting()))
@@ -1573,6 +1577,7 @@ function openPlayer (key) {
   $('#net-dot').style.background = ''
   release(viewer); viewer = null
   showPlayer(key)
+  chatOpen(key)
   watch(key, $('#player-wrap video'), nick)
     .then(p => { viewer = p; setVideoControls(true) })
     .catch(e => { toast(e.message); closePlayer() })
@@ -1844,6 +1849,7 @@ function openFixed (key) {
   clearInterval(lyrTimer)
   lyrTimer = setInterval(tickLyrics, 500)
   if (key === 'music') loadMusicHistory()
+  chatOpen(key)   // chat do canal no fim do painel lateral, aberto por padrão
 }
 
 // histórico da música: "tocou essa semana" — carrega ao abrir a aba

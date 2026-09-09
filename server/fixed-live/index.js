@@ -1032,18 +1032,18 @@ httpServer.on("upgrade", (req, sock, head) => {
   else sock.destroy()
 })
 
-// ── chat global: uma sala só, todas as streams ───────────────────────────
+// ── chat por transmissão: uma sala por streamKey ─────────────────────────
 // Relay + persistência (SQLite): o histórico sobrevive a restart e a UI
-// pagina pra trás com ?before=. Mensagem vai também pro remetente — o cliente
-// renderiza a dele pelo eco, nunca localmente (uma fonte só de verdade).
+// pagina pra trás com ?before=&room=. Mensagem vai também pro remetente —
+// o cliente renderiza a dele pelo eco, nunca localmente (uma fonte só de verdade).
 const chatWss = new WebSocketServer({ noServer: true })
-const chatClients = new Set()
+const chatRooms = new Map()   // room -> Set(ws)
 
-const chatBroadcast = obj => {
+const chatSend = (ws, obj) => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj)) }
+const chatBroadcast = (room, obj) => {
   const data = JSON.stringify(obj)
-  for (const ws of chatClients) if (ws.readyState === ws.OPEN) ws.send(data)
+  for (const ws of chatRooms.get(room) ?? []) if (ws.readyState === ws.OPEN) ws.send(data)
 }
-const chatCount = () => chatBroadcast({ type: "count", n: chatClients.size })
 
 chatWss.on("error", e => log("[chat] wss error:", e.message))
 
@@ -1051,19 +1051,22 @@ chatWss.on("connection", (ws, req) => {
   ws.on("error", e => log("[chat] ws error:", e.message))
   const u = new URL(req.url, "http://x")
   const nick = (u.searchParams.get("nick") ?? "").trim().slice(0, 32)
-  if (!nick) return ws.close(4001, "nick obrigatório")
+  const room = (u.searchParams.get("room") ?? "").trim().slice(0, 64)
+  if (!nick || !room) return ws.close(4001, "nick e room obrigatórios")
 
-  ws.nick = nick
+  ws.room = room
   ws.lastMsg = 0
-  chatClients.add(ws)
-  ws.send(JSON.stringify({ type: "history", msgs: chatLatest(50) }))
-  chatCount()
-  log(`[chat] ${nick} entrou (${chatClients.size})`)
+  const members = chatRooms.get(room) ?? new Set()
+  members.add(ws)
+  chatRooms.set(room, members)
+  ws.send(JSON.stringify({ type: "history", msgs: chatLatest(room, 50) }))
+  chatBroadcast(room, { type: "count", n: members.size })
+  log(`[chat] ${nick} entrou em "${room}" (${members.size})`)
 
   ws.on("message", data => {
     let msg
     try { msg = JSON.parse(data) } catch { return }
-    if (msg.type === "ping") return ws.send(JSON.stringify({ type: "pong", t: msg.t }))
+    if (msg.type === "ping") return chatSend(ws, { type: "pong", t: msg.t })
     if (msg.type !== "chat" || typeof msg.text !== "string") return
     const text = msg.text.trim().slice(0, 500)
     if (!text) return
@@ -1072,21 +1075,26 @@ chatWss.on("connection", (ws, req) => {
     ws.lastMsg = Date.now()
     const at = Date.now()
     let id
-    try { ({ lastInsertRowid: id } = addChatMsg(nick, text, at)) } catch (e) { log("[chat] db:", e.message); return }
-    chatBroadcast({ type: "chat", id, from: nick, text, at })
+    try { ({ lastInsertRowid: id } = addChatMsg(nick, text, at, room)) } catch (e) { log("[chat] db:", e.message); return }
+    chatBroadcast(room, { type: "chat", id, from: nick, text, at })
   })
 
   ws.on("close", () => {
-    chatClients.delete(ws)
-    chatCount()
-    log(`[chat] ${nick} saiu (${chatClients.size})`)
+    const set = chatRooms.get(room)
+    set?.delete(ws)
+    if (set?.size) chatRooms.set(room, set)
+    else chatRooms.delete(room)
+    if (set?.size) chatBroadcast(room, { type: "count", n: set.size })
+    log(`[chat] ${nick} saiu de "${room}" (${set?.size ?? 0})`)
   })
 })
 
 // scrollback: página anterior a uma mensagem (infinito pra trás na UI)
 app.get("/api/fixed/chat", (req, res) => {
+  const room = (req.query.room ?? "").toString().slice(0, 64)
+  if (!room) return res.status(400).json({ error: "room obrigatória" })
   const before = +(req.query.before ?? 0) || Number.MAX_SAFE_INTEGER
-  res.json(chatPage(before, Math.min(100, Math.max(1, +(req.query.limit ?? 50) || 50))))
+  res.json(chatPage(room, before, Math.min(100, Math.max(1, +(req.query.limit ?? 50) || 50))))
 })
 
 // lista de salas pra UI, no formato de canal fixo (status + conteúdo)
