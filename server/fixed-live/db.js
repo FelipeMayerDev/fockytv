@@ -19,6 +19,13 @@ CREATE TABLE IF NOT EXISTS music_history (
   played_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_music_played ON music_history(played_at);
+
+CREATE TABLE IF NOT EXISTS chat (
+  id   INTEGER PRIMARY KEY AUTOINCREMENT,
+  nick TEXT NOT NULL,
+  text TEXT NOT NULL,
+  at   INTEGER NOT NULL
+);
 `)
 
 // faixa que começou a tocar de fato no canal de música (playCurrent no "live")
@@ -31,3 +38,13 @@ export const musicHistory = (since, limit = 200) =>
   db.prepare(`SELECT video_id AS id, title, thumb, added_by AS addedBy, played_at AS playedAt
               FROM music_history WHERE played_at >= ? ORDER BY played_at DESC LIMIT ?`)
     .all(since, limit)
+
+// chat global: insert + página de scrollback (mais antigas primeiro)
+export const addChatMsg = (nick, text, at) =>
+  db.prepare(`INSERT INTO chat (nick, text, at) VALUES (?, ?, ?)`).run(nick, text, at)
+export const chatPage = (beforeId, limit = 50) =>
+  db.prepare(`SELECT id, nick AS "from", text, at FROM chat
+              WHERE id < ? ORDER BY id DESC LIMIT ?`).all(beforeId, limit).reverse()
+export const chatLatest = (limit = 50) =>
+  db.prepare(`SELECT id, nick AS "from", text, at FROM chat
+              ORDER BY id DESC LIMIT ?`).all(limit).reverse()

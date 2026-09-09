@@ -66,6 +66,11 @@
            title="Volume" aria-label="Volume">
   </div>
 
+  <button class="ghost icon" id="chat-btn" hidden title="Chat" aria-label="Chat">
+    <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    <span class="badge" id="chat-badge" hidden></span>
+  </button>
+
   <button class="outline icon" id="swap" hidden title="Trocar janela" aria-label="Trocar janela">
     <svg viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M10 20H4v-6"/>
       <path d="M20 4 13 11"/><path d="M4 20l7-7"/></svg>
@@ -240,6 +245,19 @@
       <button id="jam-leave" hidden style="width:100%;margin-bottom:10px">Sair da sala</button>
       <div id="jam-pills"></div>
     </aside>
+
+    <!-- chat global: todas as streams, com histórico no servidor -->
+    <aside id="chat-dock" hidden>
+      <div id="chat-head">
+        <h3>Chat</h3>
+        <span class="muted" id="chat-online"></span>
+      </div>
+      <div id="chat-msgs"></div>
+      <form id="chat-form">
+        <input id="chat-input" maxlength="500" placeholder="fala com a galera…" autocomplete="off">
+        <button>Enviar</button>
+      </form>
+    </aside>
   </div>
   <div id="stage-wrap">
     <canvas id="stage"></canvas>
@@ -285,7 +303,7 @@
       <label style="color:hsl(var(--foreground))">Chat global nos canais</label>
       <p class="desc" style="margin:2px 0 0">conversa ao lado do player, vale pra todas as streams</p>
     </div>
-    <label class="switch"><input type="checkbox" id="cfg-chat" data-set="chat"><span></span></label>
+    <label class="switch"><input type="checkbox" id="cfg-chat" data-set="chat" checked><span></span></label>
   </div>
 
   <div class="row" style="margin:12px 0 0">
@@ -963,6 +981,128 @@ $('#no-intro').onchange = e =>
 document.querySelectorAll('#dlg-cfg [data-set]').forEach(el =>
   el.onchange = e => localStorage.setItem('set:' + e.target.dataset.set, e.target.checked ? '1' : '0'))
 $('#cfg-close').onclick = () => $('#dlg-cfg').close()
+
+// ── chat global: WS do sidecar, histórico no servidor ────────────────────
+// A mensagem própria renderiza pelo eco do servidor (nunca localmente):
+// uma fonte só de verdade, e o id do banco viabiliza o scrollback.
+const chat = { ws: null, enabled: false, unread: 0, oldest: null, timer: null }
+
+const chatUrl = () => cfg.serverUrl.replace(/^http/, 'ws') + '/api/fixed/ws/chat?nick=' + encodeURIComponent(nick)
+
+function chatRender (m, append = true) {
+  const box = $('#chat-msgs')
+  const stick = append && box.scrollHeight - box.scrollTop - box.clientHeight < 40
+  const el = document.createElement('div')
+  el.className = 'chat-msg'
+  el.dataset.id = m.id
+  const t = new Date(m.at)
+  el.title = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const who = document.createElement('b')
+  who.textContent = m.from
+  const txt = document.createElement('span')
+  txt.textContent = m.text
+  el.append(who, txt)
+  if (append) {
+    box.append(el)
+    if (stick) box.scrollTop = box.scrollHeight
+  } else {
+    box.prepend(el)
+    if (chat.oldest === null) chat.oldest = m.id
+  }
+  if (append && m.id) chat.oldest ??= m.id
+}
+
+const chatBadge = () => {
+  $('#chat-badge').hidden = !chat.unread || !$('#chat-dock').hidden
+  $('#chat-badge').textContent = chat.unread > 99 ? '99+' : chat.unread || ''
+}
+
+function chatConnect () {
+  if (!chat.enabled || chat.ws) return
+  let opened = false
+  const ws = new WebSocket(chatUrl())
+  chat.ws = ws
+  ws.onopen = () => { opened = true }
+  ws.onmessage = e => {
+    let m
+    try { m = JSON.parse(e.data) } catch { return }
+    if (m.type === 'history') {
+      $('#chat-msgs').replaceChildren()
+      chat.oldest = null
+      for (const c of m.msgs) { chatRender(c); chat.oldest ??= c.id }
+      $('#chat-msgs').scrollTop = $('#chat-msgs').scrollHeight
+    } else if (m.type === 'count') {
+      $('#chat-online').textContent = m.n > 1 ? `${m.n} online` : 'só você'
+    } else if (m.type === 'chat') {
+      chatRender(m)
+      if ($('#chat-dock').hidden) { chat.unread++; chatBadge(); sfx.chat?.() }
+    }
+  }
+  ws.onclose = () => {
+    chat.ws = null
+    if (chat.enabled) chat.timer = setTimeout(chatConnect, opened ? 5000 : 15000)
+  }
+}
+
+function chatDisconnect () {
+  clearTimeout(chat.timer)
+  const ws = chat.ws
+  chat.ws = null
+  chat.enabled = false
+  ws?.close()
+  $('#chat-btn').hidden = true
+  $('#chat-dock').hidden = true
+}
+
+function chatApplySetting () {
+  const on = setOn('chat')
+  $('#chat-btn').hidden = !on
+  if (on && !chat.enabled) {
+    chat.enabled = true
+    chatConnect()
+  } else if (!on && chat.enabled) chatDisconnect()
+}
+
+$('#chat-btn').onclick = () => {
+  const dock = $('#chat-dock')
+  dock.hidden = !dock.hidden
+  if (!dock.hidden) {
+    chat.unread = 0
+    chatBadge()
+    $('#chat-input').focus()
+    $('#chat-msgs').scrollTop = $('#chat-msgs').scrollHeight
+  }
+}
+
+// scrollback: chegou no topo, pagina 50 mais antigas (uma vez por página)
+$('#chat-msgs').onscroll = () => {
+  const box = $('#chat-msgs')
+  if (box.scrollTop > 0 || !chat.oldest || box.dataset.loading) return
+  box.dataset.loading = '1'
+  fetch(`${cfg.serverUrl}/api/fixed/chat?before=${chat.oldest}`)
+    .then(r => r.json())
+    .then(rows => {
+      const top = box.scrollHeight
+      for (const c of rows) chatRender(c, false)
+      box.scrollTop = box.scrollHeight - top
+    })
+    .catch(() => {})
+    .finally(() => { delete box.dataset.loading })
+}
+
+$('#chat-form').onsubmit = e => {
+  e.preventDefault()
+  const input = $('#chat-input')
+  const text = input.value.trim()
+  if (!text || !chat.ws || chat.ws.readyState !== WebSocket.OPEN) return
+  chat.ws.send(JSON.stringify({ type: 'chat', text }))
+  input.value = ''
+}
+
+chatApplySetting()
+// religar o chat se o toggle mudou nas configurações
+document.querySelectorAll('#dlg-cfg [data-set]').forEach(el =>
+  el.addEventListener('change', () => el.dataset.set === 'chat' && chatApplySetting()))
 
 // ── compartilhar ─────────────────────────────────────────────────────────
 

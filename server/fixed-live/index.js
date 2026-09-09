@@ -11,7 +11,7 @@ import { join } from "node:path"
 import { WebSocketServer } from "ws"
 import express from "express"
 import { MediaStreamTrackFactory, RTCPeerConnection, useH264, useOPUS } from "werift"
-import { logTrackPlayed, musicHistory } from "./db.js"
+import { logTrackPlayed, musicHistory, addChatMsg, chatPage, chatLatest } from "./db.js"
 
 const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
 const PORT = +(process.env.PORT ?? 3000)
@@ -1027,8 +1027,66 @@ jamWss.on("connection", (ws, req) => {
 const httpServer = app.listen(PORT, () => log(`fixed-live na porta ${PORT}, broadcast-box em ${BB_URL}`))
 httpServer.on("upgrade", (req, sock, head) => {
   // sob o prefixo do proxy do broadcast-box (ReverseProxy repassa o upgrade do WS)
-  if (!req.url.startsWith("/api/fixed/ws/jam")) return sock.destroy()
-  jamWss.handleUpgrade(req, sock, head, ws => jamWss.emit("connection", ws, req))
+  if (req.url.startsWith("/api/fixed/ws/jam")) jamWss.handleUpgrade(req, sock, head, ws => jamWss.emit("connection", ws, req))
+  else if (req.url.startsWith("/api/fixed/ws/chat")) chatWss.handleUpgrade(req, sock, head, ws => chatWss.emit("connection", ws, req))
+  else sock.destroy()
+})
+
+// ── chat global: uma sala só, todas as streams ───────────────────────────
+// Relay + persistência (SQLite): o histórico sobrevive a restart e a UI
+// pagina pra trás com ?before=. Mensagem vai também pro remetente — o cliente
+// renderiza a dele pelo eco, nunca localmente (uma fonte só de verdade).
+const chatWss = new WebSocketServer({ noServer: true })
+const chatClients = new Set()
+
+const chatBroadcast = obj => {
+  const data = JSON.stringify(obj)
+  for (const ws of chatClients) if (ws.readyState === ws.OPEN) ws.send(data)
+}
+const chatCount = () => chatBroadcast({ type: "count", n: chatClients.size })
+
+chatWss.on("error", e => log("[chat] wss error:", e.message))
+
+chatWss.on("connection", (ws, req) => {
+  ws.on("error", e => log("[chat] ws error:", e.message))
+  const u = new URL(req.url, "http://x")
+  const nick = (u.searchParams.get("nick") ?? "").trim().slice(0, 32)
+  if (!nick) return ws.close(4001, "nick obrigatório")
+
+  ws.nick = nick
+  ws.lastMsg = 0
+  chatClients.add(ws)
+  ws.send(JSON.stringify({ type: "history", msgs: chatLatest(50) }))
+  chatCount()
+  log(`[chat] ${nick} entrou (${chatClients.size})`)
+
+  ws.on("message", data => {
+    let msg
+    try { msg = JSON.parse(data) } catch { return }
+    if (msg.type === "ping") return ws.send(JSON.stringify({ type: "pong", t: msg.t }))
+    if (msg.type !== "chat" || typeof msg.text !== "string") return
+    const text = msg.text.trim().slice(0, 500)
+    if (!text) return
+    // spam mínimo: 3 mensagens por segundo vira silêncio (sem erro, só ignora)
+    if (Date.now() - ws.lastMsg < 300) return
+    ws.lastMsg = Date.now()
+    const at = Date.now()
+    let id
+    try { ({ lastInsertRowid: id } = addChatMsg(nick, text, at)) } catch (e) { log("[chat] db:", e.message); return }
+    chatBroadcast({ type: "chat", id, from: nick, text, at })
+  })
+
+  ws.on("close", () => {
+    chatClients.delete(ws)
+    chatCount()
+    log(`[chat] ${nick} saiu (${chatClients.size})`)
+  })
+})
+
+// scrollback: página anterior a uma mensagem (infinito pra trás na UI)
+app.get("/api/fixed/chat", (req, res) => {
+  const before = +(req.query.before ?? 0) || Number.MAX_SAFE_INTEGER
+  res.json(chatPage(before, Math.min(100, Math.max(1, +(req.query.limit ?? 50) || 50))))
 })
 
 // lista de salas pra UI, no formato de canal fixo (status + conteúdo)
