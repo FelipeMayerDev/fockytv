@@ -1266,53 +1266,6 @@ async function status () {
 // "N assistindo" contaria as próprias miniaturas.
 const viewersOf = st => [...new Set((st.sessions ?? []).map(s => s.viewer).filter(Boolean))]
 
-// tile permanente de canal fixo: a miniatura é a capa do que está passando
-// agora (do /api/fixed), não um frame capturado — troca junto com a mídia
-function fixedTile (key) {
-  const st = fixedStates[key]
-  const isTv = key === 'tv'
-
-  const el = document.createElement('div')
-  el.className = 'vid'
-  el.innerHTML =
-    `<div class="thumb"><div class="skeleton"></div></div>
-     <div class="meta"><div class="avatar">${FIXED_LABEL[key].slice(0, 2)}</div>
-       <div style="min-width:0">
-         <div class="title"></div><div class="sub"></div>
-       </div></div>`
-  const thumb = el.querySelector('.thumb')
-
-  if (key === 'jam') {
-    // canal da sala: "ao vivo" quando tem gente tocando, sem mídia pra mostrar
-    const total = st?.total ?? 0
-    thumb.replaceChildren(
-      Object.assign(document.createElement('span'),
-        { className: 'muted',
-          textContent: total ? plural(total, 'músico', 'músicos') : 'sem sala ativa' }),
-      Object.assign(document.createElement('span'),
-        { className: 'badge', textContent: total ? 'AO VIVO' : 'EM ESPERA' }))
-    el.querySelector('.title').textContent = FIXED_LABEL[key]
-    el.querySelector('.sub').textContent = total
-      ? `${st.rooms.length} sala${st.rooms.length > 1 ? 's' : ''} · clique para entrar`
-      : 'entre e toque junto'
-    el.onclick = () => openFixed(key)
-    return el
-  }
-
-  const cur = isTv ? st?.current : st?.queue?.[st?.index]
-  const playing = st && st.status !== 'idle'
-  thumb.replaceChildren(...(cur
-    ? [Object.assign(new Image(), { src: imgSrc(cur.thumb) })]
-    : [Object.assign(document.createElement('span'),
-        { className: 'muted', textContent: 'nada passando' })]),
-    Object.assign(document.createElement('span'),
-      { className: 'badge', textContent: st?.status === 'starting' ? 'CARREGANDO…' : playing ? 'AO VIVO' : 'EM ESPERA' }))
-  el.querySelector('.title').textContent = FIXED_LABEL[key]
-  el.querySelector('.sub').textContent = cur?.title ?? 'clique para escolher algo'
-  el.onclick = () => openFixed(key)
-  return el
-}
-
 // canal 🎸 Sala: sem mídia nem busca — a vista é o painel da sala em si
 function openJam () {
   sfx.watch()
@@ -1370,8 +1323,8 @@ async function refresh () {
     $('#viewers-pill').title = names.join(', ')
   }
 
-  // os canais fixos têm tiles próprios: saem da listagem comum.
-  // Sem ninguém transmitindo, a grade é só a mensagem — nem tiles fixos ficam
+  // Os canais fixos (TV, Música, Sala) são abas do header: não viram tiles.
+  // A grade lista só quem está transmitindo de verdade.
   const others = live.filter(st => !FIXED_KEYS.includes(st.streamKey))
   if (!others.length) {
     const empty = document.createElement('div')
@@ -1384,11 +1337,12 @@ async function refresh () {
     $('#grid-live').replaceChildren(empty)
     return
   }
-  $('#grid-live').replaceChildren(...FIXED_KEYS.map(fixedTile), ...others.map(st => {
+  $('#grid-live').replaceChildren(...others.map(st => {
     const el = document.createElement('div')
     el.className = 'vid'
+    const timeBadge = `<span class="badge time" data-start="${st.streamStart ?? ''}"></span>`
     el.innerHTML =
-      `<div class="thumb"><div class="skeleton"></div><span class="badge">AO VIVO</span></div>
+      `<div class="thumb"><div class="skeleton"></div><span class="badge">AO VIVO</span>${timeBadge}</div>
        <div class="meta"><div class="avatar"></div>
          <div style="min-width:0">
            <div class="title"></div><div class="sub"></div>
@@ -1403,8 +1357,9 @@ async function refresh () {
     const thumb = el.querySelector('.thumb')
     const paint = url => {
       const img = new Image(); img.src = url
-      thumb.replaceChildren(img, Object.assign(document.createElement('span'),
-        { className: 'badge', textContent: 'AO VIVO' }))
+      thumb.replaceChildren(img)
+      thumb.insertAdjacentHTML('beforeend',
+        `<span class="badge">AO VIVO</span>${timeBadge}`)
     }
     if (thumbs.has(st.streamKey)) paint(thumbs.get(st.streamKey))
     else grabThumb(st.streamKey)
@@ -1415,6 +1370,19 @@ async function refresh () {
     return el
   }))
 }
+
+// duração no canto direito da thumb: conta de segundo em segundo enquanto o
+// tile estiver na grade (o badge guarda o início da stream no data-start)
+const fmtElapsed = ms => {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  const p = n => String(n).padStart(2, '0')
+  return s >= 3600 ? `${Math.floor(s / 3600)}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}`
+    : `${Math.floor(s / 60)}:${p(s % 60)}`
+}
+setInterval(() => document.querySelectorAll('.badge.time[data-start]').forEach(b => {
+  const t = Date.parse(b.dataset.start)
+  b.textContent = Number.isNaN(t) ? '' : fmtElapsed(Date.now() - t)
+}), 1000)
 
 let viewer = null   // pc de quem assiste, separado do pc de quem publica
 

@@ -163,6 +163,11 @@ main { flex:1; overflow:hidden; display:flex; flex-direction:column }
   position:absolute; left:12px; bottom:12px; background:hsl(var(--destructive));
   color:#fff; font-size:11px; font-weight:600; padding:2px 6px; border-radius:4px;
 }
+/* duração da transmissão: paralela ao AO VIVO, no canto direito */
+.vid .badge.time {
+  left:auto; right:12px; background:hsl(var(--surface-2));
+  color:hsl(var(--foreground)); font-variant-numeric:tabular-nums;
+}
 .vid .meta { display:flex; gap:10px; margin-top:10px; align-items:center }
 .avatar.sm { width:24px; height:24px; font-size:11px }
 .avatar {
