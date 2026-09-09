@@ -183,22 +183,13 @@
         <h3 style="margin:14px 0 6px;font-size:14px">Tocou essa semana</h3>
         <div id="music-history-list"></div>
       </div>
-      <div id="fixed-chat" hidden>
-        <h3 style="margin:14px 0 6px;font-size:14px">Chat</h3>
-        <p class="desc" id="fixed-chat-online" style="margin:0 0 6px"></p>
-        <div class="chat-msgs" id="fixed-chat-msgs"></div>
-        <form class="chat-form" id="fixed-chat-form">
-          <input id="fixed-chat-input" maxlength="500" placeholder="fala com a galera…" autocomplete="off">
-          <button>Enviar</button>
-        </form>
-      </div>
       <button class="outline destructive" id="tv-stop" hidden style="width:100%">Parar vídeo</button>
       <p class="err" id="fixed-err"></p>
     </aside>
     <button class="ghost icon" id="fixed-panel-toggle" hidden title="Ocultar busca" aria-label="Ocultar busca">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16M11 9l-3 3 3 3"/></svg>
     </button>
-    <!-- TV: chat abre por botão flutuante sobre o vídeo (painel fica pra busca/fila) -->
+    <!-- canais fixos: chat abre por botão flutuante sobre o vídeo -->
     <button class="ghost icon" id="chat-fab" hidden title="Chat" aria-label="Chat">
       <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
       <span class="badge" id="chat-fab-badge" hidden></span>
@@ -1001,9 +992,7 @@ $('#cfg-close').onclick = () => $('#dlg-cfg').close()
 const chat = { ws: null, room: null, oldest: null, timer: null, unread: 0, fab: false }
 let nowWatching = null   // streamKey aberto no player (showPlayer) pra religar no toggle
 
-const chatEls = room => FIXED_KEYS.includes(room) && room !== 'jam'
-  ? { msgs: $('#fixed-chat-msgs'), online: $('#fixed-chat-online'), input: $('#fixed-chat-input') }
-  : { msgs: $('#chat-msgs'), online: $('#chat-online'), input: $('#chat-input') }
+const chatEls = () => ({ msgs: $('#chat-msgs'), online: $('#chat-online'), input: $('#chat-input') })
 
 const chatFabBadge = () => {
   $('#chat-fab-badge').hidden = !chat.unread
@@ -1012,7 +1001,7 @@ const chatFabBadge = () => {
 
 function chatRender (m, append = true) {
   if (!chat.room) return
-  const box = chatEls(chat.room).msgs
+  const box = chatEls().msgs
   const stick = append && box.scrollHeight - box.scrollTop - box.clientHeight < 40
   const el = document.createElement('div')
   el.className = 'chat-msg'
@@ -1051,13 +1040,13 @@ function chatConnect () {
     let m
     try { m = JSON.parse(e.data) } catch { return }
     if (m.type === 'history') {
-      const box = chatEls(room).msgs
+      const box = chatEls().msgs
       box.replaceChildren()
       chat.oldest = null
       for (const c of m.msgs) chatRender(c)
       box.scrollTop = box.scrollHeight
     } else if (m.type === 'count') {
-      chatEls(room).online.textContent = m.n > 1 ? `${m.n} pessoas aqui` : 'só você por enquanto'
+      chatEls().online.textContent = m.n > 1 ? `${m.n} pessoas aqui` : 'só você por enquanto'
     } else if (m.type === 'chat') chatRender(m)
   }
   ws.onclose = () => {
@@ -1068,30 +1057,24 @@ function chatConnect () {
 }
 
 // abre (ou troca) o chat da stream; fecha o anterior se houver
-// TV: fica em modo FAB — conecta e conta não-lidas, painel abre no clique
+// canais fixos ficam em modo FAB — conecta e conta não-lidas, o painel
+// só abre no clique; streams de pessoas abrem o painel direto
 function chatOpen (room) {
   if (!setOn('chat') || room === 'jam') return chatClose()
   if (chat.room === room) return
   chatClose(true)
   chat.room = room
   chat.unread = 0
-  if (room === 'tv') {
-    chat.fab = true
-    $('#chat-fab').hidden = false
-    $('#chat-panel').hidden = true
-    chatFabBadge()
-  } else {
-    chat.fab = false
-    if (FIXED_KEYS.includes(room)) $('#fixed-chat').hidden = false
-    else $('#chat-panel').hidden = false
-  }
+  chat.fab = FIXED_KEYS.includes(room)
+  $('#chat-fab').hidden = !chat.fab
+  $('#chat-panel').hidden = chat.fab
+  if (chat.fab) chatFabBadge()
   chatConnect()
 }
 
 function chatClose (keepRoom = false) {
   clearTimeout(chat.timer); chat.timer = null
   chat.ws?.close(); chat.ws = null
-  $('#fixed-chat').hidden = true
   $('#chat-panel').hidden = true
   $('#chat-fab').hidden = true
   chat.fab = false
@@ -1117,7 +1100,7 @@ function chatApplySetting () {
 }
 
 // scrollback: chegou no topo, pagina 50 mais antigas (uma vez por página)
-$('#chat-msgs').onscroll = $('#fixed-chat-msgs').onscroll = e => {
+$('#chat-msgs').onscroll = e => {
   const box = e.target
   if (box.scrollTop > 0 || !chat.oldest || box.dataset.loading || !chat.room) return
   box.dataset.loading = '1'
@@ -1132,7 +1115,7 @@ $('#chat-msgs').onscroll = $('#fixed-chat-msgs').onscroll = e => {
     .finally(() => { delete box.dataset.loading })
 }
 
-for (const [form, input] of [['#chat-form', '#chat-input'], ['#fixed-chat-form', '#fixed-chat-input']])
+for (const [form, input] of [['#chat-form', '#chat-input']])
   $(form).onsubmit = e => {
     e.preventDefault()
     const text = $(input).value.trim()
@@ -1886,7 +1869,7 @@ function openFixed (key) {
   clearInterval(lyrTimer)
   lyrTimer = setInterval(tickLyrics, 500)
   if (key === 'music' || key === 'tv') loadHistory(key)
-  chatOpen(key)   // chat do canal no fim do painel lateral, aberto por padrão
+  chatOpen(key)   // canais fixos: FAB no player; pessoas: painel aberto
 }
 
 // histórico dos canais fixos: "Tocou essa semana" (música) / "Vídeos dessa
