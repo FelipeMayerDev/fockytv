@@ -179,6 +179,10 @@
       <div class="results" id="fixed-results"></div>
       <div id="fixed-now" class="now" hidden></div>
       <div id="music-queue"></div>
+      <div id="music-history" hidden>
+        <h3 style="margin:14px 0 6px;font-size:14px">Tocou essa semana</h3>
+        <div id="music-history-list"></div>
+      </div>
       <button class="outline destructive" id="tv-stop" hidden style="width:100%">Parar vídeo</button>
       <p class="err" id="fixed-err"></p>
     </aside>
@@ -274,6 +278,30 @@
       <p class="desc" style="margin:2px 0 0">abre o app em silêncio</p>
     </div>
     <label class="switch"><input type="checkbox" id="no-intro"><span></span></label>
+  </div>
+
+  <div class="row" style="margin:12px 0 0">
+    <div>
+      <label style="color:hsl(var(--foreground))">Chat global nos canais</label>
+      <p class="desc" style="margin:2px 0 0">conversa ao lado do player, vale pra todas as streams</p>
+    </div>
+    <label class="switch"><input type="checkbox" id="cfg-chat" data-set="chat"><span></span></label>
+  </div>
+
+  <div class="row" style="margin:12px 0 0">
+    <div>
+      <label style="color:hsl(var(--foreground))">Resumo "Você perdeu"</label>
+      <p class="desc" style="margin:2px 0 0">uma vez por dia, o que rolou enquanto você estava fora</p>
+    </div>
+    <label class="switch"><input type="checkbox" id="cfg-digest" data-set="digest" checked><span></span></label>
+  </div>
+
+  <div class="row" style="margin:12px 0 0">
+    <div>
+      <label style="color:hsl(var(--foreground))">Rich Presence no Discord</label>
+      <p class="desc" style="margin:2px 0 0">mostra no Discord o que você assiste ou transmite</p>
+    </div>
+    <label class="switch"><input type="checkbox" id="cfg-rpc" data-set="rpc"><span></span></label>
   </div>
 
   <div class="actions">
@@ -916,12 +944,24 @@ $('#nick').addEventListener('keydown', e => e.key === 'Enter' && $('#nick-ok').c
 $('#change-nick').onclick = () => askNick(false)
 
 // ── configurações (só preferências locais; grava no próprio toggle) ──────
+// toggles novos usam data-set e vivem em localStorage "set:<nome>"; as
+// features consultam setOn('chat') etc. Padrão vem do checked no HTML.
+const setOn = name => {
+  const raw = localStorage.getItem('set:' + name)
+  if (raw !== null) return raw === '1'
+  const el = document.querySelector(`[data-set="${name}"]`)
+  return el ? el.checked : false
+}
 $('#cfg').onclick = () => {
   $('#no-intro').checked = localStorage.getItem('noIntro') === '1'
+  document.querySelectorAll('#dlg-cfg [data-set]').forEach(el =>
+    el.checked = setOn(el.dataset.set))
   $('#dlg-cfg').showModal()
 }
 $('#no-intro').onchange = e =>
   localStorage.setItem('noIntro', e.target.checked ? '1' : '0')
+document.querySelectorAll('#dlg-cfg [data-set]').forEach(el =>
+  el.onchange = e => localStorage.setItem('set:' + e.target.dataset.set, e.target.checked ? '1' : '0'))
 $('#cfg-close').onclick = () => $('#dlg-cfg').close()
 
 // ── compartilhar ─────────────────────────────────────────────────────────
@@ -1663,6 +1703,39 @@ function openFixed (key) {
   fixedTimer = setInterval(fixedTick, 500)
   clearInterval(lyrTimer)
   lyrTimer = setInterval(tickLyrics, 500)
+  if (key === 'music') loadMusicHistory()
+}
+
+// histórico da música: "tocou essa semana" — carrega ao abrir a aba
+async function loadMusicHistory () {
+  const box = $('#music-history-list')
+  const rows = await fixed('music/history?days=7').catch(() => null)
+  if (!rows) return
+  $('#music-history').hidden = !rows.length
+  const ago = ts => {
+    const m = Math.max(1, Math.round((Date.now() - ts) / 60000))
+    if (m < 60) return `há ${m} min`
+    const h = Math.round(m / 60)
+    if (h < 24) return `há ${h}h`
+    return `há ${Math.round(h / 24)} d`
+  }
+  box.replaceChildren(...rows.map(r => {
+    const el = document.createElement('a')
+    el.className = 'q-item'
+    el.href = `https://www.youtube.com/watch?v=${r.id}`
+    el.target = '_blank'
+    el.rel = 'noopener'
+    el.innerHTML = `<img alt="" loading="lazy">
+      <span style="flex:1;min-width:0">
+        <span class="q-title"></span>
+        <span class="q-sub"></span>
+      </span>
+      <span class="muted" style="font-size:12px">${ago(r.playedAt)}</span>`
+    el.querySelector('img').src = imgSrc(r.thumb)
+    el.querySelector('.q-title').textContent = r.title
+    el.querySelector('.q-sub').textContent = r.addedBy ? `pedida por ${r.addedBy}` : ''
+    return el
+  }))
 }
 
 async function fixedTick () {

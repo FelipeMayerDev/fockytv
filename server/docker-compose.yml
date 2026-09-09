@@ -51,6 +51,8 @@ services:
     # bot": exporte de um navegador logado pra server/cookies.txt e reinicie
     volumes:
       - ./cookies.txt:/app/cookies.txt
+      # SQLite (histórico de músicas, chat): sobrevive a recriação do container
+      - ./fixed-live-data:/app/data
 
   playit:
     image: ghcr.io/playit-cloud/playit-agent:0.15
