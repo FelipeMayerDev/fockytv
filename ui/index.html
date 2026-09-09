@@ -540,6 +540,73 @@ $('#toast').onclick = () => {   // sem ação: clique no corpo dispensa
   if (!$('#toast button')) $('#toast').classList.remove('on')
 }
 
+// ── presença: avisa quando alguém começa a transmitir ou entra num canal ──
+// Cada cliente compara o /api/status com o snapshot anterior. O aviso é o
+// toast (funciona em toda plataforma, inclusive na Activity do Discord) e,
+// onde existe API de notificação com permissão, a notificação do sistema —
+// que brilha mesmo com o app em segundo plano.
+const presence = { streams: new Set(), viewers: new Map() }   // viewers: key → Set
+let presencePrime = true    // primeiro tick só monta a baseline: sem spam no boot
+
+function systemNotify (body) {
+  try {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+    if (!document.hidden && document.hasFocus()) return   // em foco, o toast basta
+    const n = new Notification('FockyTV', { body, icon: 'assets/logo.png' })
+    n.onclick = () => { window.focus(); n.close() }
+  } catch { }   // sem API (ex.: iframe do Discord): o toast cobre
+}
+
+// pedir permissão no primeiro gesto (navegador exige gesto; Electron aceita
+// direto e o Discord nem tem a API — nada quebra em nenhum dos três)
+document.addEventListener('pointerdown', () => {
+  try {
+    if (typeof Notification === 'undefined' || Notification.permission === 'default')
+      Notification.requestPermission()
+  } catch { }
+})
+
+function announce (msg) {
+  toast(msg, null, 'info')
+  systemNotify(msg)
+}
+
+async function presenceTick () {
+  try {
+    const live = await status()
+    const seen = new Set(live.map(st => st.streamKey))
+
+    for (const st of live) {
+      if (!presence.streams.has(st.streamKey)) {
+        presence.streams.add(st.streamKey)
+        if (!presencePrime && !FIXED_KEYS.includes(st.streamKey) && st.streamKey !== nick)
+          announce(`${st.streamKey} começou a compartilhar a tela`)
+      }
+      if (st.streamKey !== 'music' && st.streamKey !== 'tv') continue
+
+      const viewers = new Set(viewersOf(st))
+      const verb = st.streamKey === 'music' ? 'começou a ouvir música' : 'começou a ver o vídeo'
+      for (const v of viewersOf(st)) {
+        const known = presence.viewers.get(st.streamKey)
+        if (!known?.has(v) && !presencePrime && v !== nick)
+          announce(`${v} ${verb}`)
+      }
+      presence.viewers.set(st.streamKey, viewers)
+    }
+
+    // quem saiu: some da baseline pra poder avisar de novo quando voltar
+    for (const k of [...presence.streams]) {
+      if (!seen.has(k)) {
+        presence.streams.delete(k)
+        presence.viewers.delete(k)
+      }
+    }
+    presencePrime = false
+  } catch { }   // rede caiu: tenta de novo no próximo tick
+}
+setInterval(presenceTick, 5000)
+
+
 function setLive (on) {
   $('#live-pill').hidden = !on
   if (!on) $('#viewers-pill').hidden = true   // some com o resto da transmissão
@@ -1092,7 +1159,8 @@ setInterval(async () => {
         (r.qualityLimitationReason && r.qualityLimitationReason !== 'none'
           ? ` · limitado por ${r.qualityLimitationReason}` : '')
   })
-  if (viewer) await showNet()
+  if (viewer) await showNet(viewer)
+  else if (fixedKey === 'music' && musicViewer) await showNet(musicViewer)
   else last = null
 }, 2000)
 
@@ -1105,11 +1173,13 @@ const grade = (loss, rtt, dead) =>
   : loss > 1 || rtt > 200 ? ['hsl(45 90% 55%)', 'instável']
   : ['hsl(142 70% 45%)', 'boa']
 
-async function showNet () {
+// a conexão vem por parâmetro: no canal música quem está no ar é o
+// musicViewer (pc dedicado do áudio), não o viewer do vídeo do player
+async function showNet (pc) {
   // canal música: o que importa é o áudio — kbps no lugar de resolução/fps
   const audioMode = fixedKey === 'music'
   let v, rtt = 0
-  ;(await viewer.getStats()).forEach(r => {
+  ;(await pc.getStats()).forEach(r => {
     if (r.type === 'inbound-rtp' && r.kind === (audioMode ? 'audio' : 'video')) v = r
     // só o par em uso; os outros candidatos têm RTT velho ou nenhum
     if (r.type === 'candidate-pair' && r.nominated) rtt = (r.currentRoundTripTime ?? 0) * 1000
@@ -1367,8 +1437,13 @@ function setVideoControls (ready) {
   $('#net').hidden = !ready
 }
 
+// o canal música toca no <audio> dedicado (musicAudio): os controles de som
+// precisam seguir a mídia que está realmente no ar, senão o slider não faz nada
+const mediaEl = () => (fixedKey === 'music' ? musicAudio : vid)
+
 const drawVolIcon = () => {
-  const off = vid.muted || vid.volume === 0
+  const el = mediaEl()
+  const off = el.muted || el.volume === 0
   $('#ico-vol').innerHTML = off
     ? '<path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/>'
     : '<path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/>'
@@ -1376,15 +1451,17 @@ const drawVolIcon = () => {
 }
 
 $('#mute').onclick = () => {
-  vid.muted = !vid.muted
-  if (!vid.muted && vid.volume === 0) vid.volume = 1
-  $('#vol').value = vid.muted ? 0 : vid.volume
+  const el = mediaEl()
+  el.muted = !el.muted
+  if (!el.muted && el.volume === 0) el.volume = 1
+  $('#vol').value = el.muted ? 0 : el.volume
   drawVolIcon()
 }
 
 $('#vol').oninput = e => {
-  vid.volume = +e.target.value
-  vid.muted = vid.volume === 0
+  const el = mediaEl()
+  el.volume = +e.target.value
+  el.muted = el.volume === 0
   drawVolIcon()
 }
 
