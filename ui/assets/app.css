@@ -516,19 +516,22 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
 .now .bar-pos { height:4px; border-radius:999px; background:hsl(var(--muted)); margin-top:6px; overflow:hidden }
 .now .bar-pos i { display:block; height:100%; background:hsl(var(--accent)) }
 #music-queue { display:flex; flex-direction:column; gap:2px; overflow:visible; max-height:none }
-#music-queue .q-item {
+.q-item {
   display:flex; align-items:center; gap:10px; padding:6px; border-radius:var(--radius);
   cursor:pointer;
 }
-#music-queue .q-item:hover { background:hsl(var(--muted)) }
-#music-queue .q-item.now { background:hsl(var(--accent) / .12) }
-#music-queue .q-item.now .q-title { color:hsl(var(--accent)) }
-#music-queue .q-item.loading { animation:mv-load 1.2s ease-in-out infinite }
-#music-queue img { width:44px; height:44px; border-radius:var(--radius-media);
-                   object-fit:cover; flex:none; background:#000 }
-#music-queue .q-title { display:block; min-width:0; font-size:13px; font-weight:500;
+.q-item:hover { background:hsl(var(--muted)) }
+.q-item.now { background:hsl(var(--accent) / .12) }
+.q-item.now .q-title { color:hsl(var(--accent)) }
+.q-item.loading { animation:mv-load 1.2s ease-in-out infinite }
+#music-queue img, #music-history-list img {
+  width:44px; height:44px; border-radius:var(--radius-media);
+  object-fit:cover; flex:none; background:#000 }
+.q-title { display:block; min-width:0; font-size:13px; font-weight:500;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
-#music-queue .q-sub { display:block; font-size:12px; color:hsl(var(--muted-foreground));
+.q-sub { display:block; font-size:12px; color:hsl(var(--muted-foreground));
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
 #music-queue .q-x { cursor:pointer; color:hsl(var(--muted-foreground)); padding:0 4px }
 #music-queue .q-x:hover { color:hsl(var(--destructive)) }
+#music-history-list .q-item { text-decoration:none; color:inherit }
+
