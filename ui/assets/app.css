@@ -564,3 +564,12 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
 .chat-form { display:flex; gap:8px; padding-top:8px }
 .chat-form input { flex:1; min-width:0 }
 .chat-form button { flex:none }
+/* TV: FAB do chat sobre o vídeo (acompanha o recolher do painel fixo) */
+#chat-fab { position:absolute; bottom:16px; right:382px; z-index:6;
+  background:var(--scrim); border:1px solid hsl(var(--border)) }
+#player-wrap.tv-panel-hidden #chat-fab { right:16px }
+#chat-fab .badge {
+  position:absolute; top:-4px; right:-4px; min-width:16px; height:16px;
+  display:grid; place-items:center; padding:0 4px; border-radius:999px;
+  background:hsl(var(--destructive)); color:#fff; font-size:10px; font-weight:700;
+}

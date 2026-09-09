@@ -198,6 +198,11 @@
     <button class="ghost icon" id="fixed-panel-toggle" hidden title="Ocultar busca" aria-label="Ocultar busca">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16M11 9l-3 3 3 3"/></svg>
     </button>
+    <!-- TV: chat abre por botão flutuante sobre o vídeo (painel fica pra busca/fila) -->
+    <button class="ghost icon" id="chat-fab" hidden title="Chat" aria-label="Chat">
+      <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span class="badge" id="chat-fab-badge" hidden></span>
+    </button>
     <!-- canal 🎸 Sala: conexão no centro, quem está na sala no painel da direita -->
     <div id="jam-view">
       <div id="jam-main">
@@ -993,12 +998,17 @@ $('#cfg-close').onclick = () => $('#dlg-cfg').close()
 // painel próprio (#chat-panel, mesmo visual). A mensagem própria renderiza
 // pelo eco do servidor — uma fonte só de verdade, e o id do banco viabiliza
 // o scrollback.
-const chat = { ws: null, room: null, oldest: null, timer: null }
+const chat = { ws: null, room: null, oldest: null, timer: null, unread: 0, fab: false }
 let nowWatching = null   // streamKey aberto no player (showPlayer) pra religar no toggle
 
 const chatEls = room => FIXED_KEYS.includes(room) && room !== 'jam'
   ? { msgs: $('#fixed-chat-msgs'), online: $('#fixed-chat-online'), input: $('#fixed-chat-input') }
   : { msgs: $('#chat-msgs'), online: $('#chat-online'), input: $('#chat-input') }
+
+const chatFabBadge = () => {
+  $('#chat-fab-badge').hidden = !chat.unread
+  $('#chat-fab-badge').textContent = chat.unread > 99 ? '99+' : chat.unread || ''
+}
 
 function chatRender (m, append = true) {
   if (!chat.room) return
@@ -1017,6 +1027,8 @@ function chatRender (m, append = true) {
     box.append(el)
     if (stick) box.scrollTop = box.scrollHeight
     chat.oldest ??= m.id
+    // TV: painel só abre pelo FAB — enquanto fechado, conta não-lidas
+    if (chat.fab && $('#chat-panel').hidden) { chat.unread++; chatFabBadge() }
   } else {
     box.prepend(el)
     chat.oldest = m.id
@@ -1056,13 +1068,23 @@ function chatConnect () {
 }
 
 // abre (ou troca) o chat da stream; fecha o anterior se houver
+// TV: fica em modo FAB — conecta e conta não-lidas, painel abre no clique
 function chatOpen (room) {
   if (!setOn('chat') || room === 'jam') return chatClose()
   if (chat.room === room) return
   chatClose(true)
   chat.room = room
-  if (FIXED_KEYS.includes(room)) $('#fixed-chat').hidden = false
-  else $('#chat-panel').hidden = false
+  chat.unread = 0
+  if (room === 'tv') {
+    chat.fab = true
+    $('#chat-fab').hidden = false
+    $('#chat-panel').hidden = true
+    chatFabBadge()
+  } else {
+    chat.fab = false
+    if (FIXED_KEYS.includes(room)) $('#fixed-chat').hidden = false
+    else $('#chat-panel').hidden = false
+  }
   chatConnect()
 }
 
@@ -1071,7 +1093,22 @@ function chatClose (keepRoom = false) {
   chat.ws?.close(); chat.ws = null
   $('#fixed-chat').hidden = true
   $('#chat-panel').hidden = true
+  $('#chat-fab').hidden = true
+  chat.fab = false
+  chat.unread = 0
   if (!keepRoom) chat.room = null
+}
+
+$('#chat-fab').onclick = () => {
+  const p = $('#chat-panel')
+  p.hidden = !p.hidden
+  if (!p.hidden) {
+    chat.unread = 0
+    chatFabBadge()
+    const box = $('#chat-msgs')
+    box.scrollTop = box.scrollHeight
+    $('#chat-input').focus()
+  }
 }
 
 function chatApplySetting () {
