@@ -240,9 +240,36 @@ in your CSS, the `hidden` attribute hides nothing. The reset carries
 
 ---
 
+## Roadmap
+
+Shipped in phases, one commit each. Checked items are done.
+
+- [ ] **Phase 0 — Foundation.** SQLite in the `fixed-live` sidecar on a compose
+      volume (everything is in-memory today) + a settings dialog in the client
+      (`localStorage` toggles) for the features below.
+- [ ] **Phase 1 — Music channel history.** Every track played on the fixed
+      music channel (what, who asked, when) listed per week with a YouTube
+      link — a shared playlist for the group.
+- [ ] **Phase 2 — Global live chat.** Persistent chat next to the player,
+      visible on every stream (Twitch-style), server-side relay with history.
+- [ ] **Phase 3 — Discord integration.** Server-side webhook announcing
+      "fulano is live" when someone starts broadcasting, plus client Rich
+      Presence ("watching X's channel on FockyTV"). Both toggleable.
+- [ ] **Phase 4 — Auto-recording / VODs.** The sidecar's ffmpeg pipeline gets
+      a tee writing MP4 per stream; a new "Recordings" tab plays them back.
+- [ ] **Phase 5 — Clips.** A button in the player cuts the last 30 s of a
+      live (or any moment of a VOD) into a shareable link.
+- [ ] **Phase 6 — "You missed it" digest.** Once-a-day modal on launch:
+      "last night had 2 lives and 14 songs played", click to open.
+      Toggleable.
+- [ ] **Phase 7 — Game mode.** Game-window capture priority + capture only the
+      game's audio (the WASAPI helper already does per-process loopback, used
+      in exclude mode today) + an on-stream overlay listing who's watching.
+
+---
+
 ## Out of scope
 
-Recording · chat · auth beyond the bearer token · simulcast layer switching ·
-transcoding · mobile · multiple simultaneous screens · embedded server in the
-client · system audio on Linux (needs PipeWire; on Windows it is
-`audio: 'loopback'`)
+Auth beyond the bearer token · simulcast layer switching · transcoding ·
+mobile · multiple simultaneous screens · embedded server in the client ·
+system audio on Linux (needs PipeWire; on Windows it is `audio: 'loopback'`)
