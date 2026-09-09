@@ -1647,6 +1647,9 @@ function openFixed (key) {
   paintLyrics()
   showPlayer(key)
   tvPanelHidden = false
+  // vindo do estúdio (aba Sala): o painel "Minha entrada" é exclusivo dele
+  $('#jam-panel').hidden = true
+  $('#jam-view').classList.remove('on')
   $('#player-wrap').classList.remove('tv-panel-hidden')
   $('#fixed-panel').hidden = false
   $('#fixed-panel-toggle').hidden = key !== 'tv'
