@@ -965,7 +965,26 @@ async function openShareDialog (isSwap, cam) {
     return
   }
 
-  const sources = await fockyApi.sources()
+  // Capturar as miniaturas das janelas (fockyApi.sources) demora: abrir o
+  // diálogo só depois parece clique perdido. Abre na hora, com skeleton no
+  // lugar da lista — e se a enumeração falhar, fecha de novo e deixa o toast.
+  $('#dlg-share').dataset.swap = isSwap ? '1' : ''
+  $('#portal-note').hidden = true
+  $('#sources').replaceChildren(...Array.from({ length: 4 }, () => {
+    const fig = document.createElement('figure')
+    fig.className = 'loading'
+    fig.innerHTML = '<div class="skeleton"></div>'
+    return fig
+  }))
+  $('#dlg-share').showModal()
+
+  let sources
+  try {
+    sources = await fockyApi.sources()
+  } catch (e) {
+    $('#dlg-share').close()
+    throw e
+  }
   picked = sources[0]?.id ?? null
 
   // No Wayland o desktopCapturer devolve uma entrada genérica sem nome —
@@ -990,7 +1009,6 @@ async function openShareDialog (isSwap, cam) {
 
   $('#dlg-share').dataset.swap = isSwap ? '1' : ''
   updateShareAudio(picked)
-  $('#dlg-share').showModal()
 }
 
 // ── opções de áudio por aplicativo ────────────────────────────────────────

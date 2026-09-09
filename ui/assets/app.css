@@ -434,6 +434,8 @@ dialog .desc { font-size:13px; color:hsl(var(--muted-foreground)); margin-bottom
                border-radius:calc(var(--radius-media) - 4px); background:#000 }
 #sources figcaption { font-size:11px; margin-top:5px; color:hsl(var(--muted-foreground));
                       white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+/* carregando as fontes do compartilhar: skeleton no lugar da miniatura */
+#sources figure.loading { position:relative; aspect-ratio:16/10 }
 #cookies-file { width:100%; color:hsl(var(--muted-foreground)) }
 .err { color:hsl(var(--destructive)); font-size:13px; min-height:1.2em }
 
