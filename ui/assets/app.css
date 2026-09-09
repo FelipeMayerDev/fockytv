@@ -136,8 +136,15 @@ button.icon { width:36px; padding:0 }
 #share {
   height:38px; padding:0 18px; border-radius:var(--radius-pill);
   background:hsl(var(--accent)); color:hsl(var(--primary-foreground)); font-weight:600;
+  animation:share-pulse 2.4s ease-out infinite;
 }
-#share:hover { opacity:.9 }
+#share:hover { opacity:.9; animation-play-state:paused }
+/* anel que se expande do próprio botão, na cor do CTA */
+@keyframes share-pulse {
+  0% { box-shadow:0 0 0 0 hsl(var(--accent) / .5) }
+  70%, 100% { box-shadow:0 0 0 9px hsl(var(--accent) / 0) }
+}
+@media (prefers-reduced-motion: reduce) { #share { animation:none } }
 main { flex:1; overflow:hidden; display:flex; flex-direction:column }
 
 /* grade estilo youtube */
