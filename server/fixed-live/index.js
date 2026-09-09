@@ -11,7 +11,7 @@ import { join } from "node:path"
 import { WebSocketServer } from "ws"
 import express from "express"
 import { MediaStreamTrackFactory, RTCPeerConnection, useH264, useOPUS } from "werift"
-import { logTrackPlayed, musicHistory, addChatMsg, chatPage, chatLatest } from "./db.js"
+import { logTrackPlayed, mediaHistory, addChatMsg, chatPage, chatLatest } from "./db.js"
 
 const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
 const PORT = +(process.env.PORT ?? 3000)
@@ -621,13 +621,15 @@ const tvState = () => ({
   current: tv.current && { ...tv.current, position: Math.floor(tv.runner.position()) },
 })
 
-async function tvPlay (id) {
+async function tvPlay (id, by) {
   const meta = await metaOf(id)
   tv.current = { id: meta.id, title: meta.title, duration: meta.duration, thumb: meta.thumb }
   tv.status = "starting"
   try {
     await tv.runner.startMedia(meta, { video: true, preload: true })
     tv.status = "live"
+    logTrackPlayed({ video_id: meta.id, title: meta.title, thumb: meta.thumb,
+                     added_by: by ?? null, played_at: Date.now() }, "tv")
   } catch (e) {
     tv.status = "idle"
     tv.current = null
@@ -833,7 +835,7 @@ app.get("/api/fixed/img", wrap(async (req, res) => {
 app.get("/api/fixed/tv", (req, res) => res.json(tvState()))
 app.post("/api/fixed/tv/play", wrap(async (req, res) => {
   if (!req.body?.id) return res.status(400).json({ error: "id obrigatório" })
-  await tvPlay(req.body.id)
+  await tvPlay(req.body.id, req.body.by)
   res.json(tvState())
 }))
 app.post("/api/fixed/tv/stop", wrap(async (req, res) => {
@@ -932,10 +934,11 @@ app.get("/api/fixed/music/lyrics", wrap(async (req, res) => {
   if (!item) return res.json({ id: null, lines: [] })
   res.json({ id: item.id, lines: (await lyricsOf(item)) ?? [] })
 }))
-// histórico do canal de música: ?days=7 (padrão) limita a janela
+// histórico dos canais fixos: ?kind=music|tv, ?days=7 (padrão) limita a janela
 app.get("/api/fixed/music/history", (req, res) => {
+  const kind = req.query.kind === "tv" ? "tv" : "music"
   const days = Math.min(90, Math.max(1, +(req.query.days ?? 7) || 7))
-  res.json(musicHistory(Date.now() - days * 86_400_000))
+  res.json(mediaHistory(kind, Date.now() - days * 86_400_000))
 })
 app.post("/api/fixed/music/resume", wrap(async (req, res) => {
   // broadcast-box reiniciou etc. deixou o canal em idle com a fila viva: o

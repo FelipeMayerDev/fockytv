@@ -1726,7 +1726,7 @@ $('#fixed-q').addEventListener('keydown', async e => {
         img.replaceWith(spin)
         try {
           if (isTv) {
-            await fixed('tv/play', { method: 'POST', body: JSON.stringify({ id: r.id }) })
+            await fixed('tv/play', { method: 'POST', body: JSON.stringify({ id: r.id, by: nick }) })
             toast(`Tocando na TV: ${saida}`, null, 'info')
           } else {
             await fixed('music/add', { method: 'POST', body: JSON.stringify({ id: r.id, addedBy: nick }) })
@@ -1848,16 +1848,20 @@ function openFixed (key) {
   fixedTimer = setInterval(fixedTick, 500)
   clearInterval(lyrTimer)
   lyrTimer = setInterval(tickLyrics, 500)
-  if (key === 'music') loadMusicHistory()
+  if (key === 'music' || key === 'tv') loadHistory(key)
   chatOpen(key)   // chat do canal no fim do painel lateral, aberto por padrão
 }
 
-// histórico da música: "tocou essa semana" — carrega ao abrir a aba
-async function loadMusicHistory () {
-  const box = $('#music-history-list')
-  const rows = await fixed('music/history?days=7').catch(() => null)
-  if (!rows) return
-  $('#music-history').hidden = !rows.length
+// histórico dos canais fixos: "Tocou essa semana" (música) / "Vídeos dessa
+// semana" (tv) — carrega ao abrir a aba, cada uma com o seu
+async function loadHistory (key) {
+  const sec = $('#music-history')
+  sec.hidden = true
+  if (key !== 'music' && key !== 'tv') return
+  const rows = await fixed(`music/history?days=7&kind=${key}`).catch(() => null)
+  if (!rows?.length) return
+  sec.querySelector('h3').textContent = key === 'tv' ? 'Vídeos dessa semana' : 'Tocou essa semana'
+  sec.hidden = false
   const ago = ts => {
     const m = Math.max(1, Math.round((Date.now() - ts) / 60000))
     if (m < 60) return `há ${m} min`
@@ -1865,6 +1869,7 @@ async function loadMusicHistory () {
     if (h < 24) return `há ${h}h`
     return `há ${Math.round(h / 24)} d`
   }
+  const box = $('#music-history-list')
   box.replaceChildren(...rows.map(r => {
     const el = document.createElement('a')
     el.className = 'q-item'
@@ -1879,7 +1884,7 @@ async function loadMusicHistory () {
       <span class="muted" style="font-size:12px">${ago(r.playedAt)}</span>`
     el.querySelector('img').src = imgSrc(r.thumb)
     el.querySelector('.q-title').textContent = r.title
-    el.querySelector('.q-sub').textContent = r.addedBy ? `pedida por ${r.addedBy}` : ''
+    el.querySelector('.q-sub').textContent = r.addedBy ? `colocada por ${r.addedBy}` : ''
     return el
   }))
 }

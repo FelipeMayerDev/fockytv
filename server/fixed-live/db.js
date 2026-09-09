@@ -31,16 +31,20 @@ CREATE TABLE IF NOT EXISTS chat (
 try { db.exec(`ALTER TABLE chat ADD COLUMN room TEXT NOT NULL DEFAULT ''`) } catch {}
 
 
-// faixa que começou a tocar de fato no canal de música (playCurrent no "live")
-export const logTrackPlayed = t =>
-  db.prepare(`INSERT INTO music_history (video_id, title, thumb, added_by, played_at)
-              VALUES (@video_id, @title, @thumb, @added_by, @played_at)`).run(t)
+// tabela criada antes de existir histórico por canal: coluna entra por ALTER
+try { db.exec(`ALTER TABLE music_history ADD COLUMN kind TEXT NOT NULL DEFAULT 'music'`) } catch {}
 
-// últimas faixas desde `since` (ms epoch), mais novas primeiro
-export const musicHistory = (since, limit = 200) =>
+// faixa/vídeo que começou a tocar de fato no canal (playCurrent/tvPlay no "live")
+export const logTrackPlayed = (t, kind = "music") =>
+  db.prepare(`INSERT INTO music_history (video_id, title, thumb, added_by, played_at, kind)
+              VALUES (@video_id, @title, @thumb, @added_by, @played_at, @kind)`)
+    .run({ ...t, kind })
+
+// últimos itens do canal `kind` desde `since` (ms epoch), mais novos primeiro
+export const mediaHistory = (kind, since, limit = 200) =>
   db.prepare(`SELECT video_id AS id, title, thumb, added_by AS addedBy, played_at AS playedAt
-              FROM music_history WHERE played_at >= ? ORDER BY played_at DESC LIMIT ?`)
-    .all(since, limit)
+              FROM music_history WHERE kind = ? AND played_at >= ? ORDER BY played_at DESC LIMIT ?`)
+    .all(kind, since, limit)
 
 // chat por sala (streamKey): insert + página de scrollback (mais antigas primeiro)
 export const addChatMsg = (nick, text, at, room) =>
