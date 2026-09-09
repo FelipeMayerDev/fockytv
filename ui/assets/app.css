@@ -216,8 +216,15 @@ main { flex:1; overflow:hidden; display:flex; flex-direction:column }
 #fixed-panel {
   position:absolute; top:0; right:0; bottom:0; width:min(360px, 92vw);
   background:hsl(var(--surface-2)); border-left:1px solid hsl(var(--border));
-  border-radius:0; padding:20px 16px; overflow:auto; z-index:4;
+  border-radius:0; padding:20px 16px; z-index:4;
+  display:flex; flex-direction:column; overflow:hidden;
 }
+#fixed-panel > * { flex:none }
+#fixed-panel .results { flex:none }
+/* fila e chat dividem o espaço restante, cada um rola dentro de si */
+#music-queue { flex:1 1 auto; min-height:60px; overflow:auto }
+#music-history { max-height:38%; overflow:auto }
+#fixed-chat { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; margin-top:8px }
 #fixed-panel h3 { font-family:var(--font-display); font-size:17px; font-weight:800;
                   letter-spacing:-.02em; margin-bottom:2px }
 #fixed-panel-toggle { position:absolute; top:12px; right:382px; z-index:6 }
@@ -551,7 +558,7 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
 .chat-msgs { flex:1; min-height:120px; overflow:auto; display:flex;
              flex-direction:column; gap:6px; padding:6px 0 }
 #chat-panel .chat-msgs { flex:1 }
-#fixed-chat .chat-msgs { max-height:260px }
+#fixed-chat .chat-msgs { flex:1; min-height:40px }
 .chat-msg { font-size:13px; line-height:1.45; overflow-wrap:anywhere }
 .chat-msg b { margin-right:6px; color:hsl(var(--foreground)) }
 .chat-form { display:flex; gap:8px; padding-top:8px }
