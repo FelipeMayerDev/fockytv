@@ -716,14 +716,14 @@ setInterval(async () => {
 
     const runner = key === "tv" ? tv.runner : music.runner
     if (!runner.live) {
-      // canal desligado sem ouvintes: a fila morre junto — mas com a mesma
-      // janela de 60s, senão o zera-fila atira no add que ainda está ligando
-      // (runner "not live" por ~3s entre o clique e o pc subir). Queda do
-      // host (diedAt) tem janela própria de 15 min: dá tempo de religar.
+      // canal desligado sem ouvintes: a fila morre junto — mas com janela de
+      // 15 min (a mesma da queda do host), senão o zera-fila atira no add que
+      // ainda está ligando (runner "not live" por ~3s entre o clique e o pc
+      // subir) e em quem acabou de sair e vai voltar.
       const diedRecently = music.diedAt && Date.now() - music.diedAt < 15 * 60_000
       if (key === "music" && viewers === 0 && music.queue.length && !diedRecently) {
         zeroSince[key] ??= Date.now()
-        if (Date.now() - zeroSince[key] >= IDLE_MS) {
+        if (Date.now() - zeroSince[key] >= 15 * 60_000) {
           zeroSince[key] = null
           log("[music] canal desligado sem ouvintes, playlist zerada")
           music.queue = []
@@ -740,12 +740,11 @@ setInterval(async () => {
       if (key === "tv") {
         tv.current = null; tv.status = "idle"; runner.stop().catch(() => {})
       } else {
-        // ninguém ouvindo por 60s: zera a playlist inteira e desliga a stream
-        log("[music] sem ouvintes por 60s, playlist zerada")
-        music.queue = []
-        music.index = 0
-        music.status = "idle"
-        runner.stop().catch(() => {})
+        // ninguém ouvindo por 60s: desliga a stream (economia de recursos),
+        // mas a fila fica — sair da aba por 1 min não pode apagar a playlist.
+        // Quem voltar religa pelo resume (ou pelo relight da UI).
+        log("[music] sem ouvintes por 60s, desligando (fila fica)")
+        musicIdle()
       }
     }
   }
