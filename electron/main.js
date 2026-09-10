@@ -417,7 +417,7 @@ const rlog = m => { try { fs.appendFileSync(path.join(app.getPath('userData'), '
 async function rpcApply () {
   clearTimeout(rpcTimer); rpcTimer = null
   if (!rpcActivity) {                     // pedido pra limpar
-    if (rpcClient) rpcClient.clearActivity().catch(e => rlog('clear: ' + e.message))
+    if (rpcClient) rpcClient.user?.clearActivity().catch(e => rlog('clear: ' + e.message))
     return
   }
   try {
@@ -432,7 +432,8 @@ async function rpcApply () {
       await rpcClient.login()
       rlog('conectado ao Discord')
     }
-    await rpcClient.setActivity(rpcActivity)
+    // setActivity vive no ClientUser, não no Client
+    await rpcClient.user?.setActivity(rpcActivity)
     rlog('set: ' + (rpcActivity.details ?? '') + ' / ' + (rpcActivity.state ?? ''))
   } catch (e) {                           // Discord fechado/sem login: tenta de novo
     rlog('falhou: ' + e.message)

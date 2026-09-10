@@ -1204,6 +1204,82 @@ $('#chat-msgs').onscroll = e => {
     .finally(() => { delete box.dataset.loading })
 }
 
+// ── clips: ao vivo pega os últimos 30s do buffer; em gravação, o momento ──
+const clipModal = {
+  id: 0, url: '', dur: 30,
+  show (c) {
+    this.id = c.id; this.url = c.url; this.dur = c.duration
+    $('#clip-preview').src = c.url
+    $('#clip-start').max = $('#clip-end').max = c.duration
+    $('#clip-start').value = 0
+    $('#clip-end').value = c.duration
+    $('#clip-range').textContent = `0:00 – 0:${String(c.duration).padStart(2, '0')}`
+    $('#clip-err').textContent = ''
+    $('#dlg-clip').showModal()
+  },
+}
+$('#clip-start').oninput = e => {
+  const end = +$('#clip-end').value
+  if (+e.target.value > end - 5) e.target.value = Math.max(0, end - 5)
+  $('#clip-preview').currentTime = +$('#clip-start').value
+  $('#clip-range').textContent =
+    `0:${String(e.target.value).padStart(2, '0')} – 0:${String(end).padStart(2, '0')}`
+}
+$('#clip-end').oninput = e => {
+  const start = +$('#clip-start').value
+  if (+e.target.value < start + 5) e.target.value = start + 5
+  $('#clip-range').textContent =
+    `0:${String(start).padStart(2, '0')} – 0:${String(e.target.value).padStart(2, '0')}`
+}
+
+$('#clip-btn').onclick = () => {
+  if (!nowWatching && !vodPlaying) return
+  $('#clip-btn').disabled = true
+  const prom = vodPlaying
+    ? fetch(`${cfg.serverUrl}/api/fixed/vods/${vodPlaying}/clip`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ at: Math.max(0, $('#player-wrap video').currentTime - 5) }),
+      })
+    : fetch(`${cfg.serverUrl}/api/fixed/streams/${nowWatching}/clip`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ dur: 30 }),
+      })
+  prom.then(async r => {
+    if (!r.ok) throw new Error((await r.json().catch(() => null))?.error ?? 'falhou no servidor')
+    return r.json()
+  })
+    .then(c => {
+      if (vodPlaying) {
+        const copy = () => navigator.clipboard.writeText(c.url).then(() => toast('Link do clip copiado!'))
+        toast('Clip criado!', { label: 'Copiar link', run: copy })
+      } else clipModal.show(c)   // ao vivo: dá pra ajustar antes de salvar
+    })
+    .catch(e => toast('Clip falhou: ' + e.message))
+    .finally(() => { $('#clip-btn').disabled = false })
+}
+
+$('#clip-discard').onclick = () => {
+  $('#dlg-clip').close()
+  fetch(`${cfg.serverUrl}/api/fixed/clips/${clipModal.id}`, { method: 'DELETE' }).catch(() => {})
+}
+$('#clip-save').onclick = () => {
+  const at = +$('#clip-start').value
+  const dur = +$('#clip-end').value - at
+  $('#clip-save').disabled = true
+  fetch(`${cfg.serverUrl}/api/fixed/clips/${clipModal.id}/trim`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ at, dur }),
+  })
+    .then(r => { if (!r.ok) throw new Error('falhou'); return r.json() })
+    .then(c => {
+      $('#dlg-clip').close()
+      const copy = () => navigator.clipboard.writeText(c.url).then(() => toast('Link do clip copiado!'))
+      toast('Clip salvo!', { label: 'Copiar link', run: copy })
+    })
+    .catch(e => { $('#clip-err').textContent = 'Falhou: ' + e.message })
+    .finally(() => { $('#clip-save').disabled = false })
+}
+
 for (const [form, input] of [['#chat-form', '#chat-input']])
   $(form).onsubmit = e => {
     e.preventDefault()
@@ -1829,8 +1905,11 @@ async function renderVods () {
   }
 }
 
+let vodDur = 0, vodTimer = null
+
 function playVod (v) {
   vodPlaying = v.id
+  vodDur = v.duration
   $('#clip-btn').hidden = false
   const vid = $('#player-wrap video')
   $('#grid-live').style.display = 'none'
@@ -1838,14 +1917,27 @@ function playVod (v) {
   $('#back').hidden = false
   $('#player-ctl').hidden = false
   setVideoControls(true)
-  vid.controls = true   // play/pause/seek nativos: VOD não é live
+  $('#fixed-bar').hidden = false   // mesma barra dos canais fixos
+  $('#fb-prev').title = 'Voltar 10 segundos'
+  $('#fb-next').title = 'Avançar 10 segundos'
+  $('#fb-dur').textContent = mmss(vodDur)
+  vid.controls = false
   vid.src = `${cfg.serverUrl}/api/fixed/vods/${v.id}/file`
   vid.play().catch(() => {})
+  clearInterval(vodTimer)
+  vodTimer = setInterval(() => {
+    if (seekDrag || !vodPlaying) return
+    $('#fb-seek').value = vodDur ? (vid.currentTime / vodDur) * 100 : 0
+    $('#fb-pos').textContent = mmss(Math.floor(vid.currentTime))
+    setPlayIcon(!vid.paused && !vid.ended)
+  }, 500)
 }
 
 function closeVod () {
   vodPlaying = 0
+  clearInterval(vodTimer); vodTimer = null
   $('#clip-btn').hidden = true
+  $('#fixed-bar').hidden = true
   const vid = $('#player-wrap video')
   vid.controls = false
   vid.pause()
@@ -2333,6 +2425,11 @@ function closeFixed () {
 $('#fb-seek').addEventListener('input', () => seekDrag = true)
 $('#fb-seek').addEventListener('change', e => {
   seekDrag = false
+  if (vodPlaying) {
+    const vid = $('#player-wrap video')
+    if (vodDur) vid.currentTime = (+e.target.value / 100) * vodDur
+    return
+  }
   if (!musicPos.dur) return
   fixed(fixedKey + '/seek', {
     method: 'POST', body: JSON.stringify({ position: (+e.target.value / 100) * musicPos.dur }),
@@ -2346,18 +2443,34 @@ function setPlayIcon (playing) {
 const isPlaying = () => !$('#fb-ico-pause').classList.contains('off')
 
 $('#fb-toggle').onclick = () => {
+  if (vodPlaying) {
+    const vid = $('#player-wrap video')
+    if (vid.paused) vid.play().catch(() => {}); else vid.pause()
+    setPlayIcon(vid.paused)
+    return
+  }
   const resume = !isPlaying()
   setPlayIcon(resume)                       // resposta imediata; o tick confirma
   fixed(fixedKey + '/' + (resume ? 'resume' : 'pause'),
     { method: 'POST' }).then(fixedTick).catch(e => { setPlayIcon(!resume); toast(e.message) })
 }
 $('#fb-next').onclick = () => {
+  if (vodPlaying) {
+    const vid = $('#player-wrap video')
+    vid.currentTime = Math.min(vodDur, vid.currentTime + 10)
+    return
+  }
   const action = fixedKey === 'tv'
     ? fixed('tv/seek', { method: 'POST', body: JSON.stringify({ position: musicPos.pos + 10 }) })
     : fixed('music/next', { method: 'POST' })
   action.then(fixedTick).catch(e => toast(e.message))
 }
 $('#fb-prev').onclick = () => {
+  if (vodPlaying) {
+    const vid = $('#player-wrap video')
+    vid.currentTime = Math.max(0, vid.currentTime - 10)
+    return
+  }
   if (fixedKey === 'tv') return fixed('tv/seek', {
     method: 'POST', body: JSON.stringify({ position: Math.max(0, musicPos.pos - 10) }),
   }).then(fixedTick).catch(e => toast(e.message))
