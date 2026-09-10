@@ -11,6 +11,11 @@ import { join } from "node:path"
 import { addVod } from "./db.js"
 
 const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
+// candidatos do broadcast-box saem com o IP público/LAN (NAT_1_TO_1_IP); da
+// rede interna do compose esse caminho pode não existir (hairpin UDP). Onde
+// houver esse IP na resposta do WHEP, troca pelo hostname do container.
+const BB_PUBLIC_IP = process.env.BB_PUBLIC_IP ?? ""
+const BB_CANDIDATE_HOST = process.env.BB_CANDIDATE_HOST ?? "broadcast-box"
 const REC_DIR = join(process.env.DATA_DIR ?? "/app/data", "vods")
 mkdirSync(REC_DIR, { recursive: true })
 
@@ -152,7 +157,9 @@ async function startSession (key) {
     signal: AbortSignal.timeout(10_000),
   })
   if (!res.ok) throw new Error(`WHEP respondeu ${res.status}: ${(await res.text()).slice(0, 300)}`)
-  await pc.setRemoteDescription({ type: "answer", sdp: await res.text() })
+  let answer = await res.text()
+  if (BB_PUBLIC_IP) answer = answer.split(BB_PUBLIC_IP).join(BB_CANDIDATE_HOST)
+  await pc.setRemoteDescription({ type: "answer", sdp: answer })
 
   // espera as trilhas (vídeo + áudio) terem porta UDP pro SDP do ffmpeg
   const t0 = Date.now()
@@ -190,7 +197,7 @@ async function startSession (key) {
     try { pc.close() } catch {}
     for (const s of pipes) try { s.close() } catch {}
     proc.kill("SIGINT")   // ffmpeg finaliza o MP4 com moov válido
-    const code = await new Promise(r => { proc.once("exit", (c) => r(c)); setTimeout(() => r("timeout"), 5_000) })
+    const code = await new Promise(r => { proc.once("exit", (c) => r(c)); setTimeout(() => r("timeout"), 12_000) })
     log_(`ffmpeg saiu com ${code}`)
     const duration = (Date.now() - startedAt) / 1000
     // registro só com MP4 de verdade: tentativa falha não vira VOD fantasma

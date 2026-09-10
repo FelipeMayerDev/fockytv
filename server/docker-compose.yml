@@ -49,6 +49,10 @@ services:
       - IDLE_MS=60000
       # link usado nos anúncios do Discord ("fulano subiu ao ar")
       - PUBLIC_URL=http://192.168.1.129:8180
+      # gravador: IP que o broadcast-box anuncia nos candidatos (NAT_1_TO_1_IP);
+      # da rede docker trocamos pelo hostname, o hairpin UDP nem sempre volta
+      - BB_PUBLIC_IP=192.168.1.129
+      - BB_CANDIDATE_HOST=broadcast-box
       # pra anunciar num canal do Discord: crie um webhook lá
       # (Configurações do canal → Integrações → Webhooks) e descomente:
       # - DISCORD_WEBHOOK=https://discord.com/api/webhooks/…
