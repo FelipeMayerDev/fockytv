@@ -1223,6 +1223,17 @@ app.delete("/api/fixed/clips/:id", (req, res) => {
   delClip(clip.id)
   res.json({ ok: true })
 })
+// resumo diário ("você perdeu"): o que rolou desde a última visita
+app.get("/api/fixed/digest", (req, res) => {
+  const since = +(req.query.since ?? 0) || (Date.now() - 24 * 3_600_000)
+  res.json({
+    since,
+    lives: listVods(200).filter(v => v.startedAt >= since),
+    tracks: mediaHistory("music", since, 100),
+    videos: mediaHistory("tv", since, 50),
+    clips: listClips().filter(c => c.createdAt >= since).length,
+  })
+})
 app.get("/api/fixed/clips", (req, res) => {
   const vodId = req.query.vod ? +req.query.vod : null
   res.json(listClips(vodId))
