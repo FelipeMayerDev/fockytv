@@ -348,6 +348,14 @@
 
   <div class="row" style="margin:12px 0 0">
     <div>
+      <label style="color:hsl(var(--foreground))">Overlay de viewers na câmera</label>
+      <p class="desc" style="margin:2px 0 0">queima os nomes de quem assiste no canto da composição</p>
+    </div>
+    <label class="switch"><input type="checkbox" id="cfg-overlay" data-set="overlay" checked><span></span></label>
+  </div>
+
+  <div class="row" style="margin:12px 0 0">
+    <div>
       <label style="color:hsl(var(--foreground))">Rich Presence no Discord</label>
       <p class="desc" style="margin:2px 0 0">mostra no Discord o que você assiste ou transmite</p>
     </div>
@@ -369,6 +377,10 @@
   </p>
 
   <div class="opts">
+    <div class="row" id="game-row" hidden>
+      <label for="game" style="font-size:13px">Modo game: só janelas, som só do jogo, 60 fps</label>
+      <span class="switch"><input type="checkbox" id="game"><span></span></span>
+    </div>
     <div class="field">
       <label for="fps">Taxa de quadros</label>
       <select id="fps">
@@ -880,17 +892,38 @@ async function addCam (withMic) {
   const box = { x: 0.72, y: 0.68, w: +$('#cam-size').value / 100 }
   const ratio = (set.height ?? 720) / (set.width ?? 1280)
   const fps = Math.round(scr.frameRate ?? +$('#fps').value)
+  // quem está assistindo, queimado no canto (modo game / overlay ligado)
+  const drawViewers = () => {
+    const names = [...(presence.viewers.get(nick) ?? [])]
+    if (!names.length) return
+    const label = '👀 ' + names.slice(0, 3).join(', ') + (names.length > 3 ? ` +${names.length - 3}` : '')
+    const fs = Math.round(canvas.height / 30)
+    ctx.font = `600 ${fs}px system-ui, sans-serif`
+    const w = ctx.measureText(label).width
+    const x = Math.round(canvas.height * 0.02)
+    const y = canvas.height - Math.round(canvas.height * 0.025)
+    ctx.fillStyle = 'rgba(0,0,0,.55)'
+    ctx.beginPath()
+    ctx.roundRect(x, y - fs * 1.7, w + fs, fs * 2.3, fs)
+    ctx.fill()
+    ctx.fillStyle = '#fff'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(label, x + fs / 2, y - fs * 0.55)
+  }
   const draw = () => {
     ctx.drawImage(sv, 0, 0, canvas.width, canvas.height)
     const w = box.w * canvas.width, h = w * ratio
     const x = box.x * canvas.width, y = box.y * canvas.height
-    if (!overlay?.mirror) return ctx.drawImage(cv, x, y, w, h)
-    // espelho: desenha a partir da borda direita da caixa, com o eixo X virado
-    ctx.save()
-    ctx.translate(x + w, y)
-    ctx.scale(-1, 1)
-    ctx.drawImage(cv, 0, 0, w, h)
-    ctx.restore()
+    if (!overlay?.mirror) ctx.drawImage(cv, x, y, w, h)
+    else {
+      // espelho: desenha a partir da borda direita da caixa, com o eixo X virado
+      ctx.save()
+      ctx.translate(x + w, y)
+      ctx.scale(-1, 1)
+      ctx.drawImage(cv, 0, 0, w, h)
+      ctx.restore()
+    }
+    if (setOn('overlay')) drawViewers()
   }
   const out = canvas.captureStream(fps)
 
@@ -1305,17 +1338,27 @@ async function openShareDialog (isSwap, cam) {
     $('#dlg-share').close()
     throw e
   }
-  picked = sources[0]?.id ?? null
-
   // No Wayland o desktopCapturer devolve uma entrada genérica sem nome —
   // quem escolhe é o portal do sistema, que abre no getDisplayMedia.
   const listable = sources.length > 1 || !!sources[0]?.name
   $('#sources').hidden = !listable
   $('#portal-note').hidden = listable
 
+  // modo game: só janelas na lista (a fonte do jogo), 60 fps e som filtrado
+  const gameMode = localStorage.getItem('set:game') !== '0'
+  const gameEligible = listable && !isSwap && !cam && cfg?.windowFilter
+  $('#game-row').hidden = !gameEligible
+  $('#game').checked = gameMode
+  if (gameMode && gameEligible) {
+    sources = sources.filter(src => hwndOf(src.id))
+    picked = null
+    $('#fps').value = '60'
+  }
+  if (!picked) picked = sources[0]?.id ?? null
+
   if (listable) $('#sources').replaceChildren(...sources.map((src, i) => {
     const fig = document.createElement('figure')
-    fig.className = i === 0 ? 'sel' : ''
+    fig.className = src.id === picked ? 'sel' : ''
     fig.innerHTML = `<img src="${src.thumb}"><figcaption></figcaption>`
     fig.querySelector('figcaption').textContent = src.name
     fig.onclick = () => {
@@ -1367,6 +1410,10 @@ function updateShareAudio (srcId) {
     : 'sem filtro no navegador: compartilhe uma ABA e o som sai só dela'
 }
 $('#audio').onchange = () => updateShareAudio(picked)
+$('#game').onchange = e => {
+  localStorage.setItem('set:game', e.target.checked ? '1' : '0')
+  openShareDialog(!!$('#dlg-share').dataset.swap, !!$('#dlg-share').dataset.cam).catch(() => {})
+}
 
 $('#share').onclick = () => openShareDialog(false).catch(e => toast(e.message))
 $('#share-cam').onclick = () => openShareDialog(false, true).catch(e => toast(e.message))

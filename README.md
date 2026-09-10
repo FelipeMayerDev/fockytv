@@ -244,21 +244,23 @@ in your CSS, the `hidden` attribute hides nothing. The reset carries
 
 Shipped in phases, one commit each. Checked items are done.
 
-- [ ] **Phase 0 — Foundation.** SQLite in the `fixed-live` sidecar on a compose
+- [x] **Phase 0 — Foundation.** SQLite in the `fixed-live` sidecar on a compose
       volume (everything is in-memory today) + a settings dialog in the client
       (`localStorage` toggles) for the features below.
-- [ ] **Phase 1 — Music channel history.** Every track played on the fixed
+- [x] **Phase 1 — Music channel history.** Every track played on the fixed
       music channel (what, who asked, when) listed per week with a YouTube
       link — a shared playlist for the group.
-- [ ] **Phase 2 — Global live chat.** Persistent chat next to the player,
+- [x] **Phase 2 — Global live chat.** Persistent chat next to the player,
       visible on every stream (Twitch-style), server-side relay with history.
-- [ ] **Phase 3 — Discord integration.** Server-side webhook announcing
+- [x] **Phase 3 — Discord integration.** Server-side webhook announcing
       "fulano is live" when someone starts broadcasting, plus client Rich
       Presence ("watching X's channel on FockyTV"). Both toggleable.
-- [ ] **Phase 4 — Auto-recording / VODs.** The sidecar's ffmpeg pipeline gets
-      a tee writing MP4 per stream; a new "Recordings" tab plays them back.
-- [ ] **Phase 5 — Clips.** A button in the player cuts the last 30 s of a
-      live (or any moment of a VOD) into a shareable link.
+- [x] **Phase 4 — Auto-recording / VODs.** The sidecar consumes each live as
+      a WHEP viewer and records it to MP4 (with a rolling 45 s segment buffer
+      for live clips); a new "Recordings" tab plays them back.
+- [x] **Phase 5 — Clips.** Watching a live, a button grabs the last 30 s from
+      the rolling buffer and opens a trim modal; on a recording it cuts the
+      current moment. Clips get a shareable link.
 - [ ] **Phase 6 — "You missed it" digest.** Once-a-day modal on launch:
       "last night had 2 lives and 14 songs played", click to open.
       Toggleable.
