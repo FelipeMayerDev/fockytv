@@ -51,6 +51,7 @@ try { db.exec(`ALTER TABLE chat ADD COLUMN room TEXT NOT NULL DEFAULT ''`) } cat
 
 // tabela criada antes de existir histórico por canal: coluna entra por ALTER
 try { db.exec(`ALTER TABLE music_history ADD COLUMN kind TEXT NOT NULL DEFAULT 'music'`) } catch {}
+try { db.exec(`ALTER TABLE clips ADD COLUMN stream_key TEXT`) } catch {}
 
 // faixa/vídeo que começou a tocar de fato no canal (playCurrent/tvPlay no "live")
 export const logTrackPlayed = (t, kind = "music") =>
@@ -89,11 +90,14 @@ export const listVods = (limit = 100) =>
 
 // clips: trechos de 30s de uma gravação, com link compartilhável
 export const addClip = c =>
-  db.prepare(`INSERT INTO clips (vod_id, file, at, duration, created_at)
-              VALUES (@vod_id, @file, @at, @duration, @created_at)`).run(c)
+  db.prepare(`INSERT INTO clips (vod_id, stream_key, file, at, duration, created_at)
+              VALUES (@vod_id, @stream_key, @file, @at, @duration, @created_at)`).run(c)
 export const getClip = id =>
-  db.prepare(`SELECT id, vod_id AS vodId, file, at, duration, created_at AS createdAt
+  db.prepare(`SELECT id, vod_id AS vodId, stream_key AS streamKey, file, at, duration, created_at AS createdAt
               FROM clips WHERE id = ?`).get(id)
+export const updateClipFile = (id, file, at, duration) =>
+  db.prepare(`UPDATE clips SET file = ?, at = ?, duration = ? WHERE id = ?`).run(file, at, duration, id)
+export const delClip = id => db.prepare(`DELETE FROM clips WHERE id = ?`).run(id)
 export const listClips = (vodId, limit = 100) =>
   (vodId
     ? db.prepare(`SELECT id, vod_id AS vodId, at, duration, created_at AS createdAt

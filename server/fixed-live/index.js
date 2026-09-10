@@ -12,7 +12,7 @@ import { WebSocketServer } from "ws"
 import express from "express"
 import { MediaStreamTrackFactory, RTCPeerConnection, useH264, useOPUS } from "werift"
 import { logTrackPlayed, mediaHistory, addChatMsg, chatPage, chatLatest, getVod, listVods,
-         addClip, getClip, listClips } from "./db.js"
+         addClip, getClip, listClips, updateClipFile, delClip } from "./db.js"
 import { recorder } from "./recorder.js"
 
 const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
@@ -1182,10 +1182,47 @@ app.post("/api/fixed/vods/:id/clip", wrap(async (req, res) => {
     setTimeout(() => { try { p.kill("SIGKILL") } catch {}; r("timeout") }, 60_000)
   })
   if (code !== 0) return res.status(500).json({ error: "ffmpeg: " + code })
-  const { lastInsertRowid: id } = addClip({ vod_id: vod.id, file, at, duration: dur, created_at: Date.now() })
+  const { lastInsertRowid: id } = addClip({ vod_id: vod.id, stream_key: vod.stream_key, file, at, duration: dur, created_at: Date.now() })
   res.json({ id, at, duration: dur,
              url: `${PUBLIC_URL}/api/fixed/clips/${id}/file` })
 }))
+// clip dos últimos 30s da live (buffer de segmentos do gravador)
+app.post("/api/fixed/streams/:key/clip", wrap(async (req, res) => {
+  const dur = Math.min(60, Math.max(10, +(req.body?.dur ?? 30) || 30))
+  const clip = await recorder.clipLast(req.params.key, dur)
+  res.json({ id: clip.id, duration: clip.duration,
+             url: `${PUBLIC_URL}/api/fixed/clips/${clip.id}/file` })
+}))
+// ajuste fino do clip no modal: recorta com re-encode (precisão de segundo)
+app.post("/api/fixed/clips/:id/trim", wrap(async (req, res) => {
+  const clip = getClip(+req.params.id)
+  if (!clip) return res.status(404).json({ error: "clip não encontrado" })
+  const dur = Math.min(clip.duration, Math.max(5, +(req.body?.dur ?? clip.duration) || clip.duration))
+  const at = Math.max(0, Math.min(+(req.body?.at ?? 0) || 0, clip.duration - 5))
+  const file = clip.file.replace(/\.mp4$/, `-trim${Date.now()}.mp4`)
+  const code = await new Promise(r => {
+    const p = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error",
+      "-ss", String(at), "-i", clip.file, "-t", String(dur),
+      "-c:v", "libx264", "-preset", "veryfast", "-c:a", "copy",
+      "-movflags", "+faststart", file], { stdio: ["ignore", "ignore", "pipe"] })
+    let err = ""
+    p.stderr.on("data", d => { err += d })
+    p.once("exit", c => r(c === 0 ? 0 : err.slice(-300)))
+    setTimeout(() => { try { p.kill("SIGKILL") } catch {}; r("timeout") }, 120_000)
+  })
+  if (code !== 0) return res.status(500).json({ error: "ffmpeg: " + code })
+  rmSync(clip.file, { force: true })
+  updateClipFile(clip.id, file, at, dur)
+  res.json({ id: clip.id, at, duration: dur,
+             url: `${PUBLIC_URL}/api/fixed/clips/${clip.id}/file` })
+}))
+app.delete("/api/fixed/clips/:id", (req, res) => {
+  const clip = getClip(+req.params.id)
+  if (!clip) return res.status(404).json({ error: "clip não encontrado" })
+  rmSync(clip.file, { force: true })
+  delClip(clip.id)
+  res.json({ ok: true })
+})
 app.get("/api/fixed/clips", (req, res) => {
   const vodId = req.query.vod ? +req.query.vod : null
   res.json(listClips(vodId))

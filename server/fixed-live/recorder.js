@@ -6,9 +6,9 @@
 import { RTCPeerConnection, useH264, useOPUS } from "werift"
 import { createSocket } from "node:dgram"
 import { spawn } from "node:child_process"
-import { mkdirSync, writeFileSync, existsSync, statSync, rmSync } from "node:fs"
+import { mkdirSync, writeFileSync, existsSync, statSync, rmSync, readdirSync } from "node:fs"
 import { join } from "node:path"
-import { addVod } from "./db.js"
+import { addVod, addClip, getClip } from "./db.js"
 
 const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
 // candidatos do broadcast-box saem com o IP público/LAN (NAT_1_TO_1_IP); da
@@ -85,7 +85,9 @@ const h264ParamSets = (rtp, pipe) => {
   }
 }
 
-const startFfmpeg = (sections, outPath) => {
+const SEGMENT_S = 5   // granularidade do buffer de clips (e do corte com -c copy)
+
+const startFfmpeg = (sections, outPath, livePrefix) => {
   const sdpPath = outPath.replace(/\.mp4$/, ".sdp")
   writeFileSync(sdpPath, buildSdp(sections))
   const args = ["-hide_banner", "-loglevel", "warning",
@@ -93,6 +95,9 @@ const startFfmpeg = (sections, outPath) => {
     "-fflags", "+genpts",
     "-i", sdpPath,
     "-c", "copy",
+    // buffer de clips: segmentos fechados de 5s (cada um começa num keyframe)
+    "-f", "segment", "-segment_time", String(SEGMENT_S), "-reset_timestamps", "1",
+    "-segment_format", "mp4", livePrefix + "-live-%05d.mp4",
     "-f", "mp4", outPath]
   const proc = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] })
   let err = ""
@@ -177,7 +182,8 @@ async function startSession (key) {
   const vd = sections.find(s => s.kind === "video")
   const t1 = Date.now()
   while (vd && !(vd.sps && vd.pps) && Date.now() - t1 < 10_000) await sleep(100)
-  const proc = startFfmpeg(sections, outPath)
+  const livePrefix = join(REC_DIR, `${key}-${startedAt}`)
+  const proc = startFfmpeg(sections, outPath, livePrefix)
   log_(`gravando "${key}" → ${outPath} (${sections.map(s => s.kind).join("+")})`)
 
   // heartbeat: onde o fluxo está (werift recebendo? udp entregue? ffmpeg crescendo?)
@@ -186,6 +192,7 @@ async function startSession (key) {
     log_(`hb "${key}": ` + sections.map(s =>
       `${s.kind} got=${s.stats.got} sent=${s.stats.sent} err=${s.stats.errs}`).join(" | ") +
       ` | mp4=${(size / 1e6).toFixed(1)}MB`)
+    pruneSegments(livePrefix, 45)
   }, 30_000)
 
   let ended = false
@@ -194,6 +201,7 @@ async function startSession (key) {
     ended = true
     clearInterval(hb)
     sessions.delete(key)
+    setTimeout(() => pruneSegments(livePrefix, 0), 15_000)
     try { pc.close() } catch {}
     for (const s of pipes) try { s.close() } catch {}
     proc.kill("SIGINT")   // ffmpeg finaliza o MP4 com moov válido
@@ -215,7 +223,53 @@ async function startSession (key) {
 
   pc.connectionStateChange.subscribe(s => { if (["failed", "closed"].includes(s)) finish("pc " + s) })
   proc.once("exit", code => { if (!ended) { log_(`ffmpeg saiu (${code}): ${proc.ffmpegErr()}`); finish("ffmpeg") } })
-  return { finish }
+  return { finish, startedAt }
+}
+
+// apaga segmentos do prefixo mais velhos que maxAge s (0 = todos)
+const pruneSegments = (prefix, maxAge) => {
+  try {
+    const now = Date.now()
+    for (const f of readdirSync(REC_DIR))
+      if (f.startsWith(prefix.replace(REC_DIR + "/", "") + "-live-")) {
+        const full = join(REC_DIR, f)
+        if (now - statSync(full).mtimeMs > (maxAge + 2) * 1000) rmSync(full, { force: true })
+      }
+  } catch {}
+}
+
+// clip dos últimos `dur` segundos da live: concatena os segmentos fechados
+// (cópia direta, cada um começa num keyframe) e corta no fim
+async function clipLast (key, dur) {
+  const entry = sessions.get(key)
+  if (!entry) throw new Error("não está gravando agora")
+  const session = await entry
+  const livePrefix = join(REC_DIR, `${key}-${session.startedAt}`)
+  const cutoff = Date.now() - 6_000   // o segmento em aberto não tem moov ainda
+  const segs = readdirSync(REC_DIR)
+    .filter(f => f.startsWith(`${key}-${session.startedAt}-live-`))
+    .map(f => join(REC_DIR, f))
+    .filter(f => statSync(f).mtimeMs < cutoff)
+    .sort()
+  if (!segs.length) throw new Error("buffer ainda vazio, tenta em alguns segundos")
+  const take = Math.min(segs.length, Math.ceil((dur + 2) / SEGMENT_S))
+  const list = segs.slice(-take)
+  const outFile = join(REC_DIR, `${key}-${Date.now()}-clip.mp4`)
+  const lst = outFile.replace(/\.mp4$/, ".txt")
+  writeFileSync(lst, list.map(f => `file '${f}'`).join("\n"))
+  await new Promise((res, rej) => {
+    const p = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error",
+      "-f", "concat", "-safe", "0", "-i", lst, "-t", String(dur),
+      "-c", "copy", "-movflags", "+faststart", outFile], { stdio: ["ignore", "ignore", "pipe"] })
+    let err = ""
+    p.stderr.on("data", d => { err += d })
+    p.once("exit", c => c === 0 ? res() : rej(new Error("ffmpeg: " + err.slice(-200))))
+    setTimeout(() => { try { p.kill("SIGKILL") } catch {}; rej(new Error("timeout")) }, 60_000)
+  })
+  rmSync(lst, { force: true })
+  const { lastInsertRowid: id } = addClip({ vod_id: 0, stream_key: key, file: outFile,
+                                            at: 0, duration: dur, created_at: Date.now() })
+  return getClip(id)
 }
 
 export const recorder = {
@@ -230,6 +284,7 @@ export const recorder = {
     for (const [k, s] of sessions)
       if (!liveKeys.has(k)) Promise.resolve(s).then(x => x?.finish("stream acabou"))
   },
+  clipLast,
   async stopAll () {
     await Promise.allSettled([...sessions.keys()].map(k =>
       Promise.resolve(sessions.get(k)).then(x => x?.finish("shutdown"))))

@@ -289,6 +289,25 @@
   </div>
 </dialog>
 
+<dialog id="dlg-clip">
+  <h3>Clip dos últimos 30s</h3>
+  <p class="desc">Ajuste o pedaço que vale a pena antes de salvar.</p>
+  <video id="clip-preview" controls loop muted style="width:100%;border-radius:var(--radius);background:#000;margin:10px 0"></video>
+  <div class="field">
+    <label for="clip-start">Início <span class="muted" id="clip-range"></span></label>
+    <input type="range" id="clip-start" min="0" max="30" step="1" value="0">
+  </div>
+  <div class="field" style="margin-top:8px">
+    <label for="clip-end">Fim</label>
+    <input type="range" id="clip-end" min="5" max="30" step="1" value="30">
+  </div>
+  <p class="err" id="clip-err"></p>
+  <div class="actions">
+    <button class="outline" id="clip-discard">Descartar</button>
+    <button id="clip-save">Salvar clip</button>
+  </div>
+</dialog>
+
 <dialog id="dlg-cfg">
   <h3>Configurações</h3>
   <p class="desc">Valem só nesta máquina.</p>
@@ -1631,6 +1650,7 @@ function openPlayer (key) {
   release(viewer); viewer = null
   showPlayer(key)
   chatOpen(key)
+  $('#clip-btn').hidden = false
   watch(key, $('#player-wrap video'), nick)
     .then(p => { viewer = p; setVideoControls(true) })
     .catch(e => { toast(e.message); closePlayer() })
@@ -1646,6 +1666,7 @@ function closePlayer () {
   vid.removeAttribute('src'); vid.load()   // VOD pode ter deixado src atrás
   $('#watch-start').hidden = true
   closeVod()
+  $('#clip-btn').hidden = true
   showPlayer(null)
   if (vodMode) { renderVods().catch(() => {}); return }
   refresh().catch(() => {})
@@ -1953,6 +1974,7 @@ function openFixed (key) {
     ? 'Canal do servidor: o que você tocar aqui, todo mundo assiste.'
     : 'Playlist colaborativa: quem está assistindo adiciona e controla.'
   $('#fixed-results').replaceChildren()
+  $('#clip-btn').hidden = true   // canais fixos não têm gravação pra clipear
   $('#fixed-err').textContent = ''
   $('#fixed-now').hidden = true
   lyr = { id: null, lines: [] }
