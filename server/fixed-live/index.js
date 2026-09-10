@@ -11,7 +11,8 @@ import { join } from "node:path"
 import { WebSocketServer } from "ws"
 import express from "express"
 import { MediaStreamTrackFactory, RTCPeerConnection, useH264, useOPUS } from "werift"
-import { logTrackPlayed, mediaHistory, addChatMsg, chatPage, chatLatest } from "./db.js"
+import { logTrackPlayed, mediaHistory, addChatMsg, chatPage, chatLatest, getVod, listVods } from "./db.js"
+import { recorder } from "./recorder.js"
 
 const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
 const PORT = +(process.env.PORT ?? 3000)
@@ -740,6 +741,9 @@ setInterval(async () => {
   for (const k of announced) if (!liveKeys.has(k)) announced.delete(k)
   firstScan = false
 
+  // gravação: mantém uma sessão WHEP por stream de pessoa (não grava os fixos)
+  recorder.sync(new Set([...liveKeys].filter(k => k !== "tv" && k !== "music")))
+
   // "live" sem processo algum por 8 s = o pipeline morreu sem passar pelo
   // ended (kill num instante ruim, close tardio ignorado pela guarda de
   // geração). Avança como fim de faixa em vez de ficar "live" mudo.
@@ -1140,6 +1144,23 @@ app.get("/api/fixed/chat", (req, res) => {
   res.json(chatPage(room, before, Math.min(100, Math.max(1, +(req.query.limit ?? 50) || 50))))
 })
 
+// ── gravações (VODs) ─────────────────────────────────────────────────────
+app.get("/api/fixed/vods", (req, res) =>
+  res.json(listVods(Math.min(200, Math.max(1, +(req.query.limit ?? 100) || 100)))))
+app.get("/api/fixed/vods/:id/file", (req, res) => {
+  const vod = getVod(+req.params.id)
+  if (!vod) return res.status(404).json({ error: "gravação não encontrada" })
+  // sendFile suporta Range de graça (seek do <video>)
+  res.sendFile(vod.file, { acceptRanges: true, headers: { "cache-control": "no-cache" } },
+    e => { if (e && !res.headersSent) res.status(e.status ?? 500).end() })
+})
+app.get("/api/fixed/vods/:id/thumb", (req, res) => {
+  const vod = getVod(+req.params.id)
+  if (!vod) return res.status(404).json({ error: "gravação não encontrada" })
+  res.sendFile(vod.file.replace(/\.mp4$/, ".jpg"),
+    e => { if (e && !res.headersSent) res.status(404).end() })
+})
+
 // lista de salas pra UI, no formato de canal fixo (status + conteúdo)
 app.get("/api/fixed/jam", (req, res) => {
   const rooms = [...jamRooms.entries()].map(([room, members]) =>
@@ -1156,6 +1177,7 @@ app.get("/api/fixed/jam", (req, res) => {
 // o delete além dos 10s que o docker espera antes do SIGKILL.
 process.once("SIGTERM", () => {
   log("SIGTERM: encerrando hosts")
+  recorder.stopAll()
   Promise.race([
     Promise.allSettled([tv.runner._stop(), music.runner._stop()]),
     sleep(5_000),

@@ -26,6 +26,15 @@ CREATE TABLE IF NOT EXISTS chat (
   text TEXT NOT NULL,
   at   INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS vods (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  stream_key TEXT NOT NULL,
+  file       TEXT NOT NULL,
+  duration   REAL DEFAULT 0,
+  started_at INTEGER NOT NULL,
+  ended_at   INTEGER
+);
 `)
 // tabela criada antes de existir sala por stream: coluna entra por ALTER
 try { db.exec(`ALTER TABLE chat ADD COLUMN room TEXT NOT NULL DEFAULT ''`) } catch {}
@@ -57,3 +66,14 @@ export const chatPage = (room, beforeId, limit = 50) =>
 export const chatLatest = (room, limit = 50) =>
   db.prepare(`SELECT id, nick AS "from", text, at FROM chat
               WHERE room = ? ORDER BY id DESC LIMIT ?`).all(room, limit).reverse()
+
+// VODs: registro e busca pra servir/abrir
+export const addVod = v =>
+  db.prepare(`INSERT INTO vods (stream_key, file, duration, started_at, ended_at)
+              VALUES (@stream_key, @file, @duration, @started_at, @ended_at)`).run(v)
+export const getVod = id =>
+  db.prepare(`SELECT id, stream_key AS key, file, duration, started_at AS startedAt, ended_at AS endedAt
+              FROM vods WHERE id = ?`).get(id)
+export const listVods = (limit = 100) =>
+  db.prepare(`SELECT id, stream_key AS key, duration, started_at AS startedAt, ended_at AS endedAt
+              FROM vods ORDER BY id DESC LIMIT ?`).all(limit)

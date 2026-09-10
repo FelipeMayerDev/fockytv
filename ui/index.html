@@ -37,6 +37,7 @@
     <button class="tab" data-tab="music">Música</button>
     <button class="tab" data-tab="tv">Vídeo</button>
     <button class="tab" data-tab="jam">Estúdio (baixa latência)</button>
+    <button class="tab" data-tab="gravados">Gravados</button>
   </nav>
 
   <div class="pill" id="live-pill" hidden>
@@ -652,6 +653,7 @@ setInterval(presenceTick, 5000)
 
 
 let nowWatching = null   // streamKey aberto no player (showPlayer); usado no chat e no RPC
+let vodMode = false      // aba Gravados ativa: a grade mostra a lista de gravações
 
 function setLive (on) {
   $('#live-pill').hidden = !on
@@ -691,9 +693,10 @@ function setTab (tab) {
 document.querySelectorAll('#tabs .tab').forEach(b => {
   b.onclick = () => {
     const t = b.dataset.tab
-    if (t === 'live') closePlayer()
+    if (t === 'live') { vodMode = false; closePlayer() }
+    else if (t === 'gravados') openVods()
     else if (!FIXED_KEYS.includes(t)) return
-    else if (fixedKey !== t) openFixed(t)
+    else if (fixedKey !== t) { vodMode = false; openFixed(t) }
   }
 })
 
@@ -711,7 +714,9 @@ function showPlayer (key) {
   $('#share').hidden = watchFixed || !!pc
   $('#share-cam').hidden = watchFixed || (!!pc && camOnly)
   clearInterval(poll)
-  poll = setInterval(() => (key ? watchdog(key) : refresh()).catch(() => {}), 5000)
+  // na aba Gravados o "vigia" é a própria lista (atualiza durações/novas)
+  poll = setInterval(() =>
+    (key ? watchdog(key) : vodMode ? renderVods() : refresh()).catch(() => {}), 5000)
   // chat acompanha o player: streams de pessoas e canais fixos abrem o seu;
   // estúdio tem chat próprio e a home não tem chat
   nowWatching = key
@@ -722,7 +727,7 @@ function showPlayer (key) {
 // Quem assiste não recebe sinal quando o host sai: o WHEP continua de pé, só
 // para de chegar mídia. Então o poll da listagem vira vigia enquanto se assiste.
 async function watchdog (key) {
-  if (FIXED_KEYS.includes(key)) return   // canal fixo: quem cuida é o fixedTick
+  if (FIXED_KEYS.includes(key) || key === 'gravados') return   // fixedTick/vodMode cuidam
   if ((await status()).some(st => st.streamKey === key)) return
   closePlayer()
   toast(`${key} parou de compartilhar.`)
@@ -1629,12 +1634,83 @@ function openPlayer (key) {
 
 function closePlayer () {
   if (viewer) sfx.end()
+  vodPlaying = false
   closeFixed()
   release(viewer); viewer = null
-  $('#player-wrap video').srcObject = null
+  const vid = $('#player-wrap video')
+  vid.srcObject = null
+  vid.removeAttribute('src'); vid.load()   // VOD pode ter deixado src atrás
   $('#watch-start').hidden = true
   showPlayer(null)
+  if (vodMode) { renderVods().catch(() => {}); return }
   refresh().catch(() => {})
+}
+
+// ── aba Gravados: gravações automáticas das lives (VODs) ─────────────────
+let vodPlaying = false
+
+function openVods () {
+  vodMode = true
+  if (viewer || fixedKey || vodPlaying) closePlayer()
+  else { closeFixed(); chatClose(); showPlayer(null) }
+  setTab('gravados')
+  renderVods().catch(() => {})
+}
+
+async function renderVods () {
+  const grid = $('#grid-live')
+  let vods
+  try { vods = await fetch(cfg.serverUrl + '/api/fixed/vods').then(r => r.json()) } catch { return }
+  if (!vodMode) return
+  grid.replaceChildren()
+  if (!vods.length) {
+    const empty = document.createElement('p')
+    empty.className = 'muted'
+    empty.style.padding = '32px'
+    empty.textContent = 'Nenhuma gravação ainda — quando alguém subir ao ar, a live é gravada aqui.'
+    grid.append(empty)
+    return
+  }
+  for (const v of vods) {
+    const card = document.createElement('div')
+    card.className = 'vid'
+    const when = new Date(v.startedAt)
+    card.innerHTML = `<div class="thumb">
+        <img alt="" loading="lazy" onerror="this.remove()">
+        <span class="badge time">${mmss(v.duration)}</span>
+      </div>
+      <div class="meta"><div class="avatar"></div>
+        <div style="min-width:0">
+          <div class="title"></div><div class="sub"></div>
+        </div></div>`
+    card.querySelector('img').src = `${cfg.serverUrl}/api/fixed/vods/${v.id}/thumb`
+    card.querySelector('.avatar').textContent = v.key.slice(0, 1)
+    card.querySelector('.title').textContent = `Live de ${v.key}`
+    card.querySelector('.sub').textContent =
+      when.toLocaleDateString([], { day: '2-digit', month: 'short' }) + ' · ' +
+      when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    card.onclick = () => playVod(v)
+    grid.append(card)
+  }
+}
+
+function playVod (v) {
+  vodPlaying = true
+  const vid = $('#player-wrap video')
+  $('#grid-live').style.display = 'none'
+  $('#player-wrap').classList.add('on')
+  $('#back').hidden = false
+  $('#player-ctl').hidden = false
+  setVideoControls(true)
+  vid.src = `${cfg.serverUrl}/api/fixed/vods/${v.id}/file`
+  vid.play().catch(() => {})
+}
+
+function closeVod () {
+  vodPlaying = false
+  const vid = $('#player-wrap video')
+  vid.pause()
+  vid.removeAttribute('src'); vid.load()
 }
 
 $('#back').onclick = closePlayer
