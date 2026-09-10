@@ -410,10 +410,14 @@ function setupUpdates () {
 const RPC_CLIENT_ID = process.env.FOCKY_RPC_CLIENT_ID || '1546036535881637898'
 let rpcClient = null, rpcActivity = null, rpcTimer = null
 
+// diagnóstico em <userData>/rpc.log (mesmo esquema do audio-filter.log)
+const rlog = m => { try { fs.appendFileSync(path.join(app.getPath('userData'), 'rpc.log'),
+  new Date().toISOString() + ' ' + m + '\n') } catch {} }
+
 async function rpcApply () {
   clearTimeout(rpcTimer); rpcTimer = null
   if (!rpcActivity) {                     // pedido pra limpar
-    if (rpcClient) rpcClient.clearActivity().catch(() => {})
+    if (rpcClient) rpcClient.clearActivity().catch(e => rlog('clear: ' + e.message))
     return
   }
   try {
@@ -421,13 +425,17 @@ async function rpcApply () {
       const { Client } = require('@xhayper/discord-rpc')
       rpcClient = new Client({ clientId: RPC_CLIENT_ID })
       rpcClient.on('disconnected', () => {
+        rlog('disconnected')
         rpcClient = null
         if (rpcActivity) rpcTimer = setTimeout(rpcApply, 15_000)
       })
       await rpcClient.login()
+      rlog('conectado ao Discord')
     }
     await rpcClient.setActivity(rpcActivity)
-  } catch {                               // Discord fechado/sem login: tenta de novo
+    rlog('set: ' + (rpcActivity.details ?? '') + ' / ' + (rpcActivity.state ?? ''))
+  } catch (e) {                           // Discord fechado/sem login: tenta de novo
+    rlog('falhou: ' + e.message)
     rpcClient = null
     rpcTimer = setTimeout(rpcApply, 15_000)
   }
