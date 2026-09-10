@@ -10,4 +10,5 @@ contextBridge.exposeInMainWorld('focky', {
   onAudioPcm:  fn => ipcRenderer.on('audio-pcm', (_e, buf) => fn(buf)),
   onUpdate: fn => ipcRenderer.on('update', (_e, info) => fn(info)),
   installUpdate: () => ipcRenderer.invoke('install-update'),
+  rpc: a => ipcRenderer.invoke('rpc', a),
 })

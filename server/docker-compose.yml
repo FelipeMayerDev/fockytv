@@ -47,6 +47,11 @@ services:
     environment:
       - BB_URL=http://broadcast-box:8080
       - IDLE_MS=60000
+      # link usado nos anúncios do Discord ("fulano subiu ao ar")
+      - PUBLIC_URL=http://192.168.1.129:8180
+      # pra anunciar num canal do Discord: crie um webhook lá
+      # (Configurações do canal → Integrações → Webhooks) e descomente:
+      # - DISCORD_WEBHOOK=https://discord.com/api/webhooks/…
     # cookies do YouTube (formato Netscape) contra o "confirm you're not a
     # bot": exporte de um navegador logado pra server/cookies.txt e reinicie
     volumes:

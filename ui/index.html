@@ -651,6 +651,8 @@ async function presenceTick () {
 setInterval(presenceTick, 5000)
 
 
+let nowWatching = null   // streamKey aberto no player (showPlayer); usado no chat e no RPC
+
 function setLive (on) {
   $('#live-pill').hidden = !on
   if (!on) $('#viewers-pill').hidden = true   // some com o resto da transmissão
@@ -660,6 +662,25 @@ function setLive (on) {
   // transmitindo a tela, a câmera ainda pode entrar por cima; transmitindo só
   // a câmera, não há o que sobrepor
   $('#share-cam').hidden = on && camOnly
+  rpcUpdate()
+}
+
+// ── Rich Presence no Discord (desktop, toggle nas configurações) ─────────
+// Prioridade: no ar > assistindo > nada. O main conversa com o Discord por
+// pipe local; sem Discord rodando, tudo vira no-op silencioso.
+const rpcApi = window.fockyApi?.rpc ?? window.focky?.rpc
+function rpcUpdate () {
+  if (!rpcApi) return
+  if (!setOn('rpc')) return rpcApi(null)
+  let a = null
+  if (!$('#live-pill').hidden) {
+    a = { type: 3, details: 'No ar no FockyTV', state: 'compartilhando a tela',
+          startTimestamp: Date.now() }
+  } else if (nowWatching) {
+    a = { type: 3, details: 'Assistindo no FockyTV',
+          state: nowWatching in FIXED_LABEL ? FIXED_LABEL[nowWatching] : `canal de ${nowWatching}` }
+  }
+  rpcApi(a).catch(() => {})
 }
 
 // ── abas do header: ativa a pílula e navega pra view correspondente ──────
@@ -695,6 +716,7 @@ function showPlayer (key) {
   // estúdio tem chat próprio e a home não tem chat
   nowWatching = key
   if (!key || key === 'jam') chatClose()
+  rpcUpdate()
 }
 
 // Quem assiste não recebe sinal quando o host sai: o WHEP continua de pé, só
@@ -990,7 +1012,6 @@ $('#cfg-close').onclick = () => $('#dlg-cfg').close()
 // pelo eco do servidor — uma fonte só de verdade, e o id do banco viabiliza
 // o scrollback.
 const chat = { ws: null, room: null, oldest: null, timer: null, unread: 0, fab: false }
-let nowWatching = null   // streamKey aberto no player (showPlayer) pra religar no toggle
 
 const chatEls = () => ({ msgs: $('#chat-msgs'), online: $('#chat-online'), input: $('#chat-input') })
 
@@ -1124,9 +1145,12 @@ for (const [form, input] of [['#chat-form', '#chat-input']])
     $(input).value = ''
   }
 
-// religar o chat se o toggle mudou nas configurações
+// religar o chat / limpar o RPC se os toggles mudaram nas configurações
 document.querySelectorAll('#dlg-cfg [data-set]').forEach(el =>
-  el.addEventListener('change', () => el.dataset.set === 'chat' && chatApplySetting()))
+  el.addEventListener('change', () => {
+    if (el.dataset.set === 'chat') chatApplySetting()
+    if (el.dataset.set === 'rpc') rpcUpdate()
+  }))
 
 // ── compartilhar ─────────────────────────────────────────────────────────
 

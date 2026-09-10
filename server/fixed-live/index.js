@@ -16,6 +16,10 @@ import { logTrackPlayed, mediaHistory, addChatMsg, chatPage, chatLatest } from "
 const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
 const PORT = +(process.env.PORT ?? 3000)
 const IDLE_MS = +(process.env.IDLE_MS ?? 60_000)
+// anúncio de "subiu ao ar": webhook de um canal do Discord (opcional). O link
+// do anúncio usa PUBLIC_URL (o endereço que a galera usa pra abrir o app).
+const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK ?? ""
+const PUBLIC_URL = (process.env.PUBLIC_URL ?? BB_URL).replace(/\/$/, "")
 const log = (...a) => console.log(new Date().toISOString(), ...a)
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
@@ -694,11 +698,47 @@ const musicState = () => ({
 // só conta quem está com o player aberto de verdade.
 const zeroSince = { tv: null, music: null }
 const stalledSince = { tv: null, music: null }
+
+// ── anúncio no Discord: alguém subiu ao ar ───────────────────────────────
+// Canais fixos não anunciavam (spam); só pessoa. A 1ª varredura pós-boot
+// povoa o conjunto sem anunciar — container reiniciando não é "subiu ao ar".
+const announced = new Set()
+let firstScan = true
+const announceWebhook = key => {
+  const body = {
+    embeds: [{
+      title: `🔴 ${key} subiu ao ar`,
+      url: PUBLIC_URL,
+      description: "Abre o FockyTV pra assistir!",
+      color: 0xe11d48,
+      footer: { text: "FockyTV" },
+      timestamp: new Date().toISOString(),
+    }],
+  }
+  fetch(DISCORD_WEBHOOK, { method: "POST", headers: { "content-type": "application/json" },
+                           body: JSON.stringify(body), signal: AbortSignal.timeout(8_000) })
+    .then(r => { if (!r.ok) log("[discord] webhook respondeu", r.status) })
+    .catch(e => log("[discord] webhook:", e.message))
+}
+
 setInterval(async () => {
   let live
   try {
     live = (await (await fetch(BB_URL + "/api/status", { signal: AbortSignal.timeout(8_000) })).json()) ?? []
   } catch { return }
+
+  // quem está no ar agora (com vídeo de verdade): anuncia novidade no Discord.
+  // Todos entram no conjunto já na 1ª varredura — sem ela, quem já estava
+  // ao ar no boot era "anunciado" na varredura seguinte como se fosse novo.
+  const liveKeys = new Set(live.filter(s => s.videoTracks?.length).map(s => s.streamKey))
+  for (const k of liveKeys) {
+    if (k === "tv" || k === "music") continue
+    const isNew = !announced.has(k)
+    announced.add(k)
+    if (!firstScan && isNew && DISCORD_WEBHOOK) announceWebhook(k)
+  }
+  for (const k of announced) if (!liveKeys.has(k)) announced.delete(k)
+  firstScan = false
 
   // "live" sem processo algum por 8 s = o pipeline morreu sem passar pelo
   // ended (kill num instante ruim, close tardio ignorado pela guarda de

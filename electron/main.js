@@ -404,6 +404,40 @@ function setupUpdates () {
   setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 6 * 60 * 60 * 1000)
 }
 
+// ── Rich Presence no Discord (opcional, toggle nas configurações) ────────
+// Pipe local discord-ipc: se o Discord não está rodando, fica quieto e
+// tenta de novo com backoff — nunca atrapalha o resto do app.
+const RPC_CLIENT_ID = process.env.FOCKY_RPC_CLIENT_ID || '1546036535881637898'
+let rpcClient = null, rpcActivity = null, rpcTimer = null
+
+async function rpcApply () {
+  clearTimeout(rpcTimer); rpcTimer = null
+  if (!rpcActivity) {                     // pedido pra limpar
+    if (rpcClient) rpcClient.clearActivity().catch(() => {})
+    return
+  }
+  try {
+    if (!rpcClient) {
+      const { Client } = require('@xhayper/discord-rpc')
+      rpcClient = new Client({ clientId: RPC_CLIENT_ID })
+      rpcClient.on('disconnected', () => {
+        rpcClient = null
+        if (rpcActivity) rpcTimer = setTimeout(rpcApply, 15_000)
+      })
+      await rpcClient.login()
+    }
+    await rpcClient.setActivity(rpcActivity)
+  } catch {                               // Discord fechado/sem login: tenta de novo
+    rpcClient = null
+    rpcTimer = setTimeout(rpcApply, 15_000)
+  }
+}
+
+ipcMain.handle('rpc', (_e, activity) => {
+  rpcActivity = activity
+  return rpcApply()
+})
+
 app.on('before-quit', () => { quitting = true; audioStop() })
 
 // A janela nunca é destruída (o close vira hide), então isto só dispara se algo
