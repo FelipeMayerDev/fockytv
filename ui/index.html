@@ -122,7 +122,6 @@
   <div id="grid-live"></div>
   <div id="player-wrap">
     <video autoplay playsinline></video>
-    <button id="watch-start" hidden>▶ Clique para assistir</button>
     <div id="fixed-loading" hidden><div><span id="fixed-loading-label"></span><i></i></div></div>
     <div id="player-tools" hidden>
       <button class="ghost icon" id="clip-btn" hidden title="Criar clip de 30s deste ponto" aria-label="Criar clip">
@@ -569,8 +568,7 @@ async function watch (key, videoEl, viewer) {
   pc.addTransceiver('audio', { direction: 'recvonly' })
   pc.ontrack = e => {
     videoEl.srcObject = e.streams[0]
-    // iframe do Discord pode negar autoplay: sem gesto, oferece o clique
-    videoEl.play?.().catch(() => { if (videoEl === vid) $('#watch-start').hidden = false })
+    videoEl.play?.().catch(() => {})
     if (discord) pc.oniceconnectionstatechange =
       () => console.info('[fockytv/discord] viewer ice:', pc.iceConnectionState)
   }
@@ -1149,18 +1147,17 @@ function chatConnect () {
 }
 
 // abre (ou troca) o chat da stream; fecha o anterior se houver
-// canais fixos ficam em modo FAB — conecta e conta não-lidas, o painel
-// só abre no clique; streams de pessoas abrem o painel direto
+// toda stream fica em modo FAB — conecta e conta não-lidas; o painel
+// só abre no clique (nada de chat aberto sem o usuário pedir)
 function chatOpen (room) {
   if (!setOn('chat') || room === 'jam') return chatClose()
   if (chat.room === room) return
   chatClose(true)
   chat.room = room
   chat.unread = 0
-  chat.fab = FIXED_KEYS.includes(room)
-  $('#chat-fab').hidden = !chat.fab
-  $('#chat-panel').hidden = chat.fab
-  if (chat.fab) chatFabBadge()
+  $('#chat-fab').hidden = false
+  $('#chat-panel').hidden = true
+  chatFabBadge()
   chatConnect()
 }
 
@@ -1641,6 +1638,7 @@ function openJam () {
   fixedKey = 'jam'
   showPlayer('jam')
   $('#fixed-panel').hidden = true
+  $('#player-wrap').classList.remove('tv-panel')
   $('#fixed-panel-toggle').hidden = true
   $('#fixed-bar').hidden = true
   $('#fixed-loading').hidden = true
@@ -1759,6 +1757,7 @@ function openPlayer (key) {
   $('#net-stats').textContent = '—'
   $('#net-dot').style.background = ''
   release(viewer); viewer = null
+  $('#player-wrap').classList.remove('tv-panel')
   showPlayer(key)
   chatOpen(key)
   $('#clip-btn').hidden = false
@@ -1775,7 +1774,6 @@ function closePlayer () {
   const vid = $('#player-wrap video')
   vid.srcObject = null
   vid.removeAttribute('src'); vid.load()   // VOD pode ter deixado src atrás
-  $('#watch-start').hidden = true
   closeVod()
   $('#clip-btn').hidden = true
   showPlayer(null)
@@ -1840,6 +1838,7 @@ function playVod (v) {
   $('#back').hidden = false
   $('#player-ctl').hidden = false
   setVideoControls(true)
+  vid.controls = true   // play/pause/seek nativos: VOD não é live
   vid.src = `${cfg.serverUrl}/api/fixed/vods/${v.id}/file`
   vid.play().catch(() => {})
 }
@@ -1848,17 +1847,12 @@ function closeVod () {
   vodPlaying = 0
   $('#clip-btn').hidden = true
   const vid = $('#player-wrap video')
+  vid.controls = false
   vid.pause()
   vid.removeAttribute('src'); vid.load()
 }
 
 $('#back').onclick = closePlayer
-
-// desbloqueio por gesto do overlay de autoplay negado
-$('#watch-start').onclick = () => {
-  $('#watch-start').hidden = true
-  vid.play().catch(() => {})
-}
 
 // ── controles do player (sem play/pause: numa live não há o que pausar) ──
 const vid = $('#player-wrap video')
@@ -2071,7 +2065,7 @@ function tickLyrics () {
 }
 
 function openFixed (key) {
-  if (key === 'jam') return openJam()
+  if (key === 'jam') { $('#player-wrap').classList.remove('tv-panel'); return openJam() }
   sfx.watch()
   last = null
   $('#net-stats').textContent = '—'
@@ -2097,6 +2091,7 @@ function openFixed (key) {
   $('#jam-view').classList.remove('on')
   $('#player-wrap').classList.remove('tv-panel-hidden')
   $('#fixed-panel').hidden = false
+  $('#player-wrap').classList.add('tv-panel')
   $('#fixed-panel-toggle').hidden = key !== 'tv'
   $('#fixed-bar').hidden = false
   $('#fb-prev').hidden = $('#fb-next').hidden = $('#fb-toggle').hidden = false
@@ -2321,6 +2316,7 @@ function closeFixed () {
   clearInterval(fixedTimer)
   clearInterval(lyrTimer)
   $('#fixed-panel').hidden = true
+  $('#player-wrap').classList.remove('tv-panel')
   $('#fixed-panel-toggle').hidden = true
   $('#player-wrap').classList.remove('tv-panel-hidden')
   $('#fixed-bar').hidden = true

@@ -91,7 +91,7 @@ button.icon { width:36px; padding:0 }
 }
 
 /* header apertado: cai por etapas em vez de estourar */
-@media (max-width:1000px) {
+@media (max-width:1280px) {
   #live-stats, #net-stats, .pill .sep { display:none }
   #viewers-pill { max-width:200px }
 }
@@ -563,9 +563,11 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
 .chat-form input { flex:1; min-width:0 }
 .chat-form button { flex:none }
 /* TV: FAB do chat sobre o vídeo (acompanha o recolher do painel fixo) */
-#chat-fab { position:absolute; bottom:16px; right:382px; z-index:6;
+#chat-fab { position:absolute; bottom:16px; right:16px; z-index:6;
   background:var(--scrim); border:1px solid hsl(var(--border)) }
-#player-wrap.tv-panel-hidden #chat-fab { right:16px }
+/* canais fixos: o FAB vive no vídeo, ao lado do painel lateral */
+#player-wrap.tv-panel #chat-fab { right:382px }
+#player-wrap.tv-panel.tv-panel-hidden #chat-fab { right:12px }
 #chat-fab .badge {
   position:absolute; top:-4px; right:-4px; min-width:16px; height:16px;
   display:grid; place-items:center; padding:0 4px; border-radius:999px;

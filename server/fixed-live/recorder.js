@@ -94,10 +94,13 @@ const startFfmpeg = (sections, outPath, livePrefix) => {
     "-protocol_whitelist", "file,udp,rtp",
     "-fflags", "+genpts",
     "-i", sdpPath,
+    // -c copy por output: opções valem só pro output seguinte, e sem isso o
+    // ffmpeg 5 do container deixava o MP4 final sem streams (48 bytes)
     "-c", "copy",
     // buffer de clips: segmentos fechados de 5s (cada um começa num keyframe)
     "-f", "segment", "-segment_time", String(SEGMENT_S), "-reset_timestamps", "1",
     "-segment_format", "mp4", livePrefix + "-live-%05d.mp4",
+    "-c", "copy",
     "-f", "mp4", outPath]
   const proc = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] })
   let err = ""
