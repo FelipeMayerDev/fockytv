@@ -127,13 +127,15 @@ async function startSession (key) {
       // ssrc fixo por seção: o SDP do ffmpeg não conhece o do broadcast-box
       const fakeSsrc = 1000 + sections.length
       const out = createSocket("udp4")
+      pipe.stats = { got: 0, sent: 0, errs: 0 }
       pipe.first = new Promise(res => {
         track.onReceiveRtp.subscribe(rtp => {
+          pipe.stats.got++
           if (pipe.kind === "video") h264ParamSets(rtp, pipe)
           try {
             rtp.header.ssrc = fakeSsrc
-            out.send(rtp.serialize(), port, "127.0.0.1")
-          } catch {}
+            out.send(rtp.serialize(), port, "127.0.0.1", () => pipe.stats.sent++)
+          } catch { pipe.stats.errs++ }
           res()
         })
       })
@@ -171,15 +173,25 @@ async function startSession (key) {
   const proc = startFfmpeg(sections, outPath)
   log_(`gravando "${key}" → ${outPath} (${sections.map(s => s.kind).join("+")})`)
 
+  // heartbeat: onde o fluxo está (werift recebendo? udp entregue? ffmpeg crescendo?)
+  const hb = setInterval(() => {
+    const size = existsSync(outPath) ? statSync(outPath).size : 0
+    log_(`hb "${key}": ` + sections.map(s =>
+      `${s.kind} got=${s.stats.got} sent=${s.stats.sent} err=${s.stats.errs}`).join(" | ") +
+      ` | mp4=${(size / 1e6).toFixed(1)}MB`)
+  }, 30_000)
+
   let ended = false
   const finish = async reason => {
     if (ended) return
     ended = true
+    clearInterval(hb)
     sessions.delete(key)
     try { pc.close() } catch {}
     for (const s of pipes) try { s.close() } catch {}
     proc.kill("SIGINT")   // ffmpeg finaliza o MP4 com moov válido
-    await new Promise(r => { proc.once("exit", r); setTimeout(r, 5_000) })
+    const code = await new Promise(r => { proc.once("exit", (c) => r(c)); setTimeout(() => r("timeout"), 5_000) })
+    log_(`ffmpeg saiu com ${code}`)
     const duration = (Date.now() - startedAt) / 1000
     // registro só com MP4 de verdade: tentativa falha não vira VOD fantasma
     const ok = existsSync(outPath) && statSync(outPath).size > 10_000
