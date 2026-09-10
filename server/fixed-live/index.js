@@ -11,7 +11,8 @@ import { join } from "node:path"
 import { WebSocketServer } from "ws"
 import express from "express"
 import { MediaStreamTrackFactory, RTCPeerConnection, useH264, useOPUS } from "werift"
-import { logTrackPlayed, mediaHistory, addChatMsg, chatPage, chatLatest, getVod, listVods } from "./db.js"
+import { logTrackPlayed, mediaHistory, addChatMsg, chatPage, chatLatest, getVod, listVods,
+         addClip, getClip, listClips } from "./db.js"
 import { recorder } from "./recorder.js"
 
 const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
@@ -1159,6 +1160,41 @@ app.get("/api/fixed/vods/:id/thumb", (req, res) => {
   if (!vod) return res.status(404).json({ error: "gravação não encontrada" })
   res.sendFile(vod.file.replace(/\.mp4$/, ".jpg"),
     e => { if (e && !res.headersSent) res.status(404).end() })
+})
+
+// ── clips: 30s de uma gravação, link compartilhável ──────────────────────
+// Cópia direta (-c copy): o corte assenta no keyframe anterior ao ponto —
+// instantâneo e sem custo de CPU. O flash de 1-2s no começo é o ajuste fino
+// do keyframe; transcodar aqui custaria CPU pra cada clique.
+app.post("/api/fixed/vods/:id/clip", wrap(async (req, res) => {
+  const vod = getVod(+req.params.id)
+  if (!vod) return res.status(404).json({ error: "gravação não encontrada" })
+  const dur = Math.min(60, Math.max(5, +(req.body?.dur ?? 30) || 30))
+  const at = Math.max(0, Math.min(+(req.body?.at ?? 0) || 0, Math.max(0, vod.duration - 5)))
+  const file = vod.file.replace(/\.mp4$/, `-${Date.now()}-clip.mp4`)
+  const code = await new Promise(r => {
+    const p = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error",
+      "-ss", String(at), "-i", vod.file, "-t", String(dur), "-c", "copy",
+      "-movflags", "+faststart", file], { stdio: ["ignore", "ignore", "pipe"] })
+    let err = ""
+    p.stderr.on("data", d => { err += d })
+    p.once("exit", c => r(c === 0 ? 0 : err.slice(-300)))
+    setTimeout(() => { try { p.kill("SIGKILL") } catch {}; r("timeout") }, 60_000)
+  })
+  if (code !== 0) return res.status(500).json({ error: "ffmpeg: " + code })
+  const { lastInsertRowid: id } = addClip({ vod_id: vod.id, file, at, duration: dur, created_at: Date.now() })
+  res.json({ id, at, duration: dur,
+             url: `${PUBLIC_URL}/api/fixed/clips/${id}/file` })
+}))
+app.get("/api/fixed/clips", (req, res) => {
+  const vodId = req.query.vod ? +req.query.vod : null
+  res.json(listClips(vodId))
+})
+app.get("/api/fixed/clips/:id/file", (req, res) => {
+  const clip = getClip(+req.params.id)
+  if (!clip) return res.status(404).json({ error: "clip não encontrado" })
+  res.sendFile(clip.file, { acceptRanges: true },
+    e => { if (e && !res.headersSent) res.status(500).end() })
 })
 
 // lista de salas pra UI, no formato de canal fixo (status + conteúdo)

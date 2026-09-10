@@ -27,6 +27,15 @@ CREATE TABLE IF NOT EXISTS chat (
   at   INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS clips (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  vod_id     INTEGER NOT NULL,
+  file       TEXT NOT NULL,
+  at         REAL DEFAULT 0,
+  duration   REAL DEFAULT 30,
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS vods (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   stream_key TEXT NOT NULL,
@@ -77,3 +86,17 @@ export const getVod = id =>
 export const listVods = (limit = 100) =>
   db.prepare(`SELECT id, stream_key AS key, duration, started_at AS startedAt, ended_at AS endedAt
               FROM vods ORDER BY id DESC LIMIT ?`).all(limit)
+
+// clips: trechos de 30s de uma gravação, com link compartilhável
+export const addClip = c =>
+  db.prepare(`INSERT INTO clips (vod_id, file, at, duration, created_at)
+              VALUES (@vod_id, @file, @at, @duration, @created_at)`).run(c)
+export const getClip = id =>
+  db.prepare(`SELECT id, vod_id AS vodId, file, at, duration, created_at AS createdAt
+              FROM clips WHERE id = ?`).get(id)
+export const listClips = (vodId, limit = 100) =>
+  (vodId
+    ? db.prepare(`SELECT id, vod_id AS vodId, at, duration, created_at AS createdAt
+                  FROM clips WHERE vod_id = ? ORDER BY id DESC LIMIT ?`).all(vodId, limit)
+    : db.prepare(`SELECT id, vod_id AS vodId, at, duration, created_at AS createdAt
+                  FROM clips ORDER BY id DESC LIMIT ?`).all(limit))

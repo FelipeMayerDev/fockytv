@@ -125,6 +125,10 @@
     <button id="watch-start" hidden>▶ Clique para assistir</button>
     <div id="fixed-loading" hidden><div><span id="fixed-loading-label"></span><i></i></div></div>
     <div id="player-tools" hidden>
+      <button class="ghost icon" id="clip-btn" hidden title="Criar clip de 30s deste ponto" aria-label="Criar clip">
+        <svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
+          <path d="M20 4 8.12 15.88"/><path d="M14.47 14.48 20 20"/><path d="M8.12 8.12 12 12"/></svg>
+      </button>
       <button class="ghost icon" id="pip" title="Picture in picture" aria-label="Picture in picture">
         <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/>
           <rect x="12" y="12" width="8" height="6" rx="1"/></svg>
@@ -1641,13 +1645,14 @@ function closePlayer () {
   vid.srcObject = null
   vid.removeAttribute('src'); vid.load()   // VOD pode ter deixado src atrás
   $('#watch-start').hidden = true
+  closeVod()
   showPlayer(null)
   if (vodMode) { renderVods().catch(() => {}); return }
   refresh().catch(() => {})
 }
 
 // ── aba Gravados: gravações automáticas das lives (VODs) ─────────────────
-let vodPlaying = false
+let vodPlaying = 0   // id da gravação em reprodução (0 = nenhuma)
 
 function openVods () {
   vodMode = true
@@ -1695,7 +1700,8 @@ async function renderVods () {
 }
 
 function playVod (v) {
-  vodPlaying = true
+  vodPlaying = v.id
+  $('#clip-btn').hidden = false
   const vid = $('#player-wrap video')
   $('#grid-live').style.display = 'none'
   $('#player-wrap').classList.add('on')
@@ -1707,7 +1713,8 @@ function playVod (v) {
 }
 
 function closeVod () {
-  vodPlaying = false
+  vodPlaying = 0
+  $('#clip-btn').hidden = true
   const vid = $('#player-wrap video')
   vid.pause()
   vid.removeAttribute('src'); vid.load()
