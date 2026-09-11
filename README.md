@@ -255,14 +255,14 @@ Shipped in phases, one commit each. Checked items are done.
 - [x] **Phase 3 — Discord integration.** Server-side webhook announcing
       "fulano is live" when someone starts broadcasting, plus client Rich
       Presence ("watching X's channel on FockyTV"). Both toggleable.
-- [x] **Phase 4 — Auto-recording / VODs.** The sidecar consumes each live as
-      a WHEP viewer and records it to MP4 (with a rolling 45 s segment buffer
-      for live clips); a new "Recordings" tab plays them back.
+- [x] **Phase 4 — Clip buffer.** The sidecar consumes each live as a WHEP
+      viewer and keeps a rolling segment buffer (~90 s); lives are not
+      recorded anymore — the "Clips" tab lists saved cuts only.
 - [x] **Phase 5 — Clips.** Watching a live, a button grabs the last 30 s from
-      the rolling buffer and opens a trim modal; on a recording it cuts the
-      current moment. Clips get a shareable link.
+      the rolling buffer and opens a trim modal. Clips get a shareable link
+      and live in the Clips tab.
 - [ ] **Phase 6 — "You missed it" digest.** Once-a-day modal on launch:
-      "last night had 2 lives and 14 songs played", click to open.
+      "last night had 14 songs played and 3 clips cut", click to open.
       Toggleable.
 - [ ] **Phase 7 — Game mode.** Game-window capture priority + capture only the
       game's audio (the WASAPI helper already does per-process loopback, used

@@ -1,14 +1,15 @@
-// gravador de lives: para cada stream de pessoa no ar, conecta como viewer
+// buffer de clips: para cada stream de pessoa no ar, conecta como viewer
 // WHEP (SEM ?viewer=, então não conta como espectador no zera-stream) e
 // reencaminha o RTP recebido pra sockets UDP locais que o ffmpeg escuta via
-// SDP — cópia direta (sem reencode) direto pra MP4. Quando a stream cai,
-// SIGINT finaliza o MP4 e registra no banco.
+// SDP — cópia direta (sem reencode) em segmentos MP4 de 5s. A live NÃO é
+// gravada: os segmentos mais velhos que CLIP_BUFFER_S são apagados, sobrando
+// só a janela recente da qual se recortam os clips de 30s.
 import { RTCPeerConnection, useH264, useOPUS } from "werift"
 import { createSocket } from "node:dgram"
 import { spawn } from "node:child_process"
 import { mkdirSync, writeFileSync, existsSync, statSync, rmSync, readdirSync } from "node:fs"
 import { join } from "node:path"
-import { addVod, addClip, getClip } from "./db.js"
+import { addClip, getClip } from "./db.js"
 
 const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
 // candidatos do broadcast-box saem com o IP público/LAN (NAT_1_TO_1_IP); da
@@ -16,8 +17,12 @@ const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
 // houver esse IP na resposta do WHEP, troca pelo hostname do container.
 const BB_PUBLIC_IP = process.env.BB_PUBLIC_IP ?? ""
 const BB_CANDIDATE_HOST = process.env.BB_CANDIDATE_HOST ?? "broadcast-box"
-const REC_DIR = join(process.env.DATA_DIR ?? "/app/data", "vods")
-mkdirSync(REC_DIR, { recursive: true })
+const CLIP_DIR = join(process.env.DATA_DIR ?? "/app/data", "vods")
+mkdirSync(CLIP_DIR, { recursive: true })
+
+// janela de clips: máximo que um clip pode pegar (60s) + folga pros 5s
+// do segmento em aberto e pra variação de relógio entre corte e gravação
+const CLIP_BUFFER_S = 90
 
 const log_ = (...a) => console.log(new Date().toISOString(), "[rec]", ...a)
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -45,7 +50,7 @@ const localPort = () => new Promise(res => {
 
 // uma m-line por trilha, apontando pras portas UDP que o ffmpeg vai escutar
 const buildSdp = sections => {
-  const lines = ["v=0", "o=- 0 0 IN IP4 127.0.0.1", "s=fockytv-rec", "t=0 0"]
+  const lines = ["v=0", "o=- 0 0 IN IP4 127.0.0.1", "s=fockytv-clips", "t=0 0"]
   for (const s of sections) {
     lines.push(`m=${s.kind} ${s.port} RTP/AVP ${s.pt}`,
                "c=IN IP4 127.0.0.1",
@@ -87,21 +92,18 @@ const h264ParamSets = (rtp, pipe) => {
 
 const SEGMENT_S = 5   // granularidade do buffer de clips (e do corte com -c copy)
 
-const startFfmpeg = (sections, outPath, livePrefix) => {
-  const sdpPath = outPath.replace(/\.mp4$/, ".sdp")
+const startFfmpeg = (sections, livePrefix) => {
+  const sdpPath = livePrefix + ".sdp"
   writeFileSync(sdpPath, buildSdp(sections))
   const args = ["-hide_banner", "-loglevel", "warning",
     "-protocol_whitelist", "file,udp,rtp",
     "-fflags", "+genpts",
     "-i", sdpPath,
-    // -c copy por output: opções valem só pro output seguinte, e sem isso o
-    // ffmpeg 5 do container deixava o MP4 final sem streams (48 bytes)
+    // segmentos fechados de 5s (cada um começa num keyframe): são eles que o
+    // clip concatena. Sem output de live completa — a gravação acabou.
     "-c", "copy",
-    // buffer de clips: segmentos fechados de 5s (cada um começa num keyframe)
     "-f", "segment", "-segment_time", String(SEGMENT_S), "-reset_timestamps", "1",
-    "-segment_format", "mp4", livePrefix + "-live-%05d.mp4",
-    "-c", "copy",
-    "-f", "mp4", outPath]
+    "-segment_format", "mp4", livePrefix + "-live-%05d.mp4"]
   const proc = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] })
   let err = ""
   proc.stderr.on("data", d => { err = (err + d).slice(-4000) })
@@ -109,10 +111,9 @@ const startFfmpeg = (sections, outPath, livePrefix) => {
   return proc
 }
 
-// uma sessão de gravação: WHEP in → RTP → UDP → ffmpeg
+// uma sessão de buffer: WHEP in → RTP → UDP → ffmpeg (só segmentos)
 async function startSession (key) {
   const startedAt = Date.now()
-  const outPath = join(REC_DIR, `${key}-${startedAt}.mp4`)
 
   const pc = new RTCPeerConnection({
     codecs: {
@@ -174,9 +175,9 @@ async function startSession (key) {
   while (sections.length < 2 && Date.now() - t0 < 10_000) await sleep(200)
   if (!sections.length) throw new Error("nenhuma trilha recebida")
 
-  // o ffmpeg só registra no MP4 o que chega enquanto ele sonda (primeiros
-  // instantes). O vídeo costuma atrasar (keyframe pedido via PLI), então o
-  // spawn espera o primeiro pacote de cada trilha antes de abrir o arquivo.
+  // o ffmpeg só aceita o SDP quando sabe o que vem; o vídeo costuma atrasar
+  // (keyframe pedido via PLI), então o spawn espera o primeiro pacote de cada
+  // trilha antes de abrir os segmentos.
   await Promise.race([
     Promise.allSettled(sections.map(s => s.first)),
     sleep(30_000),
@@ -185,17 +186,15 @@ async function startSession (key) {
   const vd = sections.find(s => s.kind === "video")
   const t1 = Date.now()
   while (vd && !(vd.sps && vd.pps) && Date.now() - t1 < 10_000) await sleep(100)
-  const livePrefix = join(REC_DIR, `${key}-${startedAt}`)
-  const proc = startFfmpeg(sections, outPath, livePrefix)
-  log_(`gravando "${key}" → ${outPath} (${sections.map(s => s.kind).join("+")})`)
+  const livePrefix = join(CLIP_DIR, `${key}-${startedAt}`)
+  const proc = startFfmpeg(sections, livePrefix)
+  log_(`buffer de clips de "${key}" no ar (${sections.map(s => s.kind).join("+")})`)
 
   // heartbeat: onde o fluxo está (werift recebendo? udp entregue? ffmpeg crescendo?)
   const hb = setInterval(() => {
-    const size = existsSync(outPath) ? statSync(outPath).size : 0
     log_(`hb "${key}": ` + sections.map(s =>
-      `${s.kind} got=${s.stats.got} sent=${s.stats.sent} err=${s.stats.errs}`).join(" | ") +
-      ` | mp4=${(size / 1e6).toFixed(1)}MB`)
-    pruneSegments(livePrefix, 45)
+      `${s.kind} got=${s.stats.got} sent=${s.stats.sent} err=${s.stats.errs}`).join(" | "))
+    pruneSegments(livePrefix, CLIP_BUFFER_S)
   }, 30_000)
 
   let ended = false
@@ -207,21 +206,10 @@ async function startSession (key) {
     setTimeout(() => pruneSegments(livePrefix, 0), 15_000)
     try { pc.close() } catch {}
     for (const s of pipes) try { s.close() } catch {}
-    proc.kill("SIGINT")   // ffmpeg finaliza o MP4 com moov válido
+    proc.kill("SIGINT")
     const code = await new Promise(r => { proc.once("exit", (c) => r(c)); setTimeout(() => r("timeout"), 12_000) })
-    log_(`ffmpeg saiu com ${code}`)
-    const duration = (Date.now() - startedAt) / 1000
-    // registro só com MP4 de verdade: tentativa falha não vira VOD fantasma
-    const ok = existsSync(outPath) && statSync(outPath).size > 10_000
-    if (ok) {
-      addVod({ stream_key: key, file: outPath, duration, started_at: startedAt, ended_at: Date.now() })
-      thumbOf(outPath)
-      log_(`gravação de "${key}" pronta (${reason}, ${Math.round(duration)}s)`)
-    } else {
-      log_(`gravação de "${key}" falhou (${reason}) — ${proc.ffmpegErr().split("\n").pop()}`)
-      try { rmSync(outPath) } catch {}
-      if (Date.now() - startedAt < 20_000) cooldown.set(key, Date.now() + 60_000)
-    }
+    log_(`buffer de "${key}" encerrado (${reason}, ffmpeg ${code})`)
+    if (Date.now() - startedAt < 20_000) cooldown.set(key, Date.now() + 60_000)
   }
 
   pc.connectionStateChange.subscribe(s => { if (["failed", "closed"].includes(s)) finish("pc " + s) })
@@ -233,9 +221,9 @@ async function startSession (key) {
 const pruneSegments = (prefix, maxAge) => {
   try {
     const now = Date.now()
-    for (const f of readdirSync(REC_DIR))
-      if (f.startsWith(prefix.replace(REC_DIR + "/", "") + "-live-")) {
-        const full = join(REC_DIR, f)
+    for (const f of readdirSync(CLIP_DIR))
+      if (f.startsWith(prefix.replace(CLIP_DIR + "/", "") + "-live-")) {
+        const full = join(CLIP_DIR, f)
         if (now - statSync(full).mtimeMs > (maxAge + 2) * 1000) rmSync(full, { force: true })
       }
   } catch {}
@@ -247,17 +235,17 @@ async function clipLast (key, dur) {
   const entry = sessions.get(key)
   if (!entry) throw new Error("não está gravando agora")
   const session = await entry
-  const livePrefix = join(REC_DIR, `${key}-${session.startedAt}`)
+  const livePrefix = join(CLIP_DIR, `${key}-${session.startedAt}`)
   const cutoff = Date.now() - 6_000   // o segmento em aberto não tem moov ainda
-  const segs = readdirSync(REC_DIR)
+  const segs = readdirSync(CLIP_DIR)
     .filter(f => f.startsWith(`${key}-${session.startedAt}-live-`))
-    .map(f => join(REC_DIR, f))
+    .map(f => join(CLIP_DIR, f))
     .filter(f => statSync(f).mtimeMs < cutoff)
     .sort()
   if (!segs.length) throw new Error("buffer ainda vazio, tenta em alguns segundos")
   const take = Math.min(segs.length, Math.ceil((dur + 2) / SEGMENT_S))
   const list = segs.slice(-take)
-  const outFile = join(REC_DIR, `${key}-${Date.now()}-clip.mp4`)
+  const outFile = join(CLIP_DIR, `${key}-${Date.now()}-clip.mp4`)
   const lst = outFile.replace(/\.mp4$/, ".txt")
   writeFileSync(lst, list.map(f => `file '${f}'`).join("\n"))
   await new Promise((res, rej) => {
@@ -292,27 +280,4 @@ export const recorder = {
     await Promise.allSettled([...sessions.keys()].map(k =>
       Promise.resolve(sessions.get(k)).then(x => x?.finish("shutdown"))))
   },
-}
-
-// thumb: frame de 2s (best effort; sem thumb a UI mostra card sem imagem)
-function thumbOf (outPath) {
-  const thumb = outPath.replace(/\.mp4$/, ".jpg")
-  const grab = delay => {
-    const p = spawn("ffmpeg", [
-      "-hide_banner", "-loglevel", "error",
-      "-analyzeduration", "20M", "-probesize", "20M",
-      "-ss", String(delay), "-i", outPath, "-frames:v", "1", "-q:v", "4", thumb,
-    ], { stdio: ["ignore", "ignore", "pipe"] })
-    let err = ""
-    p.stderr.on("data", d => { err = (err + d).slice(-2000) })
-    p.once("exit", code => {
-      if (code !== 0 && delay < 10) {
-        log_(`thumb tentativa ${delay}s falhou: ${err.trim().split("\n").pop()}`)
-        sleep(1000).then(() => grab(delay + 5))
-      }
-    })
-  }
-  // 1s de propósito: o moov do MP4 pode ainda estar caindo no disco quando
-  // o ffmpeg da gravação acabou de sair
-  sleep(1000).then(() => grab(2))
 }

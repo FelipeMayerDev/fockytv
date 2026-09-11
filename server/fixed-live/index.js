@@ -11,7 +11,7 @@ import { join } from "node:path"
 import { WebSocketServer } from "ws"
 import express from "express"
 import { MediaStreamTrackFactory, RTCPeerConnection, useH264, useOPUS } from "werift"
-import { logTrackPlayed, mediaHistory, addChatMsg, chatPage, chatLatest, getVod, listVods,
+import { logTrackPlayed, mediaHistory, addChatMsg, chatPage, chatLatest,
          addClip, getClip, listClips, updateClipFile, delClip } from "./db.js"
 import { recorder } from "./recorder.js"
 
@@ -742,7 +742,7 @@ setInterval(async () => {
   for (const k of announced) if (!liveKeys.has(k)) announced.delete(k)
   firstScan = false
 
-  // gravação: mantém uma sessão WHEP por stream de pessoa (não grava os fixos)
+  // gravação saiu: o gravador mantém só o buffer rotativo pros clips de live
   recorder.sync(new Set([...liveKeys].filter(k => k !== "tv" && k !== "music")))
 
   // "live" sem processo algum por 8 s = o pipeline morreu sem passar pelo
@@ -1145,48 +1145,10 @@ app.get("/api/fixed/chat", (req, res) => {
   res.json(chatPage(room, before, Math.min(100, Math.max(1, +(req.query.limit ?? 50) || 50))))
 })
 
-// ── gravações (VODs) ─────────────────────────────────────────────────────
-app.get("/api/fixed/vods", (req, res) =>
-  res.json(listVods(Math.min(200, Math.max(1, +(req.query.limit ?? 100) || 100)))))
-app.get("/api/fixed/vods/:id/file", (req, res) => {
-  const vod = getVod(+req.params.id)
-  if (!vod) return res.status(404).json({ error: "gravação não encontrada" })
-  // sendFile suporta Range de graça (seek do <video>)
-  res.sendFile(vod.file, { acceptRanges: true, headers: { "cache-control": "no-cache" } },
-    e => { if (e && !res.headersSent) res.status(e.status ?? 500).end() })
-})
-app.get("/api/fixed/vods/:id/thumb", (req, res) => {
-  const vod = getVod(+req.params.id)
-  if (!vod) return res.status(404).json({ error: "gravação não encontrada" })
-  res.sendFile(vod.file.replace(/\.mp4$/, ".jpg"),
-    e => { if (e && !res.headersSent) res.status(404).end() })
-})
-
-// ── clips: 30s de uma gravação, link compartilhável ──────────────────────
+// ── clips: 30s da live (buffer de segmentos do gravador), link compartilhável ──
 // Cópia direta (-c copy): o corte assenta no keyframe anterior ao ponto —
 // instantâneo e sem custo de CPU. O flash de 1-2s no começo é o ajuste fino
 // do keyframe; transcodar aqui custaria CPU pra cada clique.
-app.post("/api/fixed/vods/:id/clip", wrap(async (req, res) => {
-  const vod = getVod(+req.params.id)
-  if (!vod) return res.status(404).json({ error: "gravação não encontrada" })
-  const dur = Math.min(60, Math.max(5, +(req.body?.dur ?? 30) || 30))
-  const at = Math.max(0, Math.min(+(req.body?.at ?? 0) || 0, Math.max(0, vod.duration - 5)))
-  const file = vod.file.replace(/\.mp4$/, `-${Date.now()}-clip.mp4`)
-  const code = await new Promise(r => {
-    const p = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error",
-      "-ss", String(at), "-i", vod.file, "-t", String(dur), "-c", "copy",
-      "-movflags", "+faststart", file], { stdio: ["ignore", "ignore", "pipe"] })
-    let err = ""
-    p.stderr.on("data", d => { err += d })
-    p.once("exit", c => r(c === 0 ? 0 : err.slice(-300)))
-    setTimeout(() => { try { p.kill("SIGKILL") } catch {}; r("timeout") }, 60_000)
-  })
-  if (code !== 0) return res.status(500).json({ error: "ffmpeg: " + code })
-  const { lastInsertRowid: id } = addClip({ vod_id: vod.id, stream_key: vod.stream_key, file, at, duration: dur, created_at: Date.now() })
-  res.json({ id, at, duration: dur,
-             url: `${PUBLIC_URL}/api/fixed/clips/${id}/file` })
-}))
-// clip dos últimos 30s da live (buffer de segmentos do gravador)
 app.post("/api/fixed/streams/:key/clip", wrap(async (req, res) => {
   const dur = Math.min(60, Math.max(10, +(req.body?.dur ?? 30) || 30))
   const clip = await recorder.clipLast(req.params.key, dur)
@@ -1228,7 +1190,6 @@ app.get("/api/fixed/digest", (req, res) => {
   const since = +(req.query.since ?? 0) || (Date.now() - 24 * 3_600_000)
   res.json({
     since,
-    lives: listVods(200).filter(v => v.startedAt >= since),
     tracks: mediaHistory("music", since, 100),
     videos: mediaHistory("tv", since, 50),
     clips: listClips().filter(c => c.createdAt >= since).length,

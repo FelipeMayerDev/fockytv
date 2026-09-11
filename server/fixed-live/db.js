@@ -1,7 +1,7 @@
 // Persistência do fixed-live: SQLite num volume (DATA_DIR, montado pelo
 // compose). Antes daqui tudo era memória — reinício apagava chat, histórico.
 import Database from "better-sqlite3"
-import { mkdirSync } from "node:fs"
+import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs"
 import { join } from "node:path"
 
 const dir = process.env.DATA_DIR ?? "/app/data"
@@ -34,15 +34,6 @@ CREATE TABLE IF NOT EXISTS clips (
   at         REAL DEFAULT 0,
   duration   REAL DEFAULT 30,
   created_at INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS vods (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  stream_key TEXT NOT NULL,
-  file       TEXT NOT NULL,
-  duration   REAL DEFAULT 0,
-  started_at INTEGER NOT NULL,
-  ended_at   INTEGER
 );
 `)
 // tabela criada antes de existir sala por stream: coluna entra por ALTER
@@ -77,16 +68,21 @@ export const chatLatest = (room, limit = 50) =>
   db.prepare(`SELECT id, nick AS "from", text, at FROM chat
               WHERE room = ? ORDER BY id DESC LIMIT ?`).all(room, limit).reverse()
 
-// VODs: registro e busca pra servir/abrir
-export const addVod = v =>
-  db.prepare(`INSERT INTO vods (stream_key, file, duration, started_at, ended_at)
-              VALUES (@stream_key, @file, @duration, @started_at, @ended_at)`).run(v)
-export const getVod = id =>
-  db.prepare(`SELECT id, stream_key AS key, file, duration, started_at AS startedAt, ended_at AS endedAt
-              FROM vods WHERE id = ?`).get(id)
-export const listVods = (limit = 100) =>
-  db.prepare(`SELECT id, stream_key AS key, duration, started_at AS startedAt, ended_at AS endedAt
-              FROM vods ORDER BY id DESC LIMIT ?`).all(limit)
+// ── migração: lives gravadas saíram do ar ────────────────────────────────
+// A gravação automática de lives foi removida (sobrou só o corte de clips).
+// Apaga os registros de VODs e os arquivos deles do volume; os clips ficam
+// (reconhecíveis pelo sufixo "-clip"). Seguntos órfãos de sessões antigas
+// também saem — quem sobrou sem sessão viva nunca mais vai ser podado.
+try {
+  const vodDir = join(dir, "vods")
+  const clipFile = f => f.includes("-clip")
+  for (const f of readdirSync(vodDir)) {
+    if (clipFile(f)) continue
+    const full = join(vodDir, f)
+    try { if (statSync(full).isFile()) rmSync(full, { force: true }) } catch {}
+  }
+  db.exec(`DROP TABLE IF EXISTS vods`)
+} catch {}
 
 // clips: trechos de 30s de uma gravação, com link compartilhável
 export const addClip = c =>
@@ -100,7 +96,7 @@ export const updateClipFile = (id, file, at, duration) =>
 export const delClip = id => db.prepare(`DELETE FROM clips WHERE id = ?`).run(id)
 export const listClips = (vodId, limit = 100) =>
   (vodId
-    ? db.prepare(`SELECT id, vod_id AS vodId, at, duration, created_at AS createdAt
+    ? db.prepare(`SELECT id, vod_id AS vodId, stream_key AS streamKey, at, duration, created_at AS createdAt
                   FROM clips WHERE vod_id = ? ORDER BY id DESC LIMIT ?`).all(vodId, limit)
-    : db.prepare(`SELECT id, vod_id AS vodId, at, duration, created_at AS createdAt
+    : db.prepare(`SELECT id, vod_id AS vodId, stream_key AS streamKey, at, duration, created_at AS createdAt
                   FROM clips ORDER BY id DESC LIMIT ?`).all(limit))
