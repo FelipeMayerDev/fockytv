@@ -37,7 +37,7 @@
     <button class="tab" data-tab="music">Música</button>
     <button class="tab" data-tab="tv">Vídeo</button>
     <button class="tab" data-tab="jam">Estúdio (baixa latência)</button>
-    <button class="tab" data-tab="gravados">Gravados</button>
+    <button class="tab" data-tab="clips">Clips</button>
   </nav>
 
   <div class="pill" id="live-pill" hidden>
@@ -294,7 +294,7 @@
   <div id="digest-body" style="margin-top:10px"></div>
   <div class="actions">
     <button class="outline" id="digest-close">Fechar</button>
-    <button id="digest-go" hidden>Ver gravações</button>
+    <button id="digest-go" hidden>Ver clips</button>
   </div>
 </dialog>
 
@@ -376,10 +376,10 @@
   </p>
 
   <div class="opts">
-    <div class="row" id="game-row" hidden>
-      <label for="game" style="font-size:13px">Modo game: só janelas, som só do jogo, 60 fps</label>
-      <span class="switch"><input type="checkbox" id="game"><span></span></span>
-    </div>
+    <!-- "Modo game" removido: com o áudio da janela compartilhada sendo
+         obrigatório (e o do Discord excluído na tela toda), sobrava só
+         "lista de janelas + 60 fps", que não justifica um modo. Se voltar,
+         era uma row com #game filtrando sources por hwndOf() e fps=60. -->
     <div class="field">
       <label for="fps">Taxa de quadros</label>
       <select id="fps">
@@ -402,6 +402,10 @@
     <label class="switch"><input type="checkbox" id="audio"><span></span></label>
   </div>
 
+  <!-- filtro de áudio por app. Hoje só sobrevive o modo "som só do aplicativo"
+       (janela no Windows/wmctrl): remover o áudio do Discord ao compartilhar a
+       TELA saiu do diálogo e virou obrigatório (o código força o exclude). Se
+       um dia voltar a ser opcional, reexiba esta row no updateShareAudio. -->
   <div class="row" id="faudio-row" hidden>
     <div>
       <label style="color:hsl(var(--foreground))" id="faudio-label">Som do aplicativo</label>
@@ -696,7 +700,7 @@ setInterval(presenceTick, 5000)
 
 
 let nowWatching = null   // streamKey aberto no player (showPlayer); usado no chat e no RPC
-let vodMode = false      // aba Gravados ativa: a grade mostra a lista de gravações
+let clipMode = false     // aba Clips ativa: a grade mostra a lista de cortes
 
 function setLive (on) {
   $('#live-pill').hidden = !on
@@ -736,10 +740,10 @@ function setTab (tab) {
 document.querySelectorAll('#tabs .tab').forEach(b => {
   b.onclick = () => {
     const t = b.dataset.tab
-    if (t === 'live') { vodMode = false; closePlayer() }
-    else if (t === 'gravados') openVods()
+    if (t === 'live') { clipMode = false; closePlayer() }
+    else if (t === 'clips') openClips()
     else if (!FIXED_KEYS.includes(t)) return
-    else if (fixedKey !== t) { vodMode = false; openFixed(t) }
+    else if (fixedKey !== t) { clipMode = false; openFixed(t) }
   }
 })
 
@@ -757,9 +761,9 @@ function showPlayer (key) {
   $('#share').hidden = watchFixed || !!pc
   $('#share-cam').hidden = watchFixed || (!!pc && camOnly)
   clearInterval(poll)
-  // na aba Gravados o "vigia" é a própria lista (atualiza durações/novas)
+  // na aba Clips o "vigia" é a própria lista (atualiza novos cortes)
   poll = setInterval(() =>
-    (key ? watchdog(key) : vodMode ? renderVods() : refresh()).catch(() => {}), 5000)
+    (key ? watchdog(key) : clipMode ? renderClips() : refresh()).catch(() => {}), 5000)
   // chat acompanha o player: streams de pessoas e canais fixos abrem o seu;
   // estúdio tem chat próprio e a home não tem chat
   nowWatching = key
@@ -770,7 +774,7 @@ function showPlayer (key) {
 // Quem assiste não recebe sinal quando o host sai: o WHEP continua de pé, só
 // para de chegar mídia. Então o poll da listagem vira vigia enquanto se assiste.
 async function watchdog (key) {
-  if (FIXED_KEYS.includes(key) || key === 'gravados') return   // fixedTick/vodMode cuidam
+  if (FIXED_KEYS.includes(key) || key === 'clips') return   // fixedTick/clipMode cuidam
   if ((await status()).some(st => st.streamKey === key)) return
   closePlayer()
   toast(`${key} parou de compartilhar.`)
@@ -890,7 +894,7 @@ async function addCam (withMic) {
   const box = { x: 0.72, y: 0.68, w: +$('#cam-size').value / 100 }
   const ratio = (set.height ?? 720) / (set.width ?? 1280)
   const fps = Math.round(scr.frameRate ?? +$('#fps').value)
-  // quem está assistindo, queimado no canto (modo game / overlay ligado)
+  // quem está assistindo, queimado no canto (toggle "overlay" das configurações)
   const drawViewers = () => {
     const names = [...(presence.viewers.get(nick) ?? [])]
     if (!names.length) return
@@ -1204,7 +1208,7 @@ $('#chat-msgs').onscroll = e => {
     .finally(() => { delete box.dataset.loading })
 }
 
-// ── clips: ao vivo pega os últimos 30s do buffer; em gravação, o momento ──
+// ── clips: no player de uma live, corta os últimos 30s do buffer ──────────
 const clipModal = {
   id: 0, url: '', dur: 30,
   show (c) {
@@ -1233,27 +1237,16 @@ $('#clip-end').oninput = e => {
 }
 
 $('#clip-btn').onclick = () => {
-  if (!nowWatching && !vodPlaying) return
+  if (!nowWatching) return
   $('#clip-btn').disabled = true
-  const prom = vodPlaying
-    ? fetch(`${cfg.serverUrl}/api/fixed/vods/${vodPlaying}/clip`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ at: Math.max(0, $('#player-wrap video').currentTime - 5) }),
-      })
-    : fetch(`${cfg.serverUrl}/api/fixed/streams/${nowWatching}/clip`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ dur: 30 }),
-      })
-  prom.then(async r => {
+  fetch(`${cfg.serverUrl}/api/fixed/streams/${nowWatching}/clip`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ dur: 30 }),
+  }).then(async r => {
     if (!r.ok) throw new Error((await r.json().catch(() => null))?.error ?? 'falhou no servidor')
     return r.json()
   })
-    .then(c => {
-      if (vodPlaying) {
-        const copy = () => navigator.clipboard.writeText(c.url).then(() => toast('Link do clip copiado!'))
-        toast('Clip criado!', { label: 'Copiar link', run: copy })
-      } else clipModal.show(c)   // ao vivo: dá pra ajustar antes de salvar
-    })
+    .then(c => clipModal.show(c))   // dá pra ajustar antes de salvar
     .catch(e => toast('Clip falhou: ' + e.message))
     .finally(() => { $('#clip-btn').disabled = false })
 }
@@ -1291,7 +1284,7 @@ for (const [form, input] of [['#chat-form', '#chat-input']])
 
 // ── resumo diário: "você perdeu" ─────────────────────────────────────────
 // Uma vez por dia, no primeiro boot: o que rolou desde a última visita
-// (lives gravadas, músicas tocadas, vídeos, clips). Toggle nas configurações.
+// (músicas tocadas, vídeos, clips). Toggle nas configurações.
 function digestSection (title, items, fmt) {
   if (!items.length) return null
   const h = document.createElement('h3')
@@ -1322,14 +1315,12 @@ async function maybeDigest () {
     const d = await fetch(`${cfg.serverUrl}/api/fixed/digest?since=${seen || Date.now() - 7 * 86400e3}`)
       .then(r => r.json())
     localStorage.setItem('digestSeen', Date.now())
-    if (!d.lives.length && !d.tracks.length && !d.videos.length) return
+    if (!d.tracks.length && !d.videos.length && !d.clips) return
 
     $('#digest-sub').textContent =
       'o que rolou ' + (seen ? 'desde a tua última visita' : 'nessa semana') + ':'
     const body = $('#digest-body').replaceChildren()
     const secs = [
-      digestSection(d.lives.length === 1 ? '🔴 1 live' : `🔴 ${d.lives.length} lives`, d.lives,
-        v => `Live de ${v.key} · ${mmss(v.duration)}`),
       digestSection(d.tracks.length === 1 ? '🎵 1 música' : `🎵 ${d.tracks.length} músicas`, d.tracks,
         t => `${t.title}${t.addedBy ? ` (pedida por ${t.addedBy})` : ''}`),
       digestSection(d.videos.length === 1 ? '📺 1 vídeo' : `📺 ${d.videos.length} vídeos`, d.videos,
@@ -1337,12 +1328,12 @@ async function maybeDigest () {
       d.clips ? digestSection('✂️ Clips', [{ n: d.clips }], x => `${x.n} clip(s) criados`) : null,
     ].flat().filter(Boolean)
     $('#digest-body').replaceChildren(...secs)
-    $('#digest-go').hidden = !d.lives.length
+    $('#digest-go').hidden = !d.clips
     $('#dlg-digest').showModal()
   } catch {}   // server off: resumo é opcional, nunca bloqueia o boot
 }
 $('#digest-close').onclick = () => $('#dlg-digest').close()
-$('#digest-go').onclick = () => { $('#dlg-digest').close(); openVods() }
+$('#digest-go').onclick = () => { $('#dlg-digest').close(); openClips() }
 
 // religar o chat / limpar o RPC se os toggles mudaram nas configurações
 document.querySelectorAll('#dlg-cfg [data-set]').forEach(el =>
@@ -1417,16 +1408,18 @@ async function openShareDialog (isSwap, cam) {
   $('#sources').hidden = !listable
   $('#portal-note').hidden = listable
 
-  // modo game: só janelas na lista (a fonte do jogo), 60 fps e som filtrado
-  const gameMode = localStorage.getItem('set:game') !== '0'
-  const gameEligible = listable && !isSwap && !cam && cfg?.windowFilter
-  $('#game-row').hidden = !gameEligible
-  $('#game').checked = gameMode
-  if (gameMode && gameEligible) {
-    sources = sources.filter(src => hwndOf(src.id))
-    picked = null
-    $('#fps').value = '60'
-  }
+  // // "Modo game" removido: filtrava a lista pra janelas (#game + hwndOf) e
+  // // forçava fps=60. O áudio "só do jogo" virou o comportamento padrão de
+  // // qualquer janela compartilhada (ver #share-go). Restaurar se voltar:
+  // const gameMode = localStorage.getItem('set:game') !== '0'
+  // const gameEligible = listable && !isSwap && !cam && cfg?.windowFilter
+  // $('#game-row').hidden = !gameEligible
+  // $('#game').checked = gameMode
+  // if (gameMode && gameEligible) {
+  //   sources = sources.filter(src => hwndOf(src.id))
+  //   picked = null
+  //   $('#fps').value = '60'
+  // }
   if (!picked) picked = sources[0]?.id ?? null
 
   if (listable) $('#sources').replaceChildren(...sources.map((src, i) => {
@@ -1448,45 +1441,45 @@ async function openShareDialog (isSwap, cam) {
 }
 
 // ── opções de áudio por aplicativo ────────────────────────────────────────
-// Janela escolhida: o som pode vir só do processo da janela (helper WASAPI).
-// Tela toda: dá para excluir o Discord (o eco da própria voz some e o Discord
-// segue funcionando normal no PC de quem transmite). Sem o helper (navegador,
-// Linux), o áudio é sempre do sistema inteiro — a opção nem aparece.
+// Regra fixa (sem toggle): JANELA compartilhada = sai só o áudio do processo
+// dela (helper WASAPI/PipeWire, quando disponível); TELA toda = sai o sistema
+// MENOS o Discord. Sem helper (navegador), o áudio é do sistema inteiro — não
+// há como filtrar. A row #faudio do diálogo não é mais exibida pra nada.
 const hwndOf = id => id?.match(/^window:(0x[0-9a-f]+|\d+)/i)?.[1]
 // Electron pode entregar o HWND em decimal ou hex: 0x na frente decide
 const hwndNum = h => parseInt(h, h.startsWith('0x') || h.startsWith('0X') ? 16 : 10)
 
 function updateShareAudio (srcId) {
   pickedIsWindow = !!hwndOf(srcId)
-  const winFilter = pickedIsWindow && cfg?.windowFilter   // modo "só o aplicativo"
-  if (winFilter) {
-    $('#faudio-label').textContent = 'Som só do aplicativo'
-    $('#faudio-desc').textContent = 'o áudio sai só do programa da janela escolhida'
-  } else {
-    $('#faudio-label').textContent = 'Remover áudio do Discord'
-    $('#faudio-desc').textContent = 'o Discord não entra na transmissão — e continua tocando normal no seu PC'
-  }
-  // Ligado por padrão nos dois modos. Era `= winFilter`, então compartilhar a
-  // TELA nascia com o filtro desligado — e a queixa de "o Discord vaza" era
-  // isso: o filtro nunca rodava, ninguém desmarcou nada. O padrão tem que ser
-  // o que a tela toda pede (fora o Discord); quem quiser o Discord no ar
-  // desmarca. No Linux desmarcado ainda tem som (PipeWire pega todos os apps);
-  // no Windows desmarcado cai no loopback de sistema do Chromium.
+  // // toggles removidos — os filtros viraram obrigatórios (ver #share-go).
+  // // Se um dia forem opcionais de novo, reexiba #faudio-row aqui com os
+  // // rótulos: 'Som só do aplicativo' (janela) / 'Remover áudio do Discord'
+  // // (tela). Ligado por padrão nos dois modos — desligado por padrão era a
+  // // origem da queixa histórica de "o Discord vaza".
+  // if (pickedIsWindow && cfg?.windowFilter) {
+  //   $('#faudio-label').textContent = 'Som só do aplicativo'
+  //   $('#faudio-desc').textContent = 'o áudio sai só do programa da janela escolhida'
+  // } else {
+  //   $('#faudio-label').textContent = 'Remover áudio do Discord'
+  //   $('#faudio-desc').textContent = 'o Discord não entra na transmissão — e continua tocando normal no seu PC'
+  // }
   $('#faudio').checked = true
-  $('#faudio-row').hidden = !(cfg?.audioFilter && srcId && $('#audio').checked)
+  $('#faudio-row').hidden = true
   $('#audio-desc').textContent =
-    winFilter ? 'com o filtro abaixo, só o aplicativo escolhido'
-    : !pickedIsWindow ? 'com o filtro abaixo, o sistema inteiro menos o Discord'
-    : cfg?.audioFilter ? 'áudio filtrado do aplicativo escolhido'
+    !pickedIsWindow || !cfg?.windowFilter
+      ? (cfg?.audioFilter ? 'o Discord fica de fora da transmissão'
+         // sem helper (navegador/Linux sem PipeWire): não há como excluir
+         : 'áudio do sistema')
     // navegador: janela não tem som separado — mas o Chrome dá o som só da
     // aba quando o compartilhamento é de aba
-    : 'sem filtro no navegador: compartilhe uma ABA e o som sai só dela'
+    : 'o áudio sai só do aplicativo da janela (ou só da ABA, no navegador)'
 }
 $('#audio').onchange = () => updateShareAudio(picked)
-$('#game').onchange = e => {
-  localStorage.setItem('set:game', e.target.checked ? '1' : '0')
-  openShareDialog(!!$('#dlg-share').dataset.swap, !!$('#dlg-share').dataset.cam).catch(() => {})
-}
+// // "Modo game" removido junto com o toggle do diálogo:
+// $('#game').onchange = e => {
+//   localStorage.setItem('set:game', e.target.checked ? '1' : '0')
+//   openShareDialog(!!$('#dlg-share').dataset.swap, !!$('#dlg-share').dataset.cam).catch(() => {})
+// }
 
 $('#share').onclick = () => openShareDialog(false).catch(e => toast(e.message))
 $('#share-cam').onclick = () => openShareDialog(false, true).catch(e => toast(e.message))
@@ -1556,16 +1549,21 @@ $('#share-go').onclick = async () => {
         })
       } else {
         await fockyApi.pick(picked)
-        // filtro de áudio por app: o som vem do helper (WASAPI/PipeWire),
-        // não do getDisplayMedia
+        // fonte de áudio, regra fixa (os toggles saíram do diálogo): janela
+        // com filtro disponível = só o áudio do processo dela; em todo o
+        // resto (tela toda, janela sem filtro), o exclude tira o Discord e
+        // mantém o resto do sistema.
         const hwnd = hwndOf(picked)
-        const useFilter = cfg.audioFilter && $('#audio').checked && !$('#faudio-row').hidden
-        if (useFilter && pickedIsWindow && cfg.windowFilter && $('#faudio').checked && hwnd)
+        const useFilter = cfg.audioFilter && $('#audio').checked
+        if (useFilter && pickedIsWindow && cfg.windowFilter && hwnd)
           audioOpts = { mode: 'window', hwnd: hwndNum(hwnd) }
-        else if (useFilter && $('#faudio').checked)
+        else if (useFilter)
           audioOpts = { mode: 'exclude', name: 'Discord' }
-        else if (useFilter && cfg.linux && !pickedIsWindow)
-          audioOpts = { mode: 'screen' }   // Linux: som de tudo via PipeWire
+        // // antigo: toggles deixavam o usuário liberar o sistema inteiro
+        // // (no Linux via PipeWire `screen`, no Windows via loopback do
+        // // Chromium). Os filtros são obrigatórios hoje; restaurar se voltarem:
+        // else if (useFilter && cfg.linux && !pickedIsWindow)
+        //   audioOpts = { mode: 'screen' }
         stream = await capture(fps, $('#audio').checked && !audioOpts, $('#cursor').checked)
         if (audioOpts) {
           try { stream.addTrack(await startFilteredAudio(audioOpts)) }
@@ -1844,73 +1842,69 @@ function openPlayer (key) {
 
 function closePlayer () {
   if (viewer) sfx.end()
-  vodPlaying = false
+  closeClip()
   closeFixed()
   release(viewer); viewer = null
   const vid = $('#player-wrap video')
   vid.srcObject = null
-  vid.removeAttribute('src'); vid.load()   // VOD pode ter deixado src atrás
-  closeVod()
+  vid.removeAttribute('src'); vid.load()   // clip pode ter deixado src atrás
   $('#clip-btn').hidden = true
   showPlayer(null)
-  if (vodMode) { renderVods().catch(() => {}); return }
+  if (clipMode) { renderClips().catch(() => {}); return }
   refresh().catch(() => {})
 }
 
-// ── aba Gravados: gravações automáticas das lives (VODs) ─────────────────
-let vodPlaying = 0   // id da gravação em reprodução (0 = nenhuma)
+// ── aba Clips: cortes de 30s feitos a partir do buffer das lives ──────────
+let clipPlaying = 0   // id do clip em reprodução (0 = nenhum)
 
-function openVods () {
-  vodMode = true
-  if (viewer || fixedKey || vodPlaying) closePlayer()
+function openClips () {
+  clipMode = true
+  if (viewer || fixedKey || clipPlaying) closePlayer()
   else { closeFixed(); chatClose(); showPlayer(null) }
-  setTab('gravados')
-  renderVods().catch(() => {})
+  setTab('clips')
+  renderClips().catch(() => {})
 }
 
-async function renderVods () {
+async function renderClips () {
   const grid = $('#grid-live')
-  let vods
-  try { vods = await fetch(cfg.serverUrl + '/api/fixed/vods').then(r => r.json()) } catch { return }
-  if (!vodMode) return
+  let clips
+  try { clips = await fetch(cfg.serverUrl + '/api/fixed/clips').then(r => r.json()) } catch { return }
+  if (!clipMode) return
   grid.replaceChildren()
-  if (!vods.length) {
+  if (!clips.length) {
     const empty = document.createElement('p')
     empty.className = 'muted'
     empty.style.padding = '32px'
-    empty.textContent = 'Nenhuma gravação ainda — quando alguém subir ao ar, a live é gravada aqui.'
+    empty.textContent = 'Nenhum clip ainda — assistindo uma live, o botão de tesoura corta os últimos 30s.'
     grid.append(empty)
     return
   }
-  for (const v of vods) {
+  for (const c of clips) {
     const card = document.createElement('div')
     card.className = 'vid'
-    const when = new Date(v.startedAt)
+    const when = new Date(c.createdAt)
     card.innerHTML = `<div class="thumb">
-        <img alt="" loading="lazy" onerror="this.remove()">
-        <span class="badge time">${mmss(v.duration)}</span>
+        <span class="badge time">${mmss(c.duration)}</span>
       </div>
       <div class="meta"><div class="avatar"></div>
         <div style="min-width:0">
           <div class="title"></div><div class="sub"></div>
         </div></div>`
-    card.querySelector('img').src = `${cfg.serverUrl}/api/fixed/vods/${v.id}/thumb`
-    card.querySelector('.avatar').textContent = v.key.slice(0, 1)
-    card.querySelector('.title').textContent = `Live de ${v.key}`
+    card.querySelector('.avatar').textContent = (c.streamKey ?? '?').slice(0, 1)
+    card.querySelector('.title').textContent = `Clip de ${c.streamKey ?? '?'}`
     card.querySelector('.sub').textContent =
       when.toLocaleDateString([], { day: '2-digit', month: 'short' }) + ' · ' +
       when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    card.onclick = () => playVod(v)
+    card.onclick = () => playClip(c)
     grid.append(card)
   }
 }
 
-let vodDur = 0, vodTimer = null
+let clipDur = 0, clipTimer = null
 
-function playVod (v) {
-  vodPlaying = v.id
-  vodDur = v.duration
-  $('#clip-btn').hidden = false
+function playClip (c) {
+  clipPlaying = c.id
+  clipDur = c.duration
   const vid = $('#player-wrap video')
   $('#grid-live').style.display = 'none'
   $('#player-wrap').classList.add('on')
@@ -1920,28 +1914,26 @@ function playVod (v) {
   $('#fixed-bar').hidden = false   // mesma barra dos canais fixos
   $('#fb-prev').title = 'Voltar 10 segundos'
   $('#fb-next').title = 'Avançar 10 segundos'
-  $('#fb-dur').textContent = mmss(vodDur)
+  $('#fb-dur').textContent = mmss(clipDur)
   vid.controls = false
-  vid.src = `${cfg.serverUrl}/api/fixed/vods/${v.id}/file`
+  vid.src = `${cfg.serverUrl}/api/fixed/clips/${c.id}/file`
   vid.play().catch(() => {})
-  clearInterval(vodTimer)
-  vodTimer = setInterval(() => {
-    if (seekDrag || !vodPlaying) return
-    $('#fb-seek').value = vodDur ? (vid.currentTime / vodDur) * 100 : 0
+  clearInterval(clipTimer)
+  clipTimer = setInterval(() => {
+    if (seekDrag || !clipPlaying) return
+    $('#fb-seek').value = clipDur ? (vid.currentTime / clipDur) * 100 : 0
     $('#fb-pos').textContent = mmss(Math.floor(vid.currentTime))
     setPlayIcon(!vid.paused && !vid.ended)
   }, 500)
 }
 
-function closeVod () {
-  vodPlaying = 0
-  clearInterval(vodTimer); vodTimer = null
-  $('#clip-btn').hidden = true
+function closeClip () {
+  clipPlaying = 0
+  clearInterval(clipTimer); clipTimer = null
   $('#fixed-bar').hidden = true
   const vid = $('#player-wrap video')
   vid.controls = false
   vid.pause()
-  vid.removeAttribute('src'); vid.load()
 }
 
 $('#back').onclick = closePlayer
@@ -2425,9 +2417,9 @@ function closeFixed () {
 $('#fb-seek').addEventListener('input', () => seekDrag = true)
 $('#fb-seek').addEventListener('change', e => {
   seekDrag = false
-  if (vodPlaying) {
+  if (clipPlaying) {
     const vid = $('#player-wrap video')
-    if (vodDur) vid.currentTime = (+e.target.value / 100) * vodDur
+    if (clipDur) vid.currentTime = (+e.target.value / 100) * clipDur
     return
   }
   if (!musicPos.dur) return
@@ -2443,7 +2435,7 @@ function setPlayIcon (playing) {
 const isPlaying = () => !$('#fb-ico-pause').classList.contains('off')
 
 $('#fb-toggle').onclick = () => {
-  if (vodPlaying) {
+  if (clipPlaying) {
     const vid = $('#player-wrap video')
     if (vid.paused) vid.play().catch(() => {}); else vid.pause()
     setPlayIcon(vid.paused)
@@ -2455,9 +2447,9 @@ $('#fb-toggle').onclick = () => {
     { method: 'POST' }).then(fixedTick).catch(e => { setPlayIcon(!resume); toast(e.message) })
 }
 $('#fb-next').onclick = () => {
-  if (vodPlaying) {
+  if (clipPlaying) {
     const vid = $('#player-wrap video')
-    vid.currentTime = Math.min(vodDur, vid.currentTime + 10)
+    vid.currentTime = Math.min(clipDur, vid.currentTime + 10)
     return
   }
   const action = fixedKey === 'tv'
@@ -2466,7 +2458,7 @@ $('#fb-next').onclick = () => {
   action.then(fixedTick).catch(e => toast(e.message))
 }
 $('#fb-prev').onclick = () => {
-  if (vodPlaying) {
+  if (clipPlaying) {
     const vid = $('#player-wrap video')
     vid.currentTime = Math.max(0, vid.currentTime - 10)
     return
