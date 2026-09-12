@@ -354,10 +354,23 @@
 
   <div class="row" style="margin:12px 0 0">
     <div>
-      <label style="color:hsl(var(--foreground))">Overlay de viewers na câmera</label>
-      <p class="desc" style="margin:2px 0 0">queima os nomes de quem assiste no canto da composição</p>
+      <label style="color:hsl(var(--foreground))">Overlay de viewers na transmissão</label>
+      <p class="desc" style="margin:2px 0 0">queima os nomes de quem assiste no canto do vídeo</p>
     </div>
     <label class="switch"><input type="checkbox" id="cfg-overlay" data-set="overlay" checked><span></span></label>
+  </div>
+
+  <div class="row" style="margin:12px 0 0">
+    <div>
+      <label style="color:hsl(var(--foreground))">Canto do overlay</label>
+      <p class="desc" style="margin:2px 0 0">onde os nomes aparecem sobre o vídeo</p>
+    </div>
+    <select id="cfg-overlay-pos" data-set-val="overlayPos">
+      <option value="bl" selected>Inferior esquerdo</option>
+      <option value="br">Inferior direito</option>
+      <option value="tl">Superior esquerdo</option>
+      <option value="tr">Superior direito</option>
+    </select>
   </div>
 
   <div class="row" style="margin:12px 0 0">
@@ -681,14 +694,17 @@ async function presenceTick () {
         if (!presencePrime && !FIXED_KEYS.includes(st.streamKey) && st.streamKey !== nick)
           announce(`${st.streamKey} começou a compartilhar a tela`)
       }
-      if (st.streamKey !== 'music' && st.streamKey !== 'tv') continue
-
+      // aviso de "entrou no canal" é só dos canais fixos (numa live de pessoa
+      // o próprio "começou a compartilhar" já cobre), mas a lista de viewers
+      // é guardada pra TODA stream: o overlay da câmera lê a sua por aqui.
       const viewers = new Set(viewersOf(st))
-      const verb = st.streamKey === 'music' ? 'começou a ouvir música' : 'começou a ver o vídeo'
-      for (const v of viewersOf(st)) {
-        const known = presence.viewers.get(st.streamKey)
-        if (!known?.has(v) && !presencePrime && v !== nick)
-          announce(`${v} ${verb}`)
+      if (st.streamKey === 'music' || st.streamKey === 'tv') {
+        const verb = st.streamKey === 'music' ? 'começou a ouvir música' : 'começou a ver o vídeo'
+        for (const v of viewers) {
+          const known = presence.viewers.get(st.streamKey)
+          if (!known?.has(v) && !presencePrime && v !== nick)
+            announce(`${v} ${verb}`)
+        }
       }
       presence.viewers.set(st.streamKey, viewers)
     }
@@ -858,6 +874,7 @@ function stopFilteredAudio () {
 function stop () {
   if (pc) sfx.end()
   dropCam()
+  stopCompose()
   stopFilteredAudio()
   release(pc); pc = null; sender = null; audioSender = null; camOnly = false
   stream?.getTracks().forEach(t => t.stop()); stream = null
@@ -884,23 +901,21 @@ const camRect = () => {
   return { ...box, h: box.w * ratio * (canvas.width / canvas.height) }
 }
 
-async function addCam (withMic) {
-  cam = await navigator.mediaDevices.getUserMedia({
-    video: { width: 1280, height: 720 }, audio: withMic,
-  })
+// composição no canvas: o que vai pro WHIP deixa de ser o track da tela e
+// passa a ser o canvas — é o que dá lugar pra desenhar por cima (câmera,
+// overlay de quem está assistindo). Vale sozinha: o overlay não depende de
+// câmera nenhuma. Ligar/desligar é replaceTrack, ninguém cai.
+async function startCompose () {
+  if (overlay) return overlay
   const scr = stream.getVideoTracks()[0].getSettings()
-  const set = cam.getVideoTracks()[0].getSettings()
-
   const canvas = $('#stage')
   canvas.width = scr.width ?? 1920
   canvas.height = scr.height ?? 1080
   const ctx = canvas.getContext('2d')
-  const sv = hiddenVideo(stream), cv = hiddenVideo(cam)
-  await Promise.all([sv.play(), cv.play()].map(p => p.catch(() => {})))
-
-  const box = { x: 0.72, y: 0.68, w: +$('#cam-size').value / 100 }
-  const ratio = (set.height ?? 720) / (set.width ?? 1280)
+  const sv = hiddenVideo(stream)
+  await sv.play().catch(() => {})
   const fps = Math.round(scr.frameRate ?? +$('#fps').value)
+
   // quem está assistindo, queimado no canto (toggle "overlay" das configurações)
   const drawViewers = () => {
     const names = [...(presence.viewers.get(nick) ?? [])]
@@ -908,37 +923,70 @@ async function addCam (withMic) {
     const label = '👀 ' + names.slice(0, 3).join(', ') + (names.length > 3 ? ` +${names.length - 3}` : '')
     const fs = Math.round(canvas.height / 30)
     ctx.font = `600 ${fs}px system-ui, sans-serif`
-    const w = ctx.measureText(label).width
-    const x = Math.round(canvas.height * 0.02)
-    const y = canvas.height - Math.round(canvas.height * 0.025)
+    // canto escolhido nas configurações; lido a cada quadro, então trocar
+    // durante a transmissão vale na hora
+    const pos = setVal('overlayPos') ?? 'bl'
+    const pad = Math.round(canvas.height * 0.02)
+    const bw = ctx.measureText(label).width + fs, bh = fs * 2.3
+    const bx = pos[1] === 'r' ? canvas.width - pad - bw : pad
+    const by = pos[0] === 't' ? pad : canvas.height - pad - bh
     ctx.fillStyle = 'rgba(0,0,0,.55)'
     ctx.beginPath()
-    ctx.roundRect(x, y - fs * 1.7, w + fs, fs * 2.3, fs)
+    ctx.roundRect(bx, by, bw, bh, fs)
     ctx.fill()
     ctx.fillStyle = '#fff'
     ctx.textBaseline = 'middle'
-    ctx.fillText(label, x + fs / 2, y - fs * 0.55)
+    ctx.fillText(label, bx + fs / 2, by + bh / 2)
   }
+
   const draw = () => {
     ctx.drawImage(sv, 0, 0, canvas.width, canvas.height)
-    const w = box.w * canvas.width, h = w * ratio
-    const x = box.x * canvas.width, y = box.y * canvas.height
-    if (!overlay?.mirror) ctx.drawImage(cv, x, y, w, h)
-    else {
-      // espelho: desenha a partir da borda direita da caixa, com o eixo X virado
-      ctx.save()
-      ctx.translate(x + w, y)
-      ctx.scale(-1, 1)
-      ctx.drawImage(cv, 0, 0, w, h)
-      ctx.restore()
+    const cv = overlay?.cv
+    if (cv) {
+      const { box, ratio } = overlay
+      const w = box.w * canvas.width, h = w * ratio
+      const x = box.x * canvas.width, y = box.y * canvas.height
+      if (!overlay.mirror) ctx.drawImage(cv, x, y, w, h)
+      else {
+        // espelho: desenha a partir da borda direita da caixa, com o eixo X virado
+        ctx.save()
+        ctx.translate(x + w, y)
+        ctx.scale(-1, 1)
+        ctx.drawImage(cv, 0, 0, w, h)
+        ctx.restore()
+      }
     }
     if (setOn('overlay')) drawViewers()
   }
-  const out = canvas.captureStream(fps)
 
-  overlay = { canvas, sv, cv, out, box, ratio, gain: null, mirror: false,
+  const out = canvas.captureStream(fps)
+  overlay = { canvas, sv, cv: null, out, gain: null, mirror: false,
+              box: { x: 0.72, y: 0.68, w: +$('#cam-size').value / 100 }, ratio: 0.5625,
               timer: setInterval(draw, 1000 / fps) }
   await sender.replaceTrack(out.getVideoTracks()[0])
+  return overlay
+}
+
+// desfaz a composição: volta a publicar a tela crua (sem re-encode do canvas)
+function stopCompose () {
+  if (!overlay) return
+  clearInterval(overlay.timer)
+  overlay.out.getTracks().forEach(t => t.stop())
+  overlay.sv.srcObject = null
+  overlay = null
+  if (pc && stream) sender?.replaceTrack(stream.getVideoTracks()[0]).catch(() => {})
+}
+
+async function addCam (withMic) {
+  cam = await navigator.mediaDevices.getUserMedia({
+    video: { width: 1280, height: 720 }, audio: withMic,
+  })
+  const set = cam.getVideoTracks()[0].getSettings()
+  await startCompose()
+  overlay.cv = hiddenVideo(cam)
+  await overlay.cv.play().catch(() => {})
+  overlay.ratio = (set.height ?? 720) / (set.width ?? 1280)
+  overlay.box = { x: 0.72, y: 0.68, w: +$('#cam-size').value / 100 }
 
   const mic = cam.getAudioTracks()[0]
   if (mic) {
@@ -961,19 +1009,17 @@ async function addCam (withMic) {
 }
 
 function dropCam () {
-  if (!overlay) return
-  clearInterval(overlay.timer)
-  overlay.out.getTracks().forEach(t => t.stop())
-  overlay.sv.srcObject = overlay.cv.srcObject = null
+  if (!overlay?.cv) return
+  overlay.cv.srcObject = null
+  overlay.cv = null
+  overlay.gain = null
   cam?.getTracks().forEach(t => t.stop())
   cam = null
-  overlay = null
   stage(false)
-  // a transmissão continua: volta a publicar a tela crua
-  if (pc && stream) {
-    sender?.replaceTrack(stream.getVideoTracks()[0]).catch(() => {})
-    audioSender?.replaceTrack(stream.getAudioTracks()[0] ?? null).catch(() => {})
-  }
+  // o microfone ia junto da câmera: o áudio volta a ser só o da tela
+  if (pc && stream) audioSender?.replaceTrack(stream.getAudioTracks()[0] ?? null).catch(() => {})
+  // sem câmera a composição só se justifica pelo overlay de viewers
+  if (!setOn('overlay') || camOnly) stopCompose()
 }
 
 function stage (on) {
@@ -1074,16 +1120,33 @@ const setOn = name => {
   const el = document.querySelector(`[data-set="${name}"]`)
   return el ? el.checked : false
 }
+// mesma ideia pros que não são liga/desliga (data-set-val): o padrão é o
+// `selected` do HTML
+const setVal = name =>
+  localStorage.getItem('set:' + name)
+  ?? document.querySelector(`[data-set-val="${name}"]`)?.value
 $('#cfg').onclick = () => {
   $('#no-intro').checked = localStorage.getItem('noIntro') === '1'
   document.querySelectorAll('#dlg-cfg [data-set]').forEach(el =>
     el.checked = setOn(el.dataset.set))
+  document.querySelectorAll('#dlg-cfg [data-set-val]').forEach(el =>
+    el.value = setVal(el.dataset.setVal))
   $('#dlg-cfg').showModal()
 }
 $('#no-intro').onchange = e =>
   localStorage.setItem('noIntro', e.target.checked ? '1' : '0')
 document.querySelectorAll('#dlg-cfg [data-set]').forEach(el =>
   el.onchange = e => localStorage.setItem('set:' + e.target.dataset.set, e.target.checked ? '1' : '0'))
+document.querySelectorAll('#dlg-cfg [data-set-val]').forEach(el =>
+  el.onchange = e => localStorage.setItem('set:' + e.target.dataset.setVal, e.target.value))
+
+// overlay ligado/desligado no meio da transmissão: entra e sai na hora (sem
+// câmera no ar, desligar também dispensa o canvas e volta pro track cru)
+$('#cfg-overlay').addEventListener('change', e => {
+  if (!pc || camOnly) return
+  if (e.target.checked) startCompose().catch(() => {})
+  else if (!cam) stopCompose()
+})
 $('#cfg-close').onclick = () => $('#dlg-cfg').close()
 
 // ── chat por transmissão: uma sala por stream, aberta junto do player ────
@@ -1590,6 +1653,9 @@ $('#share-go').onclick = async () => {
       }
       pc = await publish(nick, stream, fps, $('#codec').value)
       camOnly = !!cam         // só a câmera no ar: não há tela pra sobrepor
+      // overlay de viewers não precisa de câmera: compartilhou a tela com o
+      // toggle ligado, o canvas entra no lugar do track cru
+      if (!cam && setOn('overlay')) startCompose().catch(() => {})
       setLive(true)
       sfx.live()
       // fonte de áudio visível pro host: filtro que falhou em silêncio é a
