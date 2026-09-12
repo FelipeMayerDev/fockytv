@@ -41,6 +41,20 @@ jobs:
           name: audio-helper
           path: electron/audio-helper
       - run: npm ci
+      # A release TEM que existir antes do electron-builder publicar: ele sobe
+      # o .exe e o .blockmap em paralelo, os dois veem que a tag não tem
+      # release e os dois tentam criar. Uma criação vence, e os assets da
+      # perdedora somem — foi o que aconteceu na v0.7.0, v0.7.2 e v0.7.3
+      # (release publicada só com o blockmap, sem instalador e sem
+      # latest.yml: auto-update quebrado em silêncio).
+      - name: garante a release (draft) antes de publicar
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          gh release view "$tag" >/dev/null 2>&1 ||
+            gh release create "$tag" --draft --title "${tag#v}" --notes ""
       - run: npx electron-builder --win --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
