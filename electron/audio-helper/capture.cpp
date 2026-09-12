@@ -691,6 +691,11 @@ static int run_mix (const char* except_csv) {
 int main(int argc, char** argv) {
     // stdout binário: sem isso o modo texto traduz \n e corrompe o PCM
     _setmode(_fileno(stdout), _O_BINARY);
+    // stderr sem buffer: redirecionado pra arquivo ele vira full-buffered, e
+    // como o helper morre por kill (nunca por saída limpa) o log ia junto —
+    // o diagnóstico só aparecia se o processo terminasse sozinho, que não
+    // acontece. Foi assim que o erro do pw-cat ficou invisível no Linux.
+    setvbuf(stderr, nullptr, _IONBF, 0);
 
     if (argc > 1 && !strcmp(argv[1], "--test")) return run_test();
     if (argc > 1 && !strcmp(argv[1], "--mic")) return run_mic();
