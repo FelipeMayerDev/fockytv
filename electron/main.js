@@ -155,7 +155,9 @@ async function audioStart (opts) {
   const args =
     opts.mode === 'test' ? ['--test'] :
     opts.mode === 'window' ? ['--hwnd', String(opts.hwnd)] :
-    opts.mode === 'exclude' ? ['--exclude-name', opts.name ?? 'Discord'] :
+    // Windows: um loopback por app tocando, pulando os da lista. O
+    // --exclude-name (uma árvore só) não dava conta de Discord + FockyTV.
+    opts.mode === 'exclude' ? ['--mix-except', AUDIO_NEVER_WIN] :
     opts.mode === 'mic' ? ['--mic'] : null
   if (opts.mode === 'mic' && process.platform !== 'win32')
     return { ok: false, error: 'captura nativa do microfone é só no Windows (WASAPI)' }
@@ -279,6 +281,8 @@ const linuxProcs = new Map()   // serial → { proc, bufs: Buffer[] }
 // próprio FockyTV — o canal de música tocando aqui é som que voltaria pra
 // stream, e quem assiste ouviria a música duas vezes, fora de sincronia.
 const AUDIO_NEVER = /^(discord|fockytv)/i
+// mesma lista pro helper do Windows (prefixo de nome do executável)
+const AUDIO_NEVER_WIN = 'Discord,FockyTV,electron'
 
 function linuxSelect (props, opts) {
   if (props['media.class'] !== 'Stream/Output/Audio') return false

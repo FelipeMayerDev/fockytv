@@ -1664,7 +1664,7 @@ $('#share-go').onclick = async () => {
         ? 'FILTRO DE ÁUDIO FALHOU (' + audioFail + ') — foi o som do sistema, Discord incluso'
         : audioOpts
         ? (audioOpts.mode === 'window' ? 'Som: só o aplicativo da janela'
-           : audioOpts.mode === 'exclude' ? 'Som: sistema sem o Discord'
+           : audioOpts.mode === 'exclude' ? 'Som: sistema sem o Discord e sem o FockyTV'
            : 'Som: todos os aplicativos')
         : $('#audio').checked ? 'Som: sistema inteiro' : 'Sem áudio')
     }

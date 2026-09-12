@@ -7,6 +7,10 @@
 // Modos:
 //   --hwnd N          só o áudio do processo da janela N (include tree)
 //   --exclude-name X  todo o sistema MENOS a árvore do processo X (ex.: Discord)
+//   --mix-except A,B  um loopback por processo que está tocando, pulando os
+//                     nomes listados, tudo somado. É o único jeito de excluir
+//                     MAIS DE UM app: o process loopback do WASAPI aceita uma
+//                     árvore só, e o --exclude-name gasta essa vaga no Discord
 //   --mic             microfone via WASAPI exclusivo event-driven (sala de
 //                     músicos: 10ms de buffer, sem passar pelo mixer do SO)
 //   --test            senoide 440 Hz (validação do pipeline fora do Windows)
@@ -20,6 +24,7 @@
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
+#include <audiopolicy.h>
 #include <tlhelp32.h>
 #include <io.h>
 #include <fcntl.h>
@@ -28,6 +33,8 @@
 #include <cstring>
 #include <cmath>
 #include <vector>
+#include <deque>
+#include <string>
 
 // ── o que falta nos headers do mingw ──────────────────────────────────────
 enum PROCESS_LOOPBACK_MODE_ {
@@ -68,7 +75,6 @@ static const IID IID_IAgileObject_ =
   { 0x94EA2B94, 0xE9CC, 0x49E0, {0xC0,0xFF,0xEE,0x64,0xCA,0x8F,0x5B,0x90} };
 static const IID IID_IMarshal_ =
   { 0x00000003, 0x0000, 0x0000, {0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46} };
-static IUnknown* g_ftm = nullptr;
 
 struct IActivateAudioInterfaceAsyncOperation_ : public IUnknown {
   virtual HRESULT STDMETHODCALLTYPE GetActivateResult(HRESULT* hr, IUnknown** unk) = 0;
@@ -82,10 +88,12 @@ typedef HRESULT (WINAPI *ActivateAudioInterfaceAsync_t)(
   LPCWSTR, REFIID, PROPVARIANT*, IActivateAudioInterfaceCompletionHandler_*,
   IActivateAudioInterfaceAsyncOperation_**);
 
-// ── handler de ativação: só acorda o main quando o WASAPI termina ────────
-static HANDLE g_done = nullptr;
-
+// ── handler de ativação: acorda quem pediu quando o WASAPI termina ───────
+// Evento e marshaler são de instância: no --mix-except há uma ativação por
+// processo capturado, e globais poriam uma corrida atrás da outra.
 struct Handler : public IActivateAudioInterfaceCompletionHandler_ {
+  HANDLE done = nullptr;
+  IUnknown* ftm = nullptr;
   STDMETHODIMP QueryInterface(REFIID riid, void** out) override {
     if (!memcmp(&riid, &IID_IUnknown_, sizeof(IID)) ||
         !memcmp(&riid, &IID_AAIF_CompletionHandler, sizeof(IID)) ||
@@ -93,8 +101,8 @@ struct Handler : public IActivateAudioInterfaceCompletionHandler_ {
       *out = static_cast<IActivateAudioInterfaceCompletionHandler_*>(this);
       return S_OK;
     }
-    if (g_ftm && !memcmp(&riid, &IID_IMarshal_, sizeof(IID)))
-      return g_ftm->QueryInterface(riid, out);
+    if (ftm && !memcmp(&riid, &IID_IMarshal_, sizeof(IID)))
+      return ftm->QueryInterface(riid, out);
     *out = nullptr;
     return E_NOINTERFACE;
   }
@@ -102,7 +110,7 @@ struct Handler : public IActivateAudioInterfaceCompletionHandler_ {
   STDMETHODIMP_(ULONG) AddRef() override { return 2; }
   STDMETHODIMP_(ULONG) Release() override { return 1; }
   STDMETHODIMP ActivateCompleted(IActivateAudioInterfaceAsyncOperation_*) override {
-    SetEvent(g_done);
+    SetEvent(done);
     return S_OK;
   }
 };
@@ -349,12 +357,330 @@ done:
   return 0;
 }
 
+
+// ── ativação do process loopback (uma por cliente) ───────────────────────
+// A dança inteira do ActivateAudioInterfaceAsync num lugar só: o --mix-except
+// faz uma destas por processo capturado.
+static IAudioClient* activate_loopback (DWORD pid, PROCESS_LOOPBACK_MODE_ mode) {
+  static ActivateAudioInterfaceAsync_t activate = nullptr;
+  if (!activate) {
+    HMODULE mm = LoadLibraryW(L"mmdevapi.dll");
+    if (!mm) return nullptr;
+    activate = reinterpret_cast<ActivateAudioInterfaceAsync_t>(
+      GetProcAddress(mm, "ActivateAudioInterfaceAsync"));
+    if (!activate) return nullptr;
+  }
+
+  AUDIOCLIENT_ACTIVATION_PARAMS_ params = {};
+  params.ActivationType = 1;   // AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK
+  params.ProcessLoopbackParams.ProcessLoopbackMode = mode;
+  params.ProcessLoopbackParams.TargetProcessId = pid;
+
+  PROPVARIANT pv = {};
+  pv.vt = VT_BLOB;
+  pv.blob.cbSize = sizeof(params);
+  pv.blob.pBlobData = reinterpret_cast<BYTE*>(&params);
+
+  Handler handler;
+  handler.done = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+  // tem que existir ANTES do activate: é durante a chamada que o COM pede
+  // IMarshal ao handler
+  if (FAILED(CoCreateFreeThreadedMarshaler(
+        static_cast<IActivateAudioInterfaceCompletionHandler_*>(&handler), &handler.ftm))) {
+    fwprintf(stderr, L"CoCreateFreeThreadedMarshaler falhou\n");
+    CloseHandle(handler.done);
+    return nullptr;
+  }
+
+  IActivateAudioInterfaceAsyncOperation_* op = nullptr;
+  // VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK é um MACRO do SDK, e o que estava
+  // aqui era o nome dele em vez do valor. Como caminho de dispositivo isso
+  // não existe: GetActivateResult devolvia 0x80070002 (ERROR_FILE_NOT_FOUND).
+  HRESULT hr = activate(L"VAD\\Process_Loopback",
+                        __uuidof(IAudioClient), &pv, &handler, &op);
+  IAudioClient* client = nullptr;
+  if (FAILED(hr)) {
+    fwprintf(stderr, L"ActivateAudioInterfaceAsync falhou hr=0x%08lX "
+             L"(0x8000000E = handler sem marshaling free-threaded; "
+             L"0x80070490/0x80004001 = Windows sem a API de process "
+             L"loopback, precisa do build 20348+)\n", (unsigned long)hr);
+  } else if (WaitForSingleObject(handler.done, 10000) != WAIT_OBJECT_0) {
+    fwprintf(stderr, L"timeout na ativacao (pid=%lu)\n", (unsigned long)pid);
+  } else if (op) {
+    HRESULT got = E_FAIL;
+    IUnknown* unk = nullptr;
+    if (SUCCEEDED(op->GetActivateResult(&got, &unk)) && SUCCEEDED(got) && unk) {
+      unk->QueryInterface(__uuidof(IAudioClient), (void**)&client);
+      unk->Release();
+    } else {
+      fwprintf(stderr, L"ativacao falhou hr=0x%08lX\n", (unsigned long)got);
+    }
+  }
+  if (op) op->Release();
+  if (handler.ftm) handler.ftm->Release();
+  CloseHandle(handler.done);
+  return client;
+}
+
+// Initialize + evento + Start, com o formato fixo do loopback.
+// NÃO usar GetMixFormat: no endpoint de process loopback ele devolve o do
+// dispositivo (que pode vir PCM 16 bits) e o resto do código escreve float32
+// — dava PCM lido como float, ou seja, ruído. O WASAPI converte pro que
+// pedirmos aqui. E a duração do buffer DEVE ser 0 (sample oficial da
+// Microsoft): com 1s a ativação passa, chega um pacote e nada mais.
+static bool start_capture (IAudioClient* client, IAudioCaptureClient** cap, HANDLE* ev) {
+  WAVEFORMATEX fmt = {};
+  fmt.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
+  fmt.nChannels = 2;
+  fmt.nSamplesPerSec = 48000;
+  fmt.wBitsPerSample = 32;
+  fmt.nBlockAlign = fmt.nChannels * fmt.wBitsPerSample / 8;
+  fmt.nAvgBytesPerSec = fmt.nSamplesPerSec * fmt.nBlockAlign;
+  if (FAILED(client->Initialize(AUDCLNT_SHAREMODE_SHARED,
+                                AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                                0, 0, &fmt, nullptr))) return false;
+  *ev = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+  client->SetEventHandle(*ev);
+  if (FAILED(client->GetService(__uuidof(IAudioCaptureClient), (void**)cap))) return false;
+  return SUCCEEDED(client->Start());
+}
+
+// ── modo --mix-except: um loopback por app, somados ──────────────────────
+// O process loopback exclui UMA árvore. Pra deixar de fora Discord E FockyTV
+// o caminho é o inverso: enumerar quem está tocando (sessões de áudio do
+// endpoint de saída), abrir um loopback em modo *include* pra cada um que não
+// está na lista de exceções, e misturar. É o irmão Windows do supervisor
+// PipeWire do main.js, com a mesma forma: varredura de 1s + mixer de 10ms.
+
+struct Proc { DWORD pid, ppid; std::wstring stem; };
+
+static void procs_snapshot (std::vector<Proc>& out) {
+  HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+  if (snap == INVALID_HANDLE_VALUE) return;
+  PROCESSENTRY32W pe = { sizeof(pe) };
+  if (Process32FirstW(snap, &pe)) do {
+    std::wstring stem = pe.szExeFile;
+    size_t dot = stem.rfind(L'.');
+    if (dot != std::wstring::npos) stem.resize(dot);   // "brave.exe" → "brave"
+    out.push_back({ pe.th32ProcessID, pe.th32ParentProcessID, stem });
+  } while (Process32NextW(snap, &pe));
+  CloseHandle(snap);
+}
+
+static bool excluded (const std::wstring& stem, const std::vector<std::wstring>& names) {
+  for (const auto& n : names)
+    if (!n.empty() && !_wcsnicmp(stem.c_str(), n.c_str(), n.size())) return true;
+  return false;
+}
+
+// PIDs com sessão de áudio ATIVA no endpoint padrão, menos os excluídos.
+// Descendente de outro da lista não entra: o include é por árvore, e o mesmo
+// áudio entraria duas vezes (uma vez por cliente).
+static void playing_pids (const std::vector<std::wstring>& names, std::vector<DWORD>& out) {
+  static const IID IID_IMMDeviceEnumerator_ =
+    { 0xA95664D2, 0x9614, 0x4F35, {0xA7,0x46,0xDE,0x8D,0xB6,0x36,0x17,0xE6} };
+  static const CLSID CLSID_MMDeviceEnumerator_ =
+    { 0xBCDE0395, 0xE52F, 0x467C, {0x8E,0x3D,0xC4,0x57,0x92,0x91,0x69,0x2E} };
+
+  IMMDeviceEnumerator* en = nullptr;
+  if (FAILED(CoCreateInstance(CLSID_MMDeviceEnumerator_, nullptr, CLSCTX_ALL,
+                              IID_IMMDeviceEnumerator_, (void**)&en))) return;
+  IMMDevice* dev = nullptr;
+  IAudioSessionManager2* mgr = nullptr;
+  IAudioSessionEnumerator* se = nullptr;
+  int count = 0;
+  std::vector<Proc> procs;
+  procs_snapshot(procs);
+  const DWORD self = GetCurrentProcessId();
+
+  if (SUCCEEDED(en->GetDefaultAudioEndpoint(eRender, eConsole, &dev)) &&
+      SUCCEEDED(dev->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr, (void**)&mgr)) &&
+      SUCCEEDED(mgr->GetSessionEnumerator(&se)) &&
+      SUCCEEDED(se->GetCount(&count))) {
+    for (int i = 0; i < count; i++) {
+      IAudioSessionControl* ctl = nullptr;
+      if (FAILED(se->GetSession(i, &ctl)) || !ctl) continue;
+      IAudioSessionControl2* ctl2 = nullptr;
+      AudioSessionState st = AudioSessionStateExpired;
+      DWORD pid = 0;
+      if (SUCCEEDED(ctl->QueryInterface(__uuidof(IAudioSessionControl2), (void**)&ctl2)) && ctl2) {
+        ctl->GetState(&st);
+        ctl2->GetProcessId(&pid);
+        ctl2->Release();
+      }
+      ctl->Release();
+      if (st != AudioSessionStateActive || !pid || pid == self) continue;
+      std::wstring stem;
+      for (const auto& pr : procs) if (pr.pid == pid) { stem = pr.stem; break; }
+      if (excluded(stem, names)) continue;
+      out.push_back(pid);
+    }
+  }
+  if (se) se->Release();
+  if (mgr) mgr->Release();
+  if (dev) dev->Release();
+  en->Release();
+
+  // tira quem é descendente de outro já na lista (o include pega a árvore)
+  for (size_t i = 0; i < out.size();) {
+    DWORD cur = out[i];
+    bool dup = false;
+    for (int hops = 0; hops < 32 && !dup; hops++) {
+      DWORD ppid = 0; bool found = false;
+      for (const auto& pr : procs) if (pr.pid == cur) { ppid = pr.ppid; found = true; break; }
+      if (!found || !ppid) break;
+      for (DWORD other : out) if (other == ppid) dup = true;
+      cur = ppid;
+    }
+    if (dup) out.erase(out.begin() + i); else i++;
+  }
+}
+
+// uma fonte = um processo capturado; a thread só enche a fila, o mixer come
+struct Source {
+  DWORD pid = 0;
+  IAudioClient* client = nullptr;
+  IAudioCaptureClient* cap = nullptr;
+  HANDLE ev = nullptr, thread = nullptr;
+  volatile LONG stop = 0;
+  CRITICAL_SECTION lock;
+  std::deque<float> buf;
+};
+
+static DWORD WINAPI pump (LPVOID arg) {
+  Source* s = static_cast<Source*>(arg);
+  const size_t MAXQ = 48000 * 2 / 5;   // 200ms: atrasou, o velho se perde
+  while (!InterlockedCompareExchange(&s->stop, 0, 0)) {
+    if (WaitForSingleObject(s->ev, 200) != WAIT_OBJECT_0) continue;
+    BYTE* data = nullptr; UINT32 frames = 0; DWORD flags = 0;
+    while (SUCCEEDED(s->cap->GetNextPacketSize(&frames)) && frames > 0) {
+      if (FAILED(s->cap->GetBuffer(&data, &frames, &flags, nullptr, nullptr))) break;
+      const size_t n = (size_t)frames * 2;
+      EnterCriticalSection(&s->lock);
+      if (flags & AUDCLNT_BUFFERFLAGS_SILENT) s->buf.insert(s->buf.end(), n, 0.f);
+      else {
+        const float* f = reinterpret_cast<const float*>(data);
+        s->buf.insert(s->buf.end(), f, f + n);
+      }
+      if (s->buf.size() > MAXQ) s->buf.erase(s->buf.begin(), s->buf.end() - MAXQ);
+      LeaveCriticalSection(&s->lock);
+      s->cap->ReleaseBuffer(frames);
+    }
+  }
+  return 0;
+}
+
+static void source_stop (Source* s) {
+  InterlockedExchange(&s->stop, 1);
+  if (s->thread) { WaitForSingleObject(s->thread, 1000); CloseHandle(s->thread); }
+  if (s->client) { s->client->Stop(); s->client->Release(); }
+  if (s->cap) s->cap->Release();
+  if (s->ev) CloseHandle(s->ev);
+  DeleteCriticalSection(&s->lock);
+  delete s;
+}
+
+static int run_mix (const char* except_csv) {
+  if (FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED))) return 4;
+
+  std::vector<std::wstring> names;
+  {
+    wchar_t wide[512];
+    MultiByteToWideChar(CP_UTF8, 0, except_csv, -1, wide, 512);
+    std::wstring cur;
+    for (const wchar_t* p = wide; ; p++) {
+      if (*p == L',' || !*p) { if (!cur.empty()) names.push_back(cur); cur.clear(); if (!*p) break; }
+      else cur.push_back(*p);
+    }
+  }
+  for (const auto& n : names) fwprintf(stderr, L"mix: fora %ls\n", n.c_str());
+
+  uint32_t rate = 48000, ch = 2;
+  char header[16];
+  memcpy(header, "FPCM", 4);
+  memcpy(header + 4, &rate, 4);
+  memcpy(header + 8, &ch, 4);
+  memset(header + 12, 0, 4);
+  if (!write_all(header, 16)) return 12;
+
+  const UINT32 TICK = 480;                  // 10ms
+  std::vector<Source*> srcs;
+  std::vector<float> mix(TICK * ch);
+  LARGE_INTEGER freq, now;
+  QueryPerformanceFrequency(&freq);
+  QueryPerformanceCounter(&now);
+  long long next = now.QuadPart;            // relógio do mixer, sem deriva
+  long long scanAt = 0;
+
+  for (;;) {
+    // varredura: entra quem começou a tocar, sai quem parou/morreu
+    QueryPerformanceCounter(&now);
+    if (now.QuadPart >= scanAt) {
+      scanAt = now.QuadPart + freq.QuadPart;   // 1s
+      std::vector<DWORD> want;
+      playing_pids(names, want);
+      for (DWORD pid : want) {
+        bool have = false;
+        for (Source* s : srcs) if (s->pid == pid) { have = true; break; }
+        if (have) continue;
+        IAudioClient* client = activate_loopback(pid, PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE_);
+        if (!client) continue;
+        Source* s = new Source();
+        s->pid = pid;
+        s->client = client;
+        InitializeCriticalSection(&s->lock);
+        if (!start_capture(client, &s->cap, &s->ev)) {
+          fwprintf(stderr, L"mix: pid=%lu nao abriu\n", (unsigned long)pid);
+          source_stop(s);
+          continue;
+        }
+        s->thread = CreateThread(nullptr, 0, pump, s, 0, nullptr);
+        srcs.push_back(s);
+        fwprintf(stderr, L"mix: capturando pid=%lu (%u fontes)\n",
+                 (unsigned long)pid, (unsigned)srcs.size());
+      }
+      for (size_t i = 0; i < srcs.size();) {
+        bool keep = false;
+        for (DWORD pid : want) if (srcs[i]->pid == pid) { keep = true; break; }
+        if (keep) { i++; continue; }
+        fwprintf(stderr, L"mix: largando pid=%lu\n", (unsigned long)srcs[i]->pid);
+        source_stop(srcs[i]);
+        srcs.erase(srcs.begin() + i);
+      }
+    }
+
+    // mistura 10ms de cada fonte; quem não tem áudio pronto entra como zero.
+    // Sem fonte alguma sai silêncio — o relógio do RTP do outro lado segue
+    // andando, e é isso que mantém a linha do tempo inteira.
+    memset(mix.data(), 0, mix.size() * sizeof(float));
+    for (Source* s : srcs) {
+      EnterCriticalSection(&s->lock);
+      const size_t n = mix.size() < s->buf.size() ? mix.size() : s->buf.size();
+      for (size_t i = 0; i < n; i++) mix[i] += s->buf[i];
+      s->buf.erase(s->buf.begin(), s->buf.begin() + n);
+      LeaveCriticalSection(&s->lock);
+    }
+    for (float& v : mix) v = v > 1.f ? 1.f : (v < -1.f ? -1.f : v);
+    if (!write_all(mix.data(), mix.size() * sizeof(float))) break;
+
+    next += freq.QuadPart / 100;   // 10ms
+    QueryPerformanceCounter(&now);
+    long long waitMs = (next - now.QuadPart) * 1000 / freq.QuadPart;
+    if (waitMs > 0) Sleep((DWORD)waitMs);
+    else next = now.QuadPart;      // atrasou muito: reancora, não acumula
+  }
+
+  for (Source* s : srcs) source_stop(s);
+  return 0;
+}
+
 int main(int argc, char** argv) {
     // stdout binário: sem isso o modo texto traduz \n e corrompe o PCM
     _setmode(_fileno(stdout), _O_BINARY);
 
     if (argc > 1 && !strcmp(argv[1], "--test")) return run_test();
     if (argc > 1 && !strcmp(argv[1], "--mic")) return run_mic();
+    if (argc > 2 && !strcmp(argv[1], "--mix-except")) return run_mix(argv[2]);
 
     DWORD pid = 0;
     PROCESS_LOOPBACK_MODE_ mode = PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE_;
@@ -368,96 +694,21 @@ int main(int argc, char** argv) {
       if (!pid) { fwprintf(stderr, L"processo nao encontrado\n"); return 3; }
       mode = PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE_;
     } else {
-      fwprintf(stderr, L"uso: --hwnd N | --exclude-name X | --mic | --test\n");
+      fwprintf(stderr, L"uso: --hwnd N | --exclude-name X | --mix-except A,B | --mic | --test\n");
       return 1;
     }
     fwprintf(stderr, L"pid=%lu mode=%d\n", pid, (int)mode);
 
     if (FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED))) return 4;
 
-    AUDIOCLIENT_ACTIVATION_PARAMS_ params = {};
-    params.ActivationType = 1;   // AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK
-    params.ProcessLoopbackParams.ProcessLoopbackMode = mode;
-    params.ProcessLoopbackParams.TargetProcessId = pid;
-
-    PROPVARIANT pv = {};
-    pv.vt = VT_BLOB;
-    pv.blob.cbSize = sizeof(params);
-    pv.blob.pBlobData = reinterpret_cast<BYTE*>(&params);
-
-    HMODULE mm = LoadLibraryW(L"mmdevapi.dll");
-    if (!mm) return 5;
-    auto activate = reinterpret_cast<ActivateAudioInterfaceAsync_t>(
-      GetProcAddress(mm, "ActivateAudioInterfaceAsync"));
-    if (!activate) return 5;
-
-    g_done = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-    Handler handler;
-    // tem que existir ANTES do activate: é durante a chamada que o COM pede
-    // IMarshal ao handler
-    if (FAILED(CoCreateFreeThreadedMarshaler(
-          static_cast<IActivateAudioInterfaceCompletionHandler_*>(&handler), &g_ftm))) {
-      fwprintf(stderr, L"CoCreateFreeThreadedMarshaler falhou\n");
-      return 13;
-    }
-    IActivateAudioInterfaceAsyncOperation_* op = nullptr;
-    // VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK é um MACRO do SDK, e o que estava
-    // aqui era o nome dele em vez do valor. Como caminho de dispositivo isso
-    // não existe: GetActivateResult devolvia 0x80070002 (ERROR_FILE_NOT_FOUND).
-    HRESULT hr = activate(L"VAD\\Process_Loopback",
-                          __uuidof(IAudioClient), &pv, &handler, &op);
-    if (FAILED(hr)) {
-      fwprintf(stderr, L"ActivateAudioInterfaceAsync falhou hr=0x%08lX "
-               L"(0x8000000E = handler sem marshaling free-threaded; "
-               L"0x80070490/0x80004001 = Windows sem a API de process "
-               L"loopback, precisa do build 20348+)\n", (unsigned long)hr);
-      return 6;
-    }
-    if (WaitForSingleObject(g_done, 10000) != WAIT_OBJECT_0) {
-      fwprintf(stderr, L"timeout na ativacao\n");
-      return 7;
-    }
-
-    IAudioClient* client = nullptr;
-    if (op) {
-      HRESULT got = E_FAIL;
-      IUnknown* unk = nullptr;
-      if (SUCCEEDED(op->GetActivateResult(&got, &unk)) && SUCCEEDED(got) && unk) {
-        unk->QueryInterface(__uuidof(IAudioClient), (void**)&client);
-        unk->Release();
-      } else {
-        fwprintf(stderr, L"ativacao falhou hr=0x%08lX\n", (unsigned long)got);
-      }
-      op->Release();
-    }
+    IAudioClient* client = activate_loopback(pid, mode);
     if (!client) { fwprintf(stderr, L"ativacao falhou\n"); return 8; }
 
-    // Formato fixo, não GetMixFormat: no endpoint de process loopback ele não
-    // é suportado (devolve o do dispositivo, que pode vir PCM 16 bits) e o
-    // resto do código escreve float32 — dava PCM lido como float, ou seja,
-    // ruído. O WASAPI converte pro que pedirmos aqui.
-    WAVEFORMATEX fmt = {};
-    fmt.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
-    fmt.nChannels = 2;
-    fmt.nSamplesPerSec = 48000;
-    fmt.wBitsPerSample = 32;
-    fmt.nBlockAlign = fmt.nChannels * fmt.wBitsPerSample / 8;
-    fmt.nAvgBytesPerSec = fmt.nSamplesPerSec * fmt.nBlockAlign;
-    // Duração do buffer DEVE ser 0 no process loopback (sample oficial da
-    // Microsoft): com 1s a ativação passa, chega um pacote e nada mais —
-    // exatamente o "só 100ms de silêncio" medido na máquina de teste.
-    if (FAILED(client->Initialize(AUDCLNT_SHAREMODE_SHARED,
-                                  AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-                                  0, 0, &fmt, nullptr)))
-      return 10;
-
-    HANDLE dataReady = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-    client->SetEventHandle(dataReady);
+    HANDLE dataReady = nullptr;
     IAudioCaptureClient* cap = nullptr;
-    if (FAILED(client->GetService(__uuidof(IAudioCaptureClient), (void**)&cap))) return 11;
-    client->Start();
+    if (!start_capture(client, &cap, &dataReady)) return 10;
 
-    uint32_t rate = fmt.nSamplesPerSec, ch = fmt.nChannels;
+    uint32_t rate = 48000, ch = 2;
     char header[16];
     memcpy(header, "FPCM", 4);
     memcpy(header + 4, &rate, 4);

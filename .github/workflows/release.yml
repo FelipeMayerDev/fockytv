@@ -8,13 +8,38 @@ on:
 permissions:
   contents: write   # anexar assets na release da tag
 jobs:
+  # O helper de áudio por aplicativo é .exe, não entra no git e o runner de
+  # Windows não tem toolchain pra ele. Sem este job o instalador sai SEM o
+  # helper (foi o que aconteceu até a v0.7.1): no Windows o filtro de áudio
+  # falhava e a transmissão levava o sistema inteiro, Discord junto.
+  # Mesmo compilador do `make audio-helper`, pra não haver duas verdades.
+  helper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq g++-mingw-w64-x86-64
+      - run: |
+          x86_64-w64-mingw32-g++ -std=c++17 -O2 -static \
+            -o electron/audio-helper/audio-helper.exe electron/audio-helper/capture.cpp \
+            -lole32 -lpsapi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: audio-helper
+          path: electron/audio-helper/audio-helper.exe
+          if-no-files-found: error
+
   win:
+    needs: helper
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: audio-helper
+          path: electron/audio-helper
       - run: npm ci
       - run: npx electron-builder --win --publish always
         env:
