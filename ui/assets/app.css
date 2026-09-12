@@ -573,3 +573,8 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
   display:grid; place-items:center; padding:0 4px; border-radius:999px;
   background:hsl(var(--destructive)); color:#fff; font-size:10px; font-weight:700;
 }
+
+/* atualização pronta: chama atenção no canto sem interromper a transmissão */
+#update-btn { color:hsl(var(--primary)); animation:update-pulse 2s ease-in-out infinite }
+@keyframes update-pulse { 50% { opacity:.45 } }
+@media (prefers-reduced-motion:reduce) { #update-btn { animation:none } }
