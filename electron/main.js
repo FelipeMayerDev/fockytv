@@ -315,13 +315,25 @@ function startLinuxAudio (opts) {
         if (!serial || linuxProcs.has(serial)) { if (serial) wanted.add(serial); continue }
         wanted.add(serial)
         alog('capturando serial ' + serial + ' (' + (p['application.process.binary'] ?? p['node.name'] ?? '?') + ')')
+        // `--record`, não `record`: o pw-cat do PipeWire 1.6 recusa o modo como
+        // argumento solto ("one of the playback/record options must be
+        // provided") e sai na hora — o supervisor respawnava a cada segundo e
+        // a transmissão ia muda, porque o mixer só tinha silêncio pra mandar.
         const proc = spawn('pw-cat',
-          ['record', '--raw', '--format', 'f32', '--rate', '48000', '--channels', '2',
+          ['--record', '--raw', '--format', 'f32', '--rate', '48000', '--channels', '2',
            '--target', String(serial), '-'],
-          { stdio: ['ignore', 'pipe', 'inherit'] })
+          { stdio: ['ignore', 'pipe', 'pipe'] })
         const entry = { proc, bufs: [] }
         proc.stdout.on('data', d => entry.bufs.push(d))
-        proc.on('exit', () => { linuxProcs.delete(serial); alog('serial ' + serial + ' saiu') })
+        // stderr no log, não no terminal: foi o 'inherit' que escondeu o erro
+        // acima até alguém abrir uma transmissão e ouvir o silêncio
+        let perr = ''
+        proc.stderr.on('data', d => { perr = (perr + d).slice(-500) })
+        proc.on('error', e => alog('pw-cat não subiu: ' + e.message))
+        proc.on('exit', code => {
+          linuxProcs.delete(serial)
+          alog(`serial ${serial} saiu (${code})` + (perr.trim() ? ' ' + perr.trim() : ''))
+        })
         linuxProcs.set(serial, entry)
       }
       for (const [serial, e] of linuxProcs)
