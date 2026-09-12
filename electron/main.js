@@ -275,11 +275,16 @@ function audioStop () {
 let linuxPoller = null, linuxMixTimer = null
 const linuxProcs = new Map()   // serial → { proc, bufs: Buffer[] }
 
+// Nunca entram no áudio da transmissão: o Discord (a conversa é privada) e o
+// próprio FockyTV — o canal de música tocando aqui é som que voltaria pra
+// stream, e quem assiste ouviria a música duas vezes, fora de sincronia.
+const AUDIO_NEVER = /^(discord|fockytv)/i
+
 function linuxSelect (props, opts) {
   if (props['media.class'] !== 'Stream/Output/Audio') return false
+  // janela escolhida: é o pid dela que manda, ninguém mais entra
   if (opts.mode === 'window') return +props['application.process.pid'] === opts.pid
-  if (opts.mode === 'exclude') return !/^discord/i.test(props['application.process.binary'] ?? '')
-  return true   // tela toda com som
+  return !AUDIO_NEVER.test(props['application.process.binary'] ?? '')
 }
 
 function linuxPidOfHwnd (hwnd) {
