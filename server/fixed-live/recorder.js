@@ -92,6 +92,19 @@ const h264ParamSets = (rtp, pipe) => {
 
 const SEGMENT_S = 5   // granularidade do buffer de clips (e do corte com -c copy)
 
+// Pede um keyframe ao publicador (PLI pelo RTCP). Sem isto o gravador vive de
+// migalhas: o IDR que o navegador manda ao entrar um viewer é consumido aqui
+// ANTES do ffmpeg abrir (é dele que saem SPS/PPS pro SDP), e um screen share
+// parado pode passar minutos sem o próximo — todo esse trecho vira quadrado no
+// clip, porque o segmento não começa em keyframe. Um PLI ao subir o ffmpeg e
+// outro a cada heartbeat garantem IDR fresco dentro da janela do buffer.
+const askKeyframe = (pc, sections) => {
+  const vd = sections.find(s => s.kind === "video")
+  if (!vd?.track) return
+  for (const t of pc.getTransceivers())
+    if (t.kind === "video") t.receiver?.sendRtcpPLI(vd.track.ssrc).catch(() => {})
+}
+
 const startFfmpeg = (sections, livePrefix) => {
   const sdpPath = livePrefix + ".sdp"
   writeFileSync(sdpPath, buildSdp(sections))
@@ -137,6 +150,7 @@ async function startSession (key) {
     }
     localPort().then(port => {
       pipe.port = port
+      pipe.track = track
       sections.push(pipe)
       // ssrc fixo por seção: o SDP do ffmpeg não conhece o do broadcast-box
       const fakeSsrc = 1000 + sections.length
@@ -188,6 +202,9 @@ async function startSession (key) {
   while (vd && !(vd.sps && vd.pps) && Date.now() - t1 < 10_000) await sleep(100)
   const livePrefix = join(CLIP_DIR, `${key}-${startedAt}`)
   const proc = startFfmpeg(sections, livePrefix)
+  // o ffmpeg acabou de abrir: o próximo quadro precisa ser um IDR, senão o
+  // primeiro segmento (e todo clip que o pegar) sai picotado
+  askKeyframe(pc, sections)
   log_(`buffer de clips de "${key}" no ar (${sections.map(s => s.kind).join("+")})`)
 
   // heartbeat: onde o fluxo está (werift recebendo? udp entregue? ffmpeg crescendo?)
@@ -197,11 +214,20 @@ async function startSession (key) {
     pruneSegments(livePrefix, CLIP_BUFFER_S)
   }, 30_000)
 
+  // Cadência de IDR = tamanho do segmento. O muxer só corta em keyframe, então
+  // sem isto o "segmento de 5s" é ficção: ele dura até o navegador resolver
+  // mandar um IDR sozinho (num screen share parado, minutos), e aí o clip sai
+  // picotado e velho — take/`-t` aqui assumem SEGMENT_S de verdade.
+  // ponytail: um IDR a cada 5s custa banda no publicador; se pesar, subir pra
+  // 10s e passar o take a contar duração real de segmento em vez de multiplicar.
+  const kf = setInterval(() => askKeyframe(pc, sections), SEGMENT_S * 1000)
+
   let ended = false
   const finish = async reason => {
     if (ended) return
     ended = true
     clearInterval(hb)
+    clearInterval(kf)
     sessions.delete(key)
     setTimeout(() => pruneSegments(livePrefix, 0), 15_000)
     rmSync(livePrefix + ".sdp", { force: true })
