@@ -1,7 +1,7 @@
 // Persistência do fixed-live: SQLite num volume (DATA_DIR, montado pelo
 // compose). Antes daqui tudo era memória — reinício apagava chat, histórico.
 import Database from "better-sqlite3"
-import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs"
+import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 
 const dir = process.env.DATA_DIR ?? "/app/data"
@@ -38,6 +38,15 @@ CREATE TABLE IF NOT EXISTS clips (
 `)
 // tabela criada antes de existir sala por stream: coluna entra por ALTER
 try { db.exec(`ALTER TABLE chat ADD COLUMN room TEXT NOT NULL DEFAULT ''`) } catch {}
+// scrollback filtra por room ordenando por id: sem índice vira full scan
+db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_room ON chat(room, id)`)
+
+// poda no boot: chat e histórico não têm valor depois de uns meses e o volume
+// é pequeno. Sem isto as tabelas só crescem.
+const KEEP_DAYS = +(process.env.KEEP_DAYS ?? 90)
+const cutoff = Date.now() - KEEP_DAYS * 86_400_000
+db.prepare(`DELETE FROM chat WHERE at < ?`).run(cutoff)
+db.prepare(`DELETE FROM music_history WHERE played_at < ?`).run(cutoff)
 
 
 // tabela criada antes de existir histórico por canal: coluna entra por ALTER
@@ -67,22 +76,6 @@ export const chatPage = (room, beforeId, limit = 50) =>
 export const chatLatest = (room, limit = 50) =>
   db.prepare(`SELECT id, nick AS "from", text, at FROM chat
               WHERE room = ? ORDER BY id DESC LIMIT ?`).all(room, limit).reverse()
-
-// ── migração: lives gravadas saíram do ar ────────────────────────────────
-// A gravação automática de lives foi removida (sobrou só o corte de clips).
-// Apaga os registros de VODs e os arquivos deles do volume; os clips ficam
-// (reconhecíveis pelo sufixo "-clip"). Seguntos órfãos de sessões antigas
-// também saem — quem sobrou sem sessão viva nunca mais vai ser podado.
-try {
-  const vodDir = join(dir, "vods")
-  const clipFile = f => f.includes("-clip")
-  for (const f of readdirSync(vodDir)) {
-    if (clipFile(f)) continue
-    const full = join(vodDir, f)
-    try { if (statSync(full).isFile()) rmSync(full, { force: true }) } catch {}
-  }
-  db.exec(`DROP TABLE IF EXISTS vods`)
-} catch {}
 
 // clips: trechos de 30s de uma gravação, com link compartilhável
 export const addClip = c =>

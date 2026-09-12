@@ -1745,7 +1745,7 @@ function openJam () {
   jamListMics()
   clearInterval(fixedTimer)
   fixedTick()
-  fixedTimer = setInterval(fixedTick, 500)
+  fixedTimer = setInterval(fixedTick, fixedPollMs)
 }
 
 async function refresh () {
@@ -2034,11 +2034,12 @@ $('#cookies-send').onclick = async () => {
 // cartão "tocando agora" com barra de progresso
 function paintNow (el, { title, thumb, position = 0, duration = 0 }, extra = '') {
   el.hidden = false
-  el.innerHTML = `<img src="${thumb}"><div style="flex:1;min-width:0">
+  el.innerHTML = `<img><div style="flex:1;min-width:0">
     <div class="r-title"></div>
     <div class="r-sub">${mmss(position)} / ${mmss(duration)}${extra}</div>
     <div class="bar-pos"><i style="width:${duration ? Math.min(100, 100 * position / duration) : 0}%"></i></div>
   </div>`
+  el.querySelector('img').src = thumb
   el.querySelector('.r-title').textContent = title
 }
 
@@ -2191,7 +2192,8 @@ function openFixed (key) {
   seekDrag = false
   clearInterval(fixedTimer)
   fixedTick()
-  fixedTimer = setInterval(fixedTick, 500)
+  fixedPollMs = FIXED_POLL_MS
+  fixedTimer = setInterval(fixedTick, fixedPollMs)
   clearInterval(lyrTimer)
   lyrTimer = setInterval(tickLyrics, 500)
   if (key === 'music' || key === 'tv') loadHistory(key)
@@ -2235,6 +2237,19 @@ async function loadHistory (key) {
   }))
 }
 
+// A posição da faixa é interpolada no cliente (tickLyrics), então o poll não
+// precisa ser rápido: 2s no regime normal. Só enquanto o canal está ligando
+// (barra de download da TV) vale voltar pra 500ms.
+const FIXED_POLL_MS = 2000
+const FIXED_POLL_BUSY_MS = 500
+let fixedPollMs = FIXED_POLL_MS
+function setFixedPoll (ms) {
+  if (ms === fixedPollMs || !fixedTimer) return
+  fixedPollMs = ms
+  clearInterval(fixedTimer)
+  fixedTimer = setInterval(fixedTick, ms)
+}
+
 async function fixedTick () {
   if (!fixedKey) return
   const key = fixedKey
@@ -2256,6 +2271,7 @@ async function fixedTick () {
   const ready = st.status === 'live'
   setVideoControls(ready)
   const loading = isTv && st.status === 'starting'
+  setFixedPoll(st.status === 'starting' ? FIXED_POLL_BUSY_MS : FIXED_POLL_MS)
   $('#fixed-loading').hidden = !loading
   if (loading) {
     const progress = Math.round(st.progress ?? 0)

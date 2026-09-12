@@ -135,7 +135,15 @@ const helperPath = path.join(__dirname.replace('app.asar', 'app.asar.unpacked'),
 
 // Diagnóstico (picotado, app vazando no áudio): fica em <userData>/audio-filter.log
 const alogPath = () => path.join(app.getPath('userData'), 'audio-filter.log')
-const alog = m => { try { fs.appendFileSync(alogPath(), new Date().toISOString() + ' ' + m + '\n') } catch {} }
+// diagnóstico não pode virar um arquivo de 1GB numa máquina que fica meses
+// aberta: passou de 1MB, recomeça (o histórico antigo nunca serviu pra nada).
+const appendLog = (file, m) => {
+  try {
+    if ((fs.statSync(file).size ?? 0) > 1 << 20) fs.rmSync(file, { force: true })
+  } catch {}
+  try { fs.appendFileSync(file, new Date().toISOString() + ' ' + m + '\n') } catch {}
+}
+const alog = m => appendLog(alogPath(), m)
 
 let audioProc = null, headerBuf = null, metaSent = false, pcmPending = [], pcmFlush = null
 
@@ -411,8 +419,7 @@ const RPC_CLIENT_ID = process.env.FOCKY_RPC_CLIENT_ID || '1546036535881637898'
 let rpcClient = null, rpcActivity = null, rpcTimer = null
 
 // diagnóstico em <userData>/rpc.log (mesmo esquema do audio-filter.log)
-const rlog = m => { try { fs.appendFileSync(path.join(app.getPath('userData'), 'rpc.log'),
-  new Date().toISOString() + ' ' + m + '\n') } catch {} }
+const rlog = m => appendLog(path.join(app.getPath('userData'), 'rpc.log'), m)
 
 async function rpcApply () {
   clearTimeout(rpcTimer); rpcTimer = null

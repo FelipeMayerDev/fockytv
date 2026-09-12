@@ -85,6 +85,10 @@ const run = (cmd, args) =>
 
 const ytdlJson = args => run("yt-dlp", ["--no-warnings", ...cookieFlags(), ...args]).then(b => JSON.parse(b))
 
+// Map é ordenado por inserção: passar do teto derruba as entradas mais velhas.
+// Sem isto os caches do processo (que vive semanas) só crescem.
+const capped = (map, max) => { for (const k of map.keys()) { if (map.size <= max) break; map.delete(k) } }
+
 const searchCache = new Map() // q:limit -> {at, results}
 async function search (q, limit = 8) {
   const cacheKey = `${q}:${limit}`
@@ -101,6 +105,7 @@ async function search (q, limit = 8) {
       thumb: `https://i.ytimg.com/vi/${e.id}/hqdefault.jpg`,
     }))
   searchCache.set(cacheKey, { at: Date.now(), results })
+  capped(searchCache, 200)
   return results
 }
 
@@ -126,6 +131,7 @@ async function metaOf (id, audioOnly = false) {
       .filter(([, size]) => size)),
   }
   metaCache.set(ck, m)
+  capped(metaCache, 500)
   return m
 }
 
@@ -190,6 +196,7 @@ async function lyricsOf (meta) {
     if (hit) lines = parseLrc(hit.syncedLyrics)
     if (lines?.length) log(`[music] letra encontrada (${lines.length} linhas): ${meta.title}`)
     else log(`[music] sem letra no LRCLIB: ${meta.title}`)
+    capped(lyricsCache, 500)
     lyricsCache.set(meta.id, lines) // resultado definitivo (achou ou não)
   } catch (e) {
     // falha transitória (429, rede): NÃO cacheia — a próxima chamada tenta de
@@ -826,6 +833,7 @@ async function jamYtMeta (id) {
     if (!url) throw new Error("sem stream de áudio")
     const meta = { at: Date.now(), title: j.title ?? id, duration: j.duration ?? 0, url }
     ytCache.set(id, meta)
+    capped(ytCache, 200)
     return meta
   })()
   ytPending.set(id, prom)
@@ -863,11 +871,15 @@ app.get("/api/fixed/search", wrap(async (req, res) => {
 
 // Proxy de imagens externas (capas do YouTube etc.): dentro da Activity do
 // Discord o CSP bloqueia img de outras origens — a UI reescreve para cá.
+const IMG_HOSTS = /(^|\.)(ytimg\.com|ggpht\.com|googleusercontent\.com)$/
 app.get("/api/fixed/img", wrap(async (req, res) => {
   const url = (req.query.url ?? "").toString()
   let u
   try { u = new URL(url) } catch { return res.status(400).json({ error: "url inválida" }) }
   if (!/^https?:$/.test(u.protocol)) return res.status(400).json({ error: "protocolo" })
+  // allowlist: sem ela isto é um proxy aberto pra LAN inteira (o servidor está
+  // exposto pela internet). Só capa do YouTube passa — é pra isso que existe.
+  if (!IMG_HOSTS.test(u.hostname)) return res.status(400).json({ error: "host não permitido" })
   const r = await fetch(u, { signal: AbortSignal.timeout(8_000) })
   if (!r.ok || !(r.headers.get("content-type") ?? "").startsWith("image/"))
     return res.status(502).json({ error: "não é imagem" })
@@ -1156,9 +1168,16 @@ app.post("/api/fixed/streams/:key/clip", wrap(async (req, res) => {
              url: `${PUBLIC_URL}/api/fixed/clips/${clip.id}/file` })
 }))
 // ajuste fino do clip no modal: recorta com re-encode (precisão de segundo)
+// Não há login no sistema: a proteção possível é temporal — só o fluxo do
+// modal (logo depois do corte) edita ou descarta. Clip antigo é imutável, e
+// ninguém apaga o acervo de fora. Se um dia houver conta, troque por dono.
+const EDIT_WINDOW_MS = 15 * 60_000
+const editable = clip => Date.now() - clip.createdAt < EDIT_WINDOW_MS
+
 app.post("/api/fixed/clips/:id/trim", wrap(async (req, res) => {
   const clip = getClip(+req.params.id)
   if (!clip) return res.status(404).json({ error: "clip não encontrado" })
+  if (!editable(clip)) return res.status(403).json({ error: "clip antigo: só dá pra ajustar logo depois de cortar" })
   const dur = Math.min(clip.duration, Math.max(5, +(req.body?.dur ?? clip.duration) || clip.duration))
   const at = Math.max(0, Math.min(+(req.body?.at ?? 0) || 0, clip.duration - 5))
   const file = clip.file.replace(/\.mp4$/, `-trim${Date.now()}.mp4`)
@@ -1181,6 +1200,7 @@ app.post("/api/fixed/clips/:id/trim", wrap(async (req, res) => {
 app.delete("/api/fixed/clips/:id", (req, res) => {
   const clip = getClip(+req.params.id)
   if (!clip) return res.status(404).json({ error: "clip não encontrado" })
+  if (!editable(clip)) return res.status(403).json({ error: "clip antigo: só dá pra descartar logo depois de cortar" })
   rmSync(clip.file, { force: true })
   delClip(clip.id)
   res.json({ ok: true })

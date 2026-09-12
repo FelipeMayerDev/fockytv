@@ -204,6 +204,7 @@ async function startSession (key) {
     clearInterval(hb)
     sessions.delete(key)
     setTimeout(() => pruneSegments(livePrefix, 0), 15_000)
+    rmSync(livePrefix + ".sdp", { force: true })
     try { pc.close() } catch {}
     for (const s of pipes) try { s.close() } catch {}
     proc.kill("SIGINT")
