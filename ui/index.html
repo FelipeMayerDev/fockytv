@@ -820,17 +820,20 @@ async function startFilteredAudio (opts) {
   const gen = new MediaStreamTrackGenerator({ kind: 'audio' })
   const writer = gen.writable.getWriter()
   const queue = []
-  let received = 0, written = 0, startedAt = 0
-  const LEAD = 0.25   // s de margem antes de começar a tocar
+  let received = 0, written = 0, startedAt = 0, playing = false
+  const LEAD = 0.25    // s de colchão antes de (re)começar a tocar
+  const MAXLAG = 0.6   // s de atraso máximo: passou disso, pula pra frente
 
   pcmSink = buf => {
     const frames = buf.length / (r.channels * 4)
     if (!frames) return
     queue.push(buf)
     received += frames
-    // consumidor mais lento que o realtime (não deveria): corta o mais velho
-    if (received - written > r.rate * 3) {
-      let drop = received - written - r.rate * 2
+    // atrasou demais (sucessivos reprimes, ou o consumidor travou): pula pra
+    // frente até LEAD. Sem teto, cada reprime somava latência pra sempre e o
+    // áudio ia ficando atrás do vídeo.
+    if (received - written > r.rate * MAXLAG) {
+      let drop = received - written - r.rate * LEAD
       while (drop > 0 && queue.length) {
         const f = queue[0].length / (r.channels * 4)
         if (f > drop) break
@@ -840,9 +843,14 @@ async function startFilteredAudio (opts) {
   }
 
   audioTimer = setInterval(() => {
-    if (!startedAt) {
-      if (received / r.rate < LEAD) return
-      startedAt = Date.now()
+    // Enche o colchão antes de tocar — e faz isso DE NOVO a cada vez que a
+    // fila seca. O jeito antigo (empurrar o relógio pra frente) deixava o
+    // colchão em zero justamente depois do primeiro engasgo, então qualquer
+    // tremida seguinte virava buraco: simulado, 250ms de colchão viravam 0.
+    if (!playing) {
+      if (received - written < LEAD * r.rate) return
+      playing = true
+      startedAt = Date.now() - written / r.rate * 1000
     }
     const target = (Date.now() - startedAt) / 1000 * r.rate
     while (queue.length && written < target) {
@@ -855,9 +863,7 @@ async function startFilteredAudio (opts) {
       })).catch(() => {})
       written += frames
     }
-    // underrun: empurra o relógio pra frente até o buffer se refazer
-    if (!queue.length && startedAt && written < target)
-      startedAt += (target - written) / r.rate * 1000
+    if (written < target) playing = false   // secou: reprime o colchão
   }, 50)
 
   gen.addEventListener('ended', () => stopFilteredAudio())
