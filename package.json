@@ -1,6 +1,6 @@
 {
   "name": "fockytv",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
