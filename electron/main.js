@@ -308,7 +308,9 @@ function startLinuxAudio (opts) {
     opts = { ...opts, pid: linuxPidOfHwnd(opts.hwnd) }
     if (!opts.pid) return { ok: false, error: 'não achei o processo da janela' }
   }
-  const RATE = 48000, CH = 2, FRAMES = 960   // 20ms por tick
+  const RATE = 48000, CH = 2
+  const PRIME = RATE * 0.04 * CH * 4   // 40ms de fila antes de a fonte entrar
+  const MAXQ = RATE * 0.2 * CH * 4     // teto de 200ms por fonte
   win?.webContents.send('audio-meta', { rate: RATE, channels: CH })
 
   linuxPoller = setInterval(() => {
@@ -332,8 +334,15 @@ function startLinuxAudio (opts) {
           ['--record', '--raw', '--format', 'f32', '--rate', '48000', '--channels', '2',
            '--target', String(serial), '-'],
           { stdio: ['ignore', 'pipe', 'pipe'] })
-        const entry = { proc, bufs: [] }
-        proc.stdout.on('data', d => entry.bufs.push(d))
+        // PRIME: 40ms na fila antes de entrar no mix. MAXQ: teto de 200ms —
+        // atrasou (fonte mais rápida que o relógio), o mais velho se perde.
+        const entry = { proc, bufs: [], bytes: 0, live: false }
+        proc.stdout.on('data', d => {
+          entry.bufs.push(d)
+          entry.bytes += d.length
+          if (!entry.live && entry.bytes >= PRIME) entry.live = true
+          while (entry.bytes > MAXQ) entry.bytes -= entry.bufs.shift().length
+        })
         // stderr no log, não no terminal: foi o 'inherit' que escondeu o erro
         // acima até alguém abrir uma transmissão e ouvir o silêncio
         let perr = ''
@@ -351,28 +360,40 @@ function startLinuxAudio (opts) {
   }, 1000)
   linuxPoller.refresh()   // enumera já, sem esperar 1s
 
-  const mix = Buffer.allocUnsafe(FRAMES * CH * 4)
+  // Mixer: quantos frames o RELÓGIO já deve, não "960 por tick". setInterval
+  // entrega ~20,15ms, e consumir 960 fixos deixava o mixer 0,7% mais lento que
+  // o tempo real: a fila crescia até bater no teto e despejar mais de um
+  // segundo de áudio de uma vez, e o renderer (que toca pelo relógio) passava
+  // o tempo em underrun. Medido: 47.672 frames/s antes, 48.112 depois.
+  let emitted = 0
+  const t0 = Date.now()
   linuxMixTimer = setInterval(() => {
+    const owed = Math.round((Date.now() - t0) * RATE / 1000) - emitted
+    if (owed <= 0) return
+    const mix = Buffer.allocUnsafe(owed * CH * 4)
     mix.fill(0)
-    const out = new Float32Array(mix.buffer, 0, FRAMES * CH)
+    const out = new Float32Array(mix.buffer, mix.byteOffset, owed * CH)
     for (const e of linuxProcs.values()) {
-      // consome FRAMES frames da fonte; o que faltar entra como zero
-      let need = FRAMES * CH * 4
+      // fonte recém-nascida enche PRIME antes de entrar: sem isso o começo de
+      // cada app que abre o som vira um punhado de zeros no meio da mistura
+      if (!e.live) continue
+      let need = owed * CH * 4
       const src = []
       while (need > 0 && e.bufs.length) {
         const b = e.bufs[0]
-        if (b.length <= need) { src.push(b); need -= b.length; e.bufs.shift() }
-        else { src.push(b.subarray(0, need)); e.bufs[0] = b.subarray(need); need = 0 }
+        if (b.length <= need) { src.push(b); need -= b.length; e.bytes -= b.length; e.bufs.shift() }
+        else { src.push(b.subarray(0, need)); e.bufs[0] = b.subarray(need); e.bytes -= need; need = 0 }
       }
       let off = 0
       for (const b of src) {
         for (let i = 0; i + 4 <= b.length && off < out.length; i += 4, off++)
           out[off] += b.readFloatLE(i)
       }
-      if (e.bufs.length > 64) e.bufs.splice(0, e.bufs.length - 64)   // atrasou: descarta
+      if (need > 0) e.live = false   // secou: reprime antes de voltar pro mix
     }
     for (let i = 0; i < out.length; i++)
       if (out[i] > 1) out[i] = 1; else if (out[i] < -1) out[i] = -1
+    emitted += owed
     win?.webContents.send('audio-pcm', mix)
   }, 20)
   return { ok: true, rate: RATE, channels: CH }

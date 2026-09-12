@@ -539,6 +539,7 @@ static void playing_pids (const std::vector<std::wstring>& names, std::vector<DW
 // uma fonte = um processo capturado; a thread só enche a fila, o mixer come
 struct Source {
   DWORD pid = 0;
+  bool live = false;        // já encheu PRIME? (senão fica fora do mix)
   IAudioClient* client = nullptr;
   IAudioCaptureClient* cap = nullptr;
   HANDLE ev = nullptr, thread = nullptr;
@@ -562,6 +563,7 @@ static DWORD WINAPI pump (LPVOID arg) {
         const float* f = reinterpret_cast<const float*>(data);
         s->buf.insert(s->buf.end(), f, f + n);
       }
+      if (!s->live && s->buf.size() >= 48000 * 2 / 25) s->live = true;   // 40ms
       if (s->buf.size() > MAXQ) s->buf.erase(s->buf.begin(), s->buf.end() - MAXQ);
       LeaveCriticalSection(&s->lock);
       s->cap->ReleaseBuffer(frames);
@@ -603,13 +605,19 @@ static int run_mix (const char* except_csv) {
   memset(header + 12, 0, 4);
   if (!write_all(header, 16)) return 12;
 
-  const UINT32 TICK = 480;                  // 10ms
+  // Quanto emitir é o RELÓGIO que diz, não "480 frames por volta": o Sleep do
+  // Windows tem granularidade de ~15,6ms, então um tick nominal de 10ms sairia
+  // 35% mais lento que o tempo real — o consumidor tocaria em underrun
+  // permanente (craquelado). Aqui o atraso do Sleep só faz a volta seguinte
+  // emitir mais frames.
+  const UINT32 MAXTICK = 4800;              // 100ms: teto depois de uma parada
   std::vector<Source*> srcs;
-  std::vector<float> mix(TICK * ch);
+  std::vector<float> mix;
   LARGE_INTEGER freq, now;
   QueryPerformanceFrequency(&freq);
   QueryPerformanceCounter(&now);
-  long long next = now.QuadPart;            // relógio do mixer, sem deriva
+  const long long t0 = now.QuadPart;
+  unsigned long long emitted = 0;
   long long scanAt = 0;
 
   for (;;) {
@@ -649,25 +657,31 @@ static int run_mix (const char* except_csv) {
       }
     }
 
-    // mistura 10ms de cada fonte; quem não tem áudio pronto entra como zero.
-    // Sem fonte alguma sai silêncio — o relógio do RTP do outro lado segue
-    // andando, e é isso que mantém a linha do tempo inteira.
-    memset(mix.data(), 0, mix.size() * sizeof(float));
+    // frames que o relógio já deve
+    QueryPerformanceCounter(&now);
+    unsigned long long due = (unsigned long long)((now.QuadPart - t0) * 48000 / freq.QuadPart);
+    UINT32 want = due > emitted ? (UINT32)(due - emitted) : 0;
+    if (!want) { Sleep(1); continue; }
+    if (want > MAXTICK) want = MAXTICK;     // parada longa: não despeja tudo
+
+    // mistura `want` frames de cada fonte; quem não tem áudio pronto entra
+    // como zero. Sem fonte alguma sai silêncio — o relógio do RTP do outro
+    // lado segue andando, e é isso que mantém a linha do tempo inteira.
+    mix.assign((size_t)want * ch, 0.f);
     for (Source* s : srcs) {
       EnterCriticalSection(&s->lock);
-      const size_t n = mix.size() < s->buf.size() ? mix.size() : s->buf.size();
-      for (size_t i = 0; i < n; i++) mix[i] += s->buf[i];
-      s->buf.erase(s->buf.begin(), s->buf.begin() + n);
+      if (s->live) {
+        const size_t n = mix.size() < s->buf.size() ? mix.size() : s->buf.size();
+        for (size_t i = 0; i < n; i++) mix[i] += s->buf[i];
+        s->buf.erase(s->buf.begin(), s->buf.begin() + n);
+        if (n < mix.size()) s->live = false;   // secou: reprime
+      }
       LeaveCriticalSection(&s->lock);
     }
     for (float& v : mix) v = v > 1.f ? 1.f : (v < -1.f ? -1.f : v);
     if (!write_all(mix.data(), mix.size() * sizeof(float))) break;
-
-    next += freq.QuadPart / 100;   // 10ms
-    QueryPerformanceCounter(&now);
-    long long waitMs = (next - now.QuadPart) * 1000 / freq.QuadPart;
-    if (waitMs > 0) Sleep((DWORD)waitMs);
-    else next = now.QuadPart;      // atrasou muito: reancora, não acumula
+    emitted += want;
+    Sleep(5);   // o quanto dormiu não importa: a próxima volta acerta a conta
   }
 
   for (Source* s : srcs) source_stop(s);
