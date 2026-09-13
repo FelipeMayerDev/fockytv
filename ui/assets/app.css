@@ -578,3 +578,80 @@ body.intro #brand, body.intro button { animation: shake .18s infinite }
 #update-btn { color:hsl(var(--primary)); animation:update-pulse 2s ease-in-out infinite }
 @keyframes update-pulse { 50% { opacity:.45 } }
 @media (prefers-reduced-motion:reduce) { #update-btn { animation:none } }
+
+/* ── mobile / PWA ────────────────────────────────────────────────────────
+   No celular só existe assistir e câmera (getDisplayMedia não existe no iOS
+   e é irregular no Android): o botão de tela some por .no-screenshare, posto
+   no boot. O resto é a mesma UI em uma coluna — os painéis laterais de 360px
+   viram gaveta embaixo, que é o único lugar onde cabem em 390px de tela. */
+
+/* 100vh no iOS conta a barra de URL que some ao rolar: dvh é a altura real */
+@supports (height:100dvh) { body { height:100dvh } }
+body.no-screenshare #share { display:none }
+/* sem o CTA de tela, a câmera vira o botão principal — e ganha rótulo */
+body.no-screenshare #share-cam {
+  width:auto; padding:0 16px; border-color:transparent; font-weight:600;
+  border-radius:var(--radius-pill);
+  background:hsl(var(--accent)); color:hsl(var(--primary-foreground));
+}
+body.no-screenshare #share-cam::after { content:'Câmera' }
+
+@media (max-width:640px) {
+  /* toque: abaixo de 16px o iOS dá zoom ao focar o campo */
+  input, select, textarea { font-size:16px }
+
+  /* header em duas linhas: marca + ações em cima, abas rolando embaixo */
+  .bar { flex-wrap:wrap; gap:8px; padding:8px 12px;
+         padding-top:calc(8px + env(safe-area-inset-top)) }
+  .bar h1 { font-size:17px }
+  .spacer { display:none }   /* com wrap, o empurrão viraria quebra de linha */
+  .tabs { order:10; flex-basis:100%; margin-left:0; gap:4px;
+          overflow-x:auto; scrollbar-width:none }
+  .tabs::-webkit-scrollbar { display:none }
+  .tab { padding:0 12px; font-size:13px; height:34px }
+  .tab[data-tab="jam"] { display:inline-flex }   /* na linha própria cabe */
+  #live-pill { order:9 }
+
+  /* grade: uma coluna cheia, sem o respiro de desktop */
+  #grid-live { padding:16px; gap:18px 14px;
+               grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr)) }
+  .empty { min-height:46vh }
+  .empty h4 { font-size:22px }
+
+  /* painéis laterais viram gaveta inferior */
+  #fixed-panel, #chat-panel, #jam-panel {
+    top:auto; left:0; right:0; bottom:0; width:auto; height:58%;
+    border-left:0; border-top:1px solid hsl(var(--border));
+    border-radius:var(--radius-card) var(--radius-card) 0 0;
+    padding:16px 14px calc(16px + env(safe-area-inset-bottom));
+  }
+  /* o vídeo sobe pro espaço que sobra em vez de ficar atrás da gaveta */
+  #player-wrap.tv-panel video { height:42% }
+  #player-wrap.tv-panel.tv-panel-hidden video { height:100% }
+  #music-view, #jam-view { right:0; bottom:58% }
+  #fixed-empty, #fixed-loading { inset:0 0 58% 0 }
+  #fixed-bar { right:0; bottom:58%; padding:10px 14px }
+  #player-wrap.tv-panel-hidden #music-view,
+  #player-wrap.tv-panel-hidden #jam-view { bottom:0 }
+  #player-wrap.tv-panel-hidden #fixed-bar { bottom:0;
+    padding-bottom:calc(10px + env(safe-area-inset-bottom)) }
+  #fixed-panel-toggle, #player-wrap.tv-panel-hidden #fixed-panel-toggle { right:12px }
+  #chat-fab, #player-wrap.tv-panel #chat-fab,
+  #player-wrap.tv-panel.tv-panel-hidden #chat-fab {
+    right:12px; bottom:calc(12px + env(safe-area-inset-bottom)) }
+  #fixed-bar .skip { height:40px; width:40px }
+  #mv-art { width:min(180px, 22vh) }
+  #mv-title { font-size:18px }
+  #mv-main { padding:16px 16px 8px }
+  #lyrics { padding:24vh 12px 72px }
+
+  /* diálogos: coluna única e tela quase cheia */
+  dialog { width:min(560px, 94vw); padding:18px; max-height:88vh }
+  .opts { grid-template-columns:1fr; gap:12px }
+  .actions button { flex:1 }
+
+  #mini-bar { width:calc(100vw - 16px);
+              bottom:calc(8px + env(safe-area-inset-bottom)) }
+  #toast { bottom:calc(16px + env(safe-area-inset-bottom));
+           max-width:calc(100vw - 24px) }
+}

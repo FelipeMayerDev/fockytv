@@ -33,6 +33,8 @@ services:
       - ../ui/jam.js:/broadcast-box/web/build/jam.js:ro
       - ../ui/jam-worklet.js:/broadcast-box/web/build/jam-worklet.js:ro
       - ../ui/shim.html:/broadcast-box/web/build/shim.html:ro
+      - ../ui/sw.js:/broadcast-box/web/build/sw.js:ro
+      - ../ui/manifest.json:/broadcast-box/web/build/manifest.json:ro
       - ../ui/du-bist-gut-genug.mp3:/broadcast-box/web/build/du-bist-gut-genug.mp3:ro
       - ../ui/assets:/broadcast-box/web/build/assets:ro
 
