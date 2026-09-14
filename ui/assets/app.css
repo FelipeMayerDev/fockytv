@@ -285,10 +285,13 @@ main { flex:1; overflow:hidden; display:flex; flex-direction:column; position:re
 }
 .s-acts input[type=range]::-webkit-slider-thumb { appearance:none; width:12px; height:12px;
   border-radius:50%; background:hsl(var(--foreground)) }
-/* foco (solo): só a live escolhida fica visível, 16/9 da largura toda;
+/* foco (solo): só a live escolhida fica visível, preenchendo o grid todo
+   (o vídeo em contain faz as barras quando o formato não bate);
    clicar nela de novo volta pra grade */
-#grid-live.solo { grid-template-columns:1fr }
+#grid-live.solo, #grid-live.solo[data-n] { grid-template-columns:1fr; grid-template-rows:100%;
+  align-content:stretch; overflow:hidden }
 #grid-live.solo > .stream:not(.focus) { display:none }
+.stream.focus { aspect-ratio:auto; height:100% }
 #grid-live.solo[data-n="3"] > .stream:last-child:nth-child(odd) {
   grid-column:auto; width:auto; justify-self:stretch }
 /* três tiles: dois em cima, um embaixo centralizado */
