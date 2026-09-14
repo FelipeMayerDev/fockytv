@@ -160,6 +160,15 @@ label { font-size:13px; font-weight:500; color:hsl(var(--muted-foreground)) }
 }
 #ctx-title { font-weight:600; font-size:15px; letter-spacing:-.01em }
 
+/* link do repositório na barra de contexto (mesma pegada do button.ghost.icon) */
+.gh-link {
+  width:36px; height:36px; padding:0; display:inline-flex; align-items:center;
+  justify-content:center; border-radius:var(--radius); color:hsl(var(--muted-foreground));
+}
+.gh-link:hover { background:hsl(var(--muted)); color:hsl(var(--foreground)) }
+.gh-link svg { width:16px; height:16px; flex:none; fill:none; stroke:currentColor;
+  stroke-width:2; stroke-linecap:round; stroke-linejoin:round }
+
 .spacer { flex:1 }
 button svg { width:16px; height:16px; flex:none; fill:none;
   stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round }
