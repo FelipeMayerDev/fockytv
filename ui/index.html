@@ -699,7 +699,13 @@ async function capture (fps, withAudio, withCursor) {
     // cursor na tela e não na janela, no Windows o Chromium sempre compõe. Fica
     // pedido do jeito certo pra valer sozinho quando o Chromium implementar.
     video: { frameRate: fps, width: 1920, height: 1080, cursor: withCursor ? 'always' : 'never' },
-    audio: withAudio,
+    // systemAudio 'include': sem isso o seletor do Chrome nem mostra o
+    // checkbox de "áudio do sistema" no Windows — e o som sai de fora
+    audio: withAudio
+      ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      : false,
+    systemAudio: withAudio ? 'include' : 'exclude',
+    surfaceSwitching: 'include',
   })
 }
 
