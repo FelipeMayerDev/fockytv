@@ -2199,9 +2199,6 @@ function buildTile (st, kind = null) {
            <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/>
              <path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
          </button>
-         <button class="s-chat" title="Chat" aria-label="Chat">
-           <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-         </button>
        </div>
      </div>`
   el.querySelector('.avatar').textContent = key.slice(0, 1)
@@ -2236,16 +2233,16 @@ function buildTile (st, kind = null) {
     if (document.pictureInPictureElement === video) document.exitPictureInPicture().catch(() => {})
     else video.requestPictureInPicture().catch(e => toast(e.message))
   }
-  // espelhar: botão DENTRO do player, visível só quando a webcam está no ar.
-  // Local sempre vira na hora; só câmera publicando, o canvas também
-  // espelha o que vai pro ar (replaceTrack)
+  // espelhar: mora nas ações do player no lugar do chat, e só aparece
+  // quando a minha webcam está no ar. Local sempre vira na hora; só câmera
+  // publicando, o canvas também espelha o que vai pro ar (replaceTrack)
   const mb = document.createElement('button')
   mb.className = 's-mirror'
   mb.hidden = true
   mb.title = 'Espelhar imagem'
   mb.setAttribute('aria-label', 'Espelhar imagem')
   mb.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="m8 7-4 5 4 5"/><path d="m16 7 4 5-4 5"/></svg>'
-  el.append(mb)
+  el.querySelector('.s-acts').prepend(mb)
   mb.onclick = e => {
     e.stopPropagation()
     const on = video.classList.toggle('mirror')
@@ -2253,12 +2250,6 @@ function buildTile (st, kind = null) {
     setPublishedMirror(on).catch(err => toast('Espelho falhou: ' + err.message))
   }
   el.querySelector('.s-focus').onclick = () => toggleFocus(key)
-  el.querySelector('.s-chat').onclick = () => {
-    chatOpen(key)
-    const p = $('#chat-panel')
-    p.hidden = false
-    $('#chat-input').focus()
-  }
   paintVol()
   return t
 }
