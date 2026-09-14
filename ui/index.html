@@ -3246,8 +3246,10 @@ function renderVoice () {
     const wrap = document.createElement('div')
     wrap.className = 'vchan'
     const members = [...(voiceState.find(r => r.room === room)?.members ?? [])]
-    // entrada otimista: eu já apareço na sala enquanto conecta
-    if (jamPending === room && !members.includes(nick)) members.unshift(nick)
+    // entrada otimista: eu já apareço na sala enquanto conecta — e sigo
+    // aparecendo enquanto o poll do salas não me alcançar (até 5s de atraso)
+    if ((jamPending === room || (jamJoined && jamRoom === room)) &&
+        !members.includes(nick)) members.unshift(nick)
     const b = document.createElement('button')
     b.className = 'tab' + (jamJoined && jamRoom === room ? ' on' : '') +
       (jamPending === room ? ' connecting' : '')
