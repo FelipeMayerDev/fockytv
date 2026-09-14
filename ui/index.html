@@ -761,10 +761,12 @@ const postKind = (key, data) => fetch(`${cfg.serverUrl}/api/fixed/streams/${enco
   body: data ? JSON.stringify(data) : undefined,
 }).catch(() => {})
 
-// WHIP só-áudio: sem transceiver de vídeo, a sessão nasce sem track de tela
+// WHIP só-áudio + capa: a sessão leva o áudio e um vídeo de capa (1fps) —
+// o /api/status só lista sessão com videoTracks, então a capa garante que
+// quem assiste encontre o stream
 async function publishAudio (key, st) {
   const pc = new RTCPeerConnection()
-  st.getAudioTracks().forEach(t => pc.addTrack(t, st))
+  st.getTracks().forEach(t => pc.addTrack(t, st))
   await signal('/api/whip', key, pc)
   return pc
 }
@@ -2307,6 +2309,8 @@ async function refresh () {
   // tipos de stream (YouTube compartilhado): título, tag e fila
   streamKindsState = await fetch(cfg.serverUrl + '/api/fixed/streams/kinds')
     .then(r => r.json()).catch(() => ({}))
+  // o player do áudio compartilhado vale em toda view (mesmo sem tiles)
+  musicDockTick()
 
   // quantos estão ouvindo o canal música (sessões com nick de verdade)
   const mst = live.find(st => st.streamKey === 'music')
@@ -2397,7 +2401,6 @@ async function refresh () {
     }
   }
   grid.classList.toggle('solo', !!focusKey)
-  musicDockTick()
 }
 
 // duração no canto direito da thumb: conta de segundo em segundo enquanto o
