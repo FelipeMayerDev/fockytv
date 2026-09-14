@@ -137,6 +137,32 @@
       </div>
     </header>
 
+    <!-- player do áudio compartilhado: barra fixa no topo; hover abre capa/letra/fila -->
+    <div id="music-dock" hidden>
+      <div class="md-bar glass">
+        <span class="md-eq"><i></i><i></i><i></i></span>
+        <img id="md-art" alt="">
+        <div class="md-txt"><b id="md-title"></b><span class="muted" id="md-sub"></span></div>
+        <button class="ghost icon" id="md-toggle" title="Tocar/Pausar (aqui pra você)" aria-label="Tocar ou pausar localmente">
+          <svg viewBox="0 0 24 24" id="md-ico-play"><path d="M7 4.5l13 7.5-13 7.5v-15Z"/></svg>
+          <svg viewBox="0 0 24 24" id="md-ico-pause" class="off"><path d="M7 4h3.6v16H7zM13.4 4H17v16h-3.6z"/></svg>
+        </button>
+      </div>
+      <div class="md-panel glass">
+        <div class="mdp-head">
+          <img id="mdp-art" alt="">
+          <div style="min-width:0">
+            <b id="mdp-title"></b>
+            <p class="muted" id="mdp-host" style="margin:0"></p>
+          </div>
+        </div>
+        <div class="mdp-body">
+          <div id="mdp-lyrics"><p class="muted" style="padding:8px">sem letra pra esta música</p></div>
+          <div id="mdp-queue"><p class="muted" style="padding:8px">fila vazia</p></div>
+        </div>
+      </div>
+    </div>
+
     <main>
 
 <!-- áudio do canal música: conexão própria, segue tocando fora da aba Música -->
@@ -336,31 +362,6 @@
     <button class="outline" id="ytb-add">Fila</button>
   </div>
 
-  <!-- player do áudio compartilhado: barra no topo; hover abre capa/letra/fila -->
-  <div id="music-dock" hidden>
-    <div class="md-bar glass">
-      <span class="md-eq"><i></i><i></i><i></i></span>
-      <img id="md-art" alt="">
-      <div class="md-txt"><b id="md-title"></b><span class="muted" id="md-sub"></span></div>
-      <button class="ghost icon" id="md-toggle" title="Tocar/Pausar (aqui pra você)" aria-label="Tocar ou pausar localmente">
-        <svg viewBox="0 0 24 24" id="md-ico-play"><path d="M7 4.5l13 7.5-13 7.5v-15Z"/></svg>
-        <svg viewBox="0 0 24 24" id="md-ico-pause" class="off"><path d="M7 4h3.6v16H7zM13.4 4H17v16h-3.6z"/></svg>
-      </button>
-    </div>
-    <div class="md-panel glass">
-      <div class="mdp-head">
-        <img id="mdp-art" alt="">
-        <div style="min-width:0">
-          <b id="mdp-title"></b>
-          <p class="muted" id="mdp-host" style="margin:0"></p>
-        </div>
-      </div>
-      <div class="mdp-body">
-        <div id="mdp-lyrics"><p class="muted" style="padding:8px">sem letra pra esta música</p></div>
-        <div id="mdp-queue"><p class="muted" style="padding:8px">fila vazia</p></div>
-      </div>
-    </div>
-  </div>
 
   <!-- dock de chamada: vidro flutuante; voz + publicar + encerrar -->
   <div id="call-dock" class="glass">

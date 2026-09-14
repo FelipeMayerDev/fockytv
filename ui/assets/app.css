@@ -253,10 +253,9 @@ button.icon { width:36px; padding:0 }
 #ytb-queue { width:160px; flex:none; height:32px; font-size:12px }
 #ytb-add { height:32px; padding:0 12px; font-size:12px; flex:none }
 
-/* player do áudio compartilhado: pílula no topo da área central; hover
-   derruba o painel com capa grande, letra e fila */
-#music-dock { position:absolute; top:60px; left:50%; transform:translateX(-50%);
-  z-index:7; width:min(520px, calc(100% - 32px)) }
+/* player do áudio compartilhado: filete fixo entre a barra de contexto e a
+   grade (empurra os tiles pra baixo); o hover derruba o painel por cima */
+#music-dock { position:relative; flex:none; padding:10px 20px 0; z-index:7 }
 #music-dock[hidden] { display:none }
 .md-bar {
   display:flex; align-items:center; gap:10px; padding:8px 12px;
@@ -275,7 +274,8 @@ button.icon { width:36px; padding:0 }
 @keyframes eq { 0%, 100% { height:4px } 50% { height:14px } }
 @media (prefers-reduced-motion:reduce) { .md-eq i { animation:none; height:10px } }
 .md-panel {
-  display:none; margin-top:8px; padding:16px;
+  display:none; position:absolute; left:20px; right:20px; top:100%; margin-top:6px;
+  padding:16px; z-index:8;
   border:1px solid var(--glass-border); border-radius:var(--radius-card);
   box-shadow:var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
   background:var(--glass-bg-strong);
@@ -401,6 +401,10 @@ button svg.off { display:none }
 .stream.focus { aspect-ratio:auto; height:100% }
 #grid-live.solo[data-n="3"] > .stream:last-child:nth-child(odd) {
   grid-column:auto; width:auto; justify-self:stretch }
+/* uma live só: ela ocupa o grid inteiro sem precisar de foco */
+#grid-live[data-n="1"] { grid-template-columns:1fr; grid-template-rows:100%;
+  align-content:stretch; overflow:hidden }
+#grid-live[data-n="1"] .stream { aspect-ratio:auto; height:100% }
 /* três tiles: dois em cima, um embaixo centralizado */
 #grid-live[data-n="3"] { grid-template-columns:1fr 1fr }
 #grid-live[data-n="3"] > .stream:last-child:nth-child(odd) {
