@@ -195,7 +195,30 @@ button.icon { width:36px; padding:0 }
 }
 .dock-btn.primary:hover { animation-play-state:paused }
 .dock-btn.destructive { background:hsl(var(--destructive)); color:#fff }
+.dock-btn-sm { width:20px; height:44px; border-radius:0; background:transparent;
+  color:hsl(var(--muted-foreground)) }
+.dock-btn-sm:hover { background:transparent; transform:none; color:hsl(var(--foreground)) }
+.dock-btn-sm svg { width:14px; height:14px }
 #call-dock[hidden] { display:none }
+
+/* popover de configuração do mic: sobe do dock, mesma linguagem de vidro */
+.dock-pop {
+  position:absolute; bottom:calc(100% + 12px); left:50%; transform:translateX(-50%);
+  width:280px; padding:14px 16px; z-index:9;
+  border:1px solid var(--glass-border); border-radius:var(--radius-card);
+  box-shadow:var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+  background:var(--glass-bg-strong);
+  backdrop-filter:blur(var(--glass-blur));
+  -webkit-backdrop-filter:blur(var(--glass-blur));
+}
+.dock-pop[hidden] { display:none }
+.dock-pop .field { margin-bottom:10px }
+.pop-row {
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  padding:7px 0; font-size:13px; font-weight:500; cursor:pointer;
+}
+.pop-row + .pop-row { border-top:1px solid hsl(var(--border)) }
+.dock-pop .desc { margin-top:10px; font-size:11.5px }
 
 /* header apertado: cai por etapas em vez de estourar */
 @media (max-width:1280px) {

@@ -326,6 +326,24 @@
     <button class="dock-btn" id="dock-mic" title="Entrar no canal de voz">
       <svg viewBox="0 0 24 24" class="ico-mic-off"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/><path d="m3 3 18 18" opacity=".9"/></svg>
     </button>
+    <button class="dock-btn dock-btn-sm" id="dock-mic-cfg" title="Configurar microfone" aria-label="Configurar microfone">
+      <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <!-- configuração do microfone: dispositivo + processamento de voz -->
+    <div class="dock-pop glass" id="mic-pop" hidden>
+      <div class="field">
+        <label for="dock-dev">Microfone</label>
+        <select id="dock-dev"></select>
+      </div>
+      <label class="pop-row"><span>Cancelar eco</span>
+        <span class="switch"><input type="checkbox" id="dock-aec"><span></span></span></label>
+      <label class="pop-row"><span>Supressão de ruído</span>
+        <span class="switch"><input type="checkbox" id="dock-ns"><span></span></span></label>
+      <label class="pop-row"><span>Ganho automático</span>
+        <span class="switch"><input type="checkbox" id="dock-agc"><span></span></span></label>
+      <p class="desc">Tudo desligado é o certo pra tocar instrumento (e use fones).
+        Ligado vira modo conversa: a voz fica mais limpa em caixa de som.</p>
+    </div>
     <button class="dock-btn" id="share-cam" title="Compartilhar WebCam" aria-label="Compartilhar WebCam">
       <svg viewBox="0 0 24 24"><path d="m22 8-6 4 6 4V8Z"/>
         <rect x="2" y="6" width="14" height="12" rx="2"/></svg>
@@ -2952,6 +2970,55 @@ $('#vs-cam').onclick = () => $('#share-cam').click()
 $('#vs-screen').onclick = () => $('#share').click()
 $('#vs-leave').onclick = () => jamToggleJoin()
 
+// ── configuração do microfone (popover do dock) ──────────────────────────
+// O padrão segue voz crua (música, AEC/NS/AGC fora); ligar os toggles vira
+// "modo conversa". Muda na hora: recaptura o mic e troca a fonte do encoder
+// sem renegociar nada (jam.replaceMic).
+const jamMicPrefs = {
+  get (k) { return localStorage.getItem('jam-' + k) === '1' },
+  set (k, v) { localStorage.setItem('jam-' + k, v ? '1' : '0') },
+}
+const jamMicOpts = () => ({
+  echoCancellation: jamMicPrefs.get('aec'),
+  noiseSuppression: jamMicPrefs.get('ns'),
+  autoGainControl: jamMicPrefs.get('agc'),
+})
+const jamMicDevice = () => $('#dock-dev').value || $('#jam-dev').value || undefined
+
+function micPopPaint () {
+  $('#dock-aec').checked = jamMicPrefs.get('aec')
+  $('#dock-ns').checked = jamMicPrefs.get('ns')
+  $('#dock-agc').checked = jamMicPrefs.get('agc')
+}
+
+async function applyMicSettings () {
+  if (!jamJoined || !jam) return   // desconectado: vale no próximo join
+  try {
+    if (jamNativeOn) jamNativeStop()   // captura nativa não lê esses toggles
+    const dev = jamMicDevice()
+    const ms = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 2, sampleRate: 48000, ...jamMicOpts(),
+               ...(dev ? { deviceId: { exact: dev } } : {}) },
+    })
+    await jam.replaceMic(ms)
+  } catch (e) { toast('Microfone não trocou: ' + e.message) }
+}
+
+$('#dock-mic-cfg').onclick = e => {
+  e.stopPropagation()
+  const pop = $('#mic-pop')
+  pop.hidden = !pop.hidden
+  if (!pop.hidden) { micPopPaint(); jamListMics($('#dock-dev')) }
+}
+$('#mic-pop').onclick = e => e.stopPropagation()   // clique dentro não fecha
+document.addEventListener('click', e => { $('#mic-pop').hidden = true })
+for (const [id, key] of [['#dock-aec', 'aec'], ['#dock-ns', 'ns'], ['#dock-agc', 'agc']])
+  $(id).onchange = e => { jamMicPrefs.set(key, e.target.checked); applyMicSettings() }
+$('#dock-dev').addEventListener('change', () => {
+  localStorage.setItem('jam-device', $('#dock-dev').value)
+  applyMicSettings()
+})
+
 // chat da sala: mensagens vivem só na sessão (o relay do servidor não guarda
 // histórico); as próprias mensagens entram no log na hora do envio
 let jamChatLog = []
@@ -3224,7 +3291,7 @@ async function jamToggleJoin (room = 'sala') {
       voiceUI()
       return
     }
-    jam ??= await import('./jam.js?v=6').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+    jam ??= await import('./jam.js?v=7').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
       .then(j => {
         j.onChat(m => {
           if (m.type === 'yt') return jamYtEvent(m)
@@ -3241,7 +3308,8 @@ async function jamToggleJoin (room = 'sala') {
       catch (e) { toast('Captura nativa indisponível, usando o mic do navegador.', null, 'warning') }
     }
     await jam.join(room, nick, jamRender,
-      ms ? { micStream: ms } : { deviceId: $('#jam-dev').value || undefined })
+      ms ? { micStream: ms }
+         : { deviceId: jamMicDevice(), audio: jamMicOpts() })
     jam.setMicGain(dockMuted ? 0 : (+localStorage.getItem('jam-micgain') || 1))
     jamJoined = true
     jamRoom = room
@@ -3271,8 +3339,7 @@ async function jamToggleJoin (room = 'sala') {
 $('#jam-toggle').onclick = () => jamToggleJoin()
 // lista os dispositivos de entrada; os nomes só vêm depois da permissão de
 // mic, então se vierem em branco pede um acesso descartável e lista de novo
-async function jamListMics () {
-  const sel = $('#jam-dev')
+async function jamListMics (sel = $('#jam-dev')) {
   const fill = () => {
     sel.replaceChildren(...devices.filter(d => d.kind === 'audioinput').map((d, i) => {
       const opt = document.createElement('option')

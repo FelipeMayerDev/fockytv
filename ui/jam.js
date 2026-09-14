@@ -294,7 +294,7 @@ export async function initJam ({ serverUrl }) {
 
   // ── API pública ─────────────────────────────────────────────────────────
   return {
-    async join (_room, _nick, _onState, { micStream: extMic = null, deviceId = null } = {}) {
+    async join (_room, _nick, _onState, { micStream: extMic = null, deviceId = null, audio = null } = {}) {
       room = _room; me = _nick; onState = _onState || onState
       ws = new WebSocket(`${wsUrl}/api/fixed/ws/jam?room=${encodeURIComponent(room)}&nick=${encodeURIComponent(me)}`)
       ws.onmessage = e => {
@@ -310,11 +310,13 @@ export async function initJam ({ serverUrl }) {
       // de voz (fones são obrigatórios — sem AEC o alto-falante vira eco). No
       // app desktop, o chamador pode injetar o PCM do helper WASAPI exclusivo
       // via micStream: captura com ~10ms de latência, fora da pipeline de voz
-      // do Chromium inteira.
+      // do Chromium inteira. `audio` sobrescreve os processamentos (a UI de
+      // configuração de mic liga AEC/NS/AGC pra conversa, não pra música).
       micStream = extMic ?? await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: false, noiseSuppression: false, autoGainControl: false,
           channelCount: 2, sampleRate: 48000,
+          ...(audio ?? {}),
           ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
         },
       })
