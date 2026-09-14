@@ -772,23 +772,27 @@ async function publishAudio (key, st) {
 }
 
 // capa queimada no canvas do modo áudio: o /api/status só lista sessão com
-// videoTracks, então o áudio vai com uma capa estática de vídeo
+// videoTracks, então o áudio vai com uma capa estática de vídeo. O canvas é
+// REDESENHADO 1x/s: captureStream de canvas estático não gera quadros, e sem
+// quadros o broadcast-box não lista a trilha.
 async function coverTrack (videoId, title) {
   const canvas = document.createElement('canvas')
   canvas.width = 640; canvas.height = 360
   const ctx2 = canvas.getContext('2d')
-  const paint = () => {
-    ctx2.fillStyle = '#111'; ctx2.fillRect(0, 0, 640, 360)
-    ctx2.fillStyle = '#f4f2ef'
-    ctx2.font = '600 22px system-ui, sans-serif'
-    ctx2.textAlign = 'center'
-    ctx2.fillText('♪', 320, 330)
-  }
-  paint()
   const img = new Image()
   img.crossOrigin = 'anonymous'
-  img.onload = () => { ctx2.drawImage(img, 0, 0, 640, 360) }
+  img.onload = paint
   img.src = imgSrc(`https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`)
+  let tick = 0
+  function paint () {
+    ctx2.fillStyle = '#111'; ctx2.fillRect(0, 0, 640, 360)
+    if (img.complete && img.naturalWidth) ctx2.drawImage(img, 0, 0, 640, 360)
+    // pontinho que alterna: força pintura nova a cada segundo
+    ctx2.fillStyle = (tick = !tick) ? '#f4f2ef' : '#f4f2ef00'
+    ctx2.beginPath(); ctx2.arc(320, 330, 6, 0, 7); ctx2.fill()
+  }
+  setInterval(paint, 1000)
+  paint()
   return canvas.captureStream(1).getVideoTracks()[0]
 }
 
