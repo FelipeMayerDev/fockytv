@@ -17,6 +17,17 @@ const FRAME_MS = 5
 const FRAME_48 = 240
 const BITRATE = 256_000   // Opus estéreo música; DTX/FEC fora de propósito
 
+// Dois perfis de pipeline (join({ mode })):
+//  'music' — Estúdio: latência mínima, estéreo cru a 256k, jitter de 30ms.
+//  'voice' — canais de conversa: Opus mono a 64k com DTX, frames de 20ms e
+//            jitter mais folgado (80ms) — estabilidade acima de latência.
+// AEC/NS/AGC ficam por conta das constraints pedidas pelo chamador; a sala
+// nunca processa voz por conta própria.
+const MODES = {
+  music: { frameMs: 5, frame48: 240, channels: 2, bitrate: BITRATE, dtx: false, jitterMs: 30 },
+  voice: { frameMs: 20, frame48: 960, channels: 1, bitrate: 64_000, dtx: true, jitterMs: 80 },
+}
+
 export async function initJam ({ serverUrl }) {
   const wsUrl = serverUrl.replace(/^http/, 'ws')
   let ws = null
@@ -40,16 +51,30 @@ export async function initJam ({ serverUrl }) {
   }
 
   // ── envio ───────────────────────────────────────────────────────────────
+  let mode = 'music'
+  let fms = FRAME_MS, f48 = FRAME_48, nch = 2   // params do modo corrente
   let micStream = null
   let tap = null
   let encoder = null
   let outSeq = 0
 
+  // voz: o tap entrega blocos de 5ms estéreo — soma os canais (mono) e junta
+  // 4 blocos num frame de 20ms, que é onde o Opus de voz é eficiente
+  let voiceAcc = null, voicePos = 0
+  const tapFrame = block => {
+    if (nch === 2) return feedEncoder(block)
+    if (!voiceAcc) voiceAcc = new Float32Array(f48)
+    for (let i = 0; i < FRAME_48; i++)
+      voiceAcc[voicePos + i] = (block[i * 2] + block[i * 2 + 1]) / 2
+    voicePos += FRAME_48
+    if (voicePos === f48) { voicePos = 0; feedEncoder(voiceAcc) }
+  }
+
   const feedEncoder = block => {
     if (encoder?.state !== 'configured') return
     encoder.encode(new AudioData({
-      format: 'f32', sampleRate: 48000, numberOfFrames: FRAME_48, numberOfChannels: 2,
-      timestamp: outSeq * FRAME_MS * 1000, data: block,
+      format: 'f32', sampleRate: 48000, numberOfFrames: f48, numberOfChannels: nch,
+      timestamp: outSeq * fms * 1000, data: block,
     }))
   }
 
@@ -74,13 +99,13 @@ export async function initJam ({ serverUrl }) {
       error: e => console.warn('[jam] encoder:', e.message),
     })
     encoder.configure({
-      codec: 'opus', sampleRate: 48000, numberOfChannels: 2, bitrate: BITRATE,
-      opus: { frameDuration: FRAME_MS * 1000, usedtx: false },
+      codec: 'opus', sampleRate: 48000, numberOfChannels: nch, bitrate: MODES[mode].bitrate,
+      opus: { frameDuration: fms * 1000, usedtx: MODES[mode].dtx },
     })
     tap = new AudioWorkletNode(ctx, 'jam-tap')
     tap.port.onmessage = e => {
       if (e.data.type === 'level') { selfLevel = e.data.v; fireLevels() }
-      else feedEncoder(e.data)
+      else tapFrame(e.data)
     }
     ctx.createMediaStreamSource(stream).connect(tap)
     tap.connect(mixNode) // silencioso no mix (gain 0): só mantém o worklet vivo
@@ -108,7 +133,7 @@ export async function initJam ({ serverUrl }) {
         output: ad => this.play(ad),
         error: e => console.warn(`[jam] decoder ${id}:`, e.message),
       })
-      this.decoder.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: 2 })
+      this.decoder.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: nch })
       mixNode.port.postMessage({ type: 'add', id })
     }
 
@@ -152,18 +177,24 @@ export async function initJam ({ serverUrl }) {
 
     play (ad) {
       // o decoder devolve 'f32-planar' (ou 'f32' interleaved); sempre sai
-      // interleaved de 2 canais pro ring do mixer. allocationSize manda no
-      // tamanho — a conversão de formato pode não ter n*channels samples.
+      // interleaved de 2 canais pro ring do mixer (mono duplicado). O copyTo
+      // com allocationSize manda no tamanho — a conversão de formato pode
+      // não ter n*channels samples.
       const n = ad.numberOfFrames
       const itl = new Float32Array(n * 2)
       if (ad.format === 'f32') {
-        ad.copyTo(itl.subarray(0, ad.allocationSize({ planeIndex: 0 }) / 4), { planeIndex: 0 })
+        const mono = ad.numberOfChannels === 1
+        ad.copyTo(mono ? itl.subarray(0, n) : itl.subarray(0, ad.allocationSize({ planeIndex: 0 }) / 4),
+          { planeIndex: 0 })
+        if (mono) for (let i = 0; i < n; i++) itl[i * 2 + 1] = itl[i * 2]
       } else {
-        for (let c = 0; c < Math.min(2, ad.numberOfChannels); c++) {
+        const nchIn = Math.min(2, ad.numberOfChannels)
+        for (let c = 0; c < nchIn; c++) {
           const plane = new Float32Array(ad.allocationSize({ planeIndex: c, format: 'f32' }) / 4)
           ad.copyTo(plane, { planeIndex: c, format: 'f32' })
           for (let i = 0; i < plane.length && i < n; i++) itl[i * 2 + c] = plane[i]
         }
+        if (nchIn === 1) for (let i = 0; i < n; i++) itl[i * 2 + 1] = itl[i * 2]
       }
       ad.close()
       mixNode.port.postMessage({ type: 'audio', id: this.id, data: itl }, [itl.buffer])
@@ -294,7 +325,10 @@ export async function initJam ({ serverUrl }) {
 
   // ── API pública ─────────────────────────────────────────────────────────
   return {
-    async join (_room, _nick, _onState, { micStream: extMic = null, deviceId = null, audio = null } = {}) {
+    async join (_room, _nick, _onState, { micStream: extMic = null, deviceId = null, audio = null, mode: _mode = 'music' } = {}) {
+      mode = MODES[_mode] ? _mode : 'music'
+      ;({ frameMs: fms, frame48: f48, channels: nch } = MODES[mode])
+      voiceAcc = null; voicePos = 0
       room = _room; me = _nick; onState = _onState || onState
       ws = new WebSocket(`${wsUrl}/api/fixed/ws/jam?room=${encodeURIComponent(room)}&nick=${encodeURIComponent(me)}`)
       ws.onmessage = e => {
@@ -315,13 +349,15 @@ export async function initJam ({ serverUrl }) {
       micStream = extMic ?? await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: false, noiseSuppression: false, autoGainControl: false,
-          channelCount: 2, sampleRate: 48000,
+          channelCount: nch, sampleRate: 48000,
           ...(audio ?? {}),
           ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
         },
       })
       await ctx.resume()
       await startSend(micStream)
+      // jitter alvo do modo: conversa tolera mais buffer, música não
+      mixNode.port.postMessage({ type: 'target', ms: MODES[mode].jitterMs })
       // RTT por par: ping no DataChannel a cada 2s (resposta vem no mesmo canal)
       if (!this._ping) this._ping = setInterval(() => {
         const t = performance.now()

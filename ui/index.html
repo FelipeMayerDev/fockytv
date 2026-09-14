@@ -341,8 +341,8 @@
         <span class="switch"><input type="checkbox" id="dock-ns"><span></span></span></label>
       <label class="pop-row"><span>Ganho automático</span>
         <span class="switch"><input type="checkbox" id="dock-agc"><span></span></span></label>
-      <p class="desc">Tudo desligado é o certo pra tocar instrumento (e use fones).
-        Ligado vira modo conversa: a voz fica mais limpa em caixa de som.</p>
+      <p class="desc">Nos canais de voz os filtros já começam ligados (modo conversa).
+        Pra instrumento use o Estúdio — entrada crua, sem processamento.</p>
     </div>
     <button class="dock-btn" id="share-cam" title="Compartilhar WebCam" aria-label="Compartilhar WebCam">
       <svg viewBox="0 0 24 24"><path d="m22 8-6 4 6 4V8Z"/>
@@ -2901,16 +2901,37 @@ function showNews () {
 // UI: entrada na sala, lista de peers com ganho/mudo e telemetria (RTT via
 // ping no DataChannel, buffer e underruns do jitter buffer, nível do sinal).
 let jam = null, jamTimer = null, jamJoined = false
+let jamMode = 'music'    // pipeline da conexão atual: 'music' (estúdio) | 'voice'
+const MODES = new Set(['music', 'voice'])
+const jams = {}          // uma instância por modo: não reconfigurar encoder ao vivo
+// cada modo tem uma instância própria do motor (encoder/jitter são fixos por
+// sessão); o "jam" solto é a conexão ativa no momento
+const jamFor = async mode => {
+  const key = MODES.has(mode) ? mode : 'music'
+  if (jams[key]) return jams[key]
+  const j = await import('./jam.js?v=7').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+  j.onChat(m => {
+    if (m.type === 'yt') return jamYtEvent(m)
+    jamChatLog.push(m); jamChatRender()
+  })
+  j.onLevels(jamLevels)
+  jams[key] = j
+  return j
+}
 let jamRoom = null       // canal de voz em que estou conectado
 let dockMuted = false    // mic silenciado pelo dock (não derruba a conexão)
 let voiceState = []      // salas do /api/fixed/jam: [{ room, members }]
-const VOICE_MAIN = 'sala'   // canal de voz fixo do servidor; os demais vêm da API
+// canais de voz da sidebar são conversa (modo 'voice'); a sala do Estúdio é
+// outro ambiente (música) e não aparece na lista
+const VOICE_MAIN = 'geral'
+const ESTUDIO_ROOM = 'sala'
 
 // sidebar: canais de voz com membros; LIVE vermelho em quem está no ar
 function renderVoice () {
   const box = $('#voice-chans')
   const liveKeys = new Set([...tiles.keys()])
-  const rooms = [...new Set([VOICE_MAIN, ...voiceState.map(r => r.room)])]
+  const rooms = [...new Set([VOICE_MAIN,
+    ...voiceState.map(r => r.room).filter(r => r !== ESTUDIO_ROOM)])]
   box.replaceChildren(...rooms.map(room => {
     const wrap = document.createElement('div')
     wrap.className = 'vchan'
@@ -2927,7 +2948,7 @@ function renderVoice () {
       : `Entrar no canal de voz "${room}"`
     b.onclick = () => {
       if (jamJoined) jamToggleJoin()          // conectado: o clique desconecta
-      else jamToggleJoin(room).catch(e => toast(e.message))
+      else jamToggleJoin(room, 'voice').catch(e => toast(e.message))
     }
     wrap.append(b)
     for (const m of members) {
@@ -2961,7 +2982,7 @@ function voiceUI () {
 }
 
 $('#dock-mic').onclick = () => {
-  if (!jamJoined) return jamToggleJoin(VOICE_MAIN).catch(e => toast(e.message))
+  if (!jamJoined) return jamToggleJoin(VOICE_MAIN, 'voice').catch(e => toast(e.message))
   dockMuted = !dockMuted
   jam.setMicGain(dockMuted ? 0 : (+localStorage.getItem('jam-micgain') || 1))
   voiceUI()
@@ -2978,17 +2999,24 @@ const jamMicPrefs = {
   get (k) { return localStorage.getItem('jam-' + k) === '1' },
   set (k, v) { localStorage.setItem('jam-' + k, v ? '1' : '0') },
 }
-const jamMicOpts = () => ({
-  echoCancellation: jamMicPrefs.get('aec'),
-  noiseSuppression: jamMicPrefs.get('ns'),
-  autoGainControl: jamMicPrefs.get('agc'),
+// sem preferência salva, o modo decide: conversa liga os filtros de voz,
+// música deixa a entrada crua
+const jamMicPref = (k, mode) => {
+  const raw = localStorage.getItem('jam-' + k)
+  return raw !== null ? raw === '1' : mode === 'voice'
+}
+const jamMicOpts = (mode = jamMode) => ({
+  echoCancellation: jamMicPref('aec', mode),
+  noiseSuppression: jamMicPref('ns', mode),
+  autoGainControl: jamMicPref('agc', mode),
 })
 const jamMicDevice = () => $('#dock-dev').value || $('#jam-dev').value || undefined
 
 function micPopPaint () {
-  $('#dock-aec').checked = jamMicPrefs.get('aec')
-  $('#dock-ns').checked = jamMicPrefs.get('ns')
-  $('#dock-agc').checked = jamMicPrefs.get('agc')
+  // o popover é dos canais de voz: mostra os padrões do modo conversa
+  $('#dock-aec').checked = jamMicPref('aec', 'voice')
+  $('#dock-ns').checked = jamMicPref('ns', 'voice')
+  $('#dock-agc').checked = jamMicPref('agc', 'voice')
 }
 
 async function applyMicSettings () {
@@ -2997,7 +3025,8 @@ async function applyMicSettings () {
     if (jamNativeOn) jamNativeStop()   // captura nativa não lê esses toggles
     const dev = jamMicDevice()
     const ms = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 2, sampleRate: 48000, ...jamMicOpts(),
+      audio: { channelCount: jamMode === 'voice' ? 1 : 2, sampleRate: 48000,
+               ...jamMicOpts(jamMode),
                ...(dev ? { deviceId: { exact: dev } } : {}) },
     })
     await jam.replaceMic(ms)
@@ -3267,7 +3296,9 @@ function jamLevels ({ self, peers }) {
 }
 
 
-async function jamToggleJoin (room = 'sala') {
+// sala = Estúdio (música, latência mínima); os demais são canais de voz
+// (conversa: Opus mono, jitter folgado, AEC/NS/AGC por padrão)
+async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
   const btn = $('#jam-toggle')
   jamErrSet(null)
   try {
@@ -3291,28 +3322,22 @@ async function jamToggleJoin (room = 'sala') {
       voiceUI()
       return
     }
-    jam ??= await import('./jam.js?v=7').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
-      .then(j => {
-        j.onChat(m => {
-          if (m.type === 'yt') return jamYtEvent(m)
-          jamChatLog.push(m); jamChatRender()
-        })
-        j.onLevels(jamLevels)
-        return j
-      })
+    jam = await jamFor(mode)
     // captura nativa quando disponível e o filtro de stream não estiver usando
-    // o helper; falhando, cai pro getUserMedia sem processamento de voz
+    // o helper; falhando, cai pro getUserMedia sem processamento de voz.
+    // Nativa só no estúdio: modo voz depende dos filtros do navegador.
     let ms = null
-    if ($('#jam-native').checked && cfg.nativeMic && !filterMode) {
+    if (mode === 'music' && $('#jam-native').checked && cfg.nativeMic && !filterMode) {
       try { ms = await jamNativeStart() }
       catch (e) { toast('Captura nativa indisponível, usando o mic do navegador.', null, 'warning') }
     }
     await jam.join(room, nick, jamRender,
       ms ? { micStream: ms }
-         : { deviceId: jamMicDevice(), audio: jamMicOpts() })
+         : { deviceId: jamMicDevice(), audio: jamMicOpts(mode), mode })
     jam.setMicGain(dockMuted ? 0 : (+localStorage.getItem('jam-micgain') || 1))
     jamJoined = true
     jamRoom = room
+    jamMode = mode
     btn.textContent = 'Sair'
     $('#jam-entry').hidden = true
     $('#jam-card').hidden = true
