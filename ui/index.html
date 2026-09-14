@@ -563,6 +563,7 @@
     <div>
       <label style="color:hsl(var(--foreground))" id="audio-label">Compartilhar som</label>
       <p class="desc" style="margin:2px 0 0" id="audio-desc">áudio do sistema junto com o vídeo</p>
+      <p class="desc" style="margin:4px 0 0;color:hsl(var(--warning))" id="audio-note">No seletor do navegador, marque também "compartilhar áudio" — sem isso o som não entra.</p>
     </div>
     <label class="switch"><input type="checkbox" id="audio"><span></span></label>
   </div>
@@ -2035,7 +2036,7 @@ $('#share-go').onclick = async () => {
       // fonte de áudio visível pro host: filtro que falhou em silêncio é a
       // pior falha possível (o Discord entra e ninguém sabe o porquê)
       if (!cam) toast(semAudioCapturado
-        ? 'O sistema não entregou áudio na captura (comum no Wayland sem PipeWire) — foi no ar só o vídeo.'
+        ? 'Foi no ar só o vídeo: marque o áudio no SELETOR do navegador (checkbox "compartilhar áudio da aba/sistema") — o toggle daqui não força ele.'
         : audioFail
         ? 'FILTRO DE ÁUDIO FALHOU (' + audioFail + ') — foi o som do sistema, Discord incluso'
         : audioOpts
