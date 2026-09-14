@@ -171,7 +171,7 @@ export async function initJam ({ serverUrl }) {
           this.decoder.decode(new EncodedAudioChunk({
             type: 'key', timestamp: this.nextTs, data: head.payload,
           }))
-          this.nextTs += FRAME_MS * 1000
+          this.nextTs += fms * 1000
           this.decoded++
         } catch {}
       }
