@@ -3245,7 +3245,9 @@ function renderVoice () {
   box.replaceChildren(...rooms.map(room => {
     const wrap = document.createElement('div')
     wrap.className = 'vchan'
-    const members = voiceState.find(r => r.room === room)?.members ?? []
+    const members = [...(voiceState.find(r => r.room === room)?.members ?? [])]
+    // entrada otimista: eu já apareço na sala enquanto conecta
+    if (jamPending === room && !members.includes(nick)) members.unshift(nick)
     const b = document.createElement('button')
     b.className = 'tab' + (jamJoined && jamRoom === room ? ' on' : '') +
       (jamPending === room ? ' connecting' : '')
