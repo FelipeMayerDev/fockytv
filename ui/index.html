@@ -752,6 +752,7 @@ async function watch (key, videoEl, viewer) {
 // transmissão comum. O broadcast-box não sabe o que é: o tipo/título/fila
 // ficam no registro de kinds do sidecar, e a UI lê de lá.
 let ytShare = null          // { kind, el, videoId, title, queue, duration }
+let ytAc = null             // AudioContext do compartilhar YouTube (reuso entre faixas)
 let streamKindsState = {}   // key -> { kind, title, videoId, queue }
 
 const postKind = (key, data) => fetch(`${cfg.serverUrl}/api/fixed/streams/${encodeURIComponent(key)}/kind`, {
@@ -809,11 +810,22 @@ async function ytSource (videoId, audioOnly) {
     setTimeout(() => rej(new Error('tempo esgotado ao carregar do YouTube')), 30000)
   })
   await el.play()
+
+  // Áudio via Web Audio: captureStream() direto de elemento de mídia pica no
+  // Chromium (resample da taxa do arquivo vs do dispositivo de saída). O
+  // createMediaElementSource captura no rate do contexto e o WebRTC remonta
+  // limpo — e o elemento continua tocando pro host via destination.
+  ytAc ??= new AudioContext({ latencyHint: 'playback' })
+  await ytAc.resume().catch(() => {})
+  const src = ytAc.createMediaElementSource(el)
+  const dest = ytAc.createMediaStreamDestination()
+  src.connect(dest)
+  src.connect(ytAc.destination)   // host acompanha o que está no ar
   const raw = el.captureStream?.() ?? el.mozCaptureStream?.()
-  if (!raw) { el.remove(); throw new Error('captureStream indisponível neste navegador') }
+  if (!raw && !audioOnly) { el.remove(); throw new Error('captureStream indisponível neste navegador') }
   const stream = audioOnly
-    ? new MediaStream([...raw.getAudioTracks(), await coverTrack(videoId, meta.title)])
-    : raw
+    ? new MediaStream([...dest.stream.getAudioTracks(), await coverTrack(videoId, meta.title)])
+    : new MediaStream([...dest.stream.getAudioTracks(), ...raw.getVideoTracks()])
   ytShare = { kind: audioOnly ? 'yt-audio' : 'yt-video', el,
               videoId, title: meta.title, duration: meta.duration ?? 0, queue: [] }
   return stream
@@ -826,6 +838,7 @@ async function ytLoadNext () {
   const queue = ytShare.queue          // ytSource zera o estado; guarda a fila
   const stream = await ytSource(next.videoId, kind === 'yt-audio')
   ytShare.queue = queue
+  old.pause()
   old.remove()
   // a conexão WHIP continua no ar: troca as trilhas sem renegociar
   if (sender) await sender.replaceTrack(stream.getVideoTracks()[0] ?? null).catch(() => {})

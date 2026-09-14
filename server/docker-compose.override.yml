@@ -1,0 +1,7 @@
+# Local (máquina do focky): o compose principal aponta o NAT 1:1 pro IP do
+# servidor de deploy (192.168.1.129); daqui, os candidatos ICE precisam ser
+# o IP desta máquina pra WebRTC conectar na LAN.
+services:
+  broadcast-box:
+    environment:
+      - NAT_1_TO_1_IP=192.168.1.175
