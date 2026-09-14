@@ -3252,7 +3252,7 @@ const jams = {}          // uma instância por modo: não reconfigurar encoder a
 const jamFor = async mode => {
   const key = MODES.has(mode) ? mode : 'music'
   if (jams[key]) return jams[key]
-  const j = await import('./jam.js?v=11').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+  const j = await import('./jam.js?v=12').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
   j.onChat(m => {
     if (m.type === 'yt') return jamYtEvent(m)
     jamChatLog.push(m); jamChatRender()

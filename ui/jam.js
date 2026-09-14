@@ -189,7 +189,9 @@ export async function initJam ({ serverUrl }) {
         const mono = ad.numberOfChannels === 1
         ad.copyTo(mono ? itl.subarray(0, n) : itl.subarray(0, ad.allocationSize({ planeIndex: 0 }) / 4),
           { planeIndex: 0 })
-        if (mono) for (let i = 0; i < n; i++) itl[i * 2 + 1] = itl[i * 2]
+        // mono chega compacto em [0, n): espalha de trás pra frente, senão a
+        // escrita em i*2 come as amostras ainda não lidas (saía 2x acelerado)
+        if (mono) for (let i = n - 1; i >= 0; i--) { const v = itl[i]; itl[i * 2] = v; itl[i * 2 + 1] = v }
       } else {
         const nchIn = Math.min(2, ad.numberOfChannels)
         for (let c = 0; c < nchIn; c++) {
