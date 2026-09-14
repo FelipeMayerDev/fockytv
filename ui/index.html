@@ -3230,6 +3230,7 @@ function renderVoice () {
     for (const m of members) {
       const row = document.createElement('div')
       row.className = 'vmem' + (m === nick ? ' on' : '')
+      row.dataset.peer = m
       row.innerHTML = '<span class="vdot"></span>'
       row.append(Object.assign(document.createElement('span'), { textContent: m }))
       if (liveKeys.has(m))
@@ -3697,6 +3698,15 @@ function jamLevels ({ self, peers }) {
     const level = id === nick ? (self ?? 0) : (peers[id]?.level ?? 0)
     pill.classList.toggle('talking', level > TALK_THRESHOLD)
   }
+  // voice presence na sidebar: quem fala ganha a pílula pulsando
+  for (const row of document.querySelectorAll('#voice-chans .vmem[data-peer]')) {
+    const id = row.dataset.peer
+    const level = id === nick ? (self ?? 0) : (peers[id]?.level ?? 0)
+    row.classList.toggle('talking', level > TALK_THRESHOLD)
+  }
+  // e no dock: meu mic falando acende o botão
+  $('#dock-mic').classList.toggle('talking',
+    jamJoined && !dockMuted && (self ?? 0) > TALK_THRESHOLD)
   $('#jam-selfmeter').style.width = Math.min(100, (self ?? 0) * 160) + '%'
 }
 
