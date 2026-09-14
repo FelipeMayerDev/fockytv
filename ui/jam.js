@@ -25,7 +25,10 @@ const BITRATE = 256_000   // Opus estéreo música; DTX/FEC fora de propósito
 // nunca processa voz por conta própria.
 const MODES = {
   music: { frameMs: 5, frame48: 240, channels: 2, bitrate: BITRATE, dtx: false, jitterMs: 30 },
-  voice: { frameMs: 20, frame48: 960, channels: 1, bitrate: 64_000, dtx: true, jitterMs: 80 },
+  // DTX fora: nosso pipeline é Opus cru sobre DataChannel com jitter buffer
+  // próprio que espera pacote contínuo — com DTX o encoder para de mandar
+  // nos momentos de voz baixa e o buffer esvazia entre sílabas (picotado)
+  voice: { frameMs: 20, frame48: 960, channels: 1, bitrate: 64_000, dtx: false, jitterMs: 80 },
 }
 
 export async function initJam ({ serverUrl }) {
