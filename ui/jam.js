@@ -420,5 +420,6 @@ export async function initJam ({ serverUrl }) {
     get joined () { return !!room },
     get state () { return state() },
     get context () { return ctx },
+    get mixer () { return mixNode },   // diagnóstico: analisar a recepção
   }
 }
