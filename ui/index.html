@@ -81,7 +81,7 @@
     <div id="voice-status" hidden>
       <div class="vs-info">
         <span class="vs-dot"></span>
-        <div class="vs-txt"><b>Voz conectada</b><span id="vs-room" class="muted">Sala</span></div>
+        <div class="vs-txt"><b id="vs-label">Voz conectada</b><span id="vs-room" class="muted">Sala</span></div>
       </div>
       <!-- latência da conexão: gráfico na barra; hover abre o painel com o
            gráfico grande e os detalhes -->
@@ -3227,6 +3227,7 @@ const jamFor = async mode => {
   return j
 }
 let jamRoom = null       // canal de voz em que estou conectado
+let jamPending = null    // canal que estamos conectando (entrada otimista)
 let dockMuted = false    // mic silenciado pelo dock (não derruba a conexão)
 let voiceState = []      // salas do /api/fixed/jam: [{ room, members }]
 // canais de voz da sidebar são conversa (modo 'voice'); a sala do Estúdio é
@@ -3239,20 +3240,26 @@ function renderVoice () {
   const box = $('#voice-chans')
   const liveKeys = new Set([...tiles.keys()])
   const rooms = [...new Set([VOICE_MAIN,
-    ...voiceState.map(r => r.room).filter(r => r !== ESTUDIO_ROOM)])]
+    ...voiceState.map(r => r.room).filter(r => r !== ESTUDIO_ROOM),
+    ...(jamPending ? [jamPending] : [])])]
   box.replaceChildren(...rooms.map(room => {
     const wrap = document.createElement('div')
     wrap.className = 'vchan'
     const members = voiceState.find(r => r.room === room)?.members ?? []
     const b = document.createElement('button')
-    b.className = 'tab' + (jamJoined && jamRoom === room ? ' on' : '')
+    b.className = 'tab' + (jamJoined && jamRoom === room ? ' on' : '') +
+      (jamPending === room ? ' connecting' : '')
     b.innerHTML = `<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/>
       <path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>`
     b.append(Object.assign(document.createElement('span'), { textContent: room }))
-    if (members.length)
+    if (jamPending === room)
+      b.append(Object.assign(document.createElement('span'),
+        { className: 'vcount', textContent: 'conectando…' }))
+    else if (members.length)
       b.append(Object.assign(document.createElement('span'),
         { className: 'vcount', textContent: String(members.length) }))
     b.title = jamJoined && jamRoom === room ? 'Sair do canal de voz'
+      : jamPending === room ? 'Conectando…'
       : `Entrar no canal de voz "${room}"`
     b.onclick = () => {
       if (jamJoined) jamToggleJoin()          // conectado: o clique desconecta
@@ -3274,14 +3281,19 @@ function renderVoice () {
   }))
 }
 
-// acende/apaga o status de voz da sidebar e pinta o botão de mic do dock
+// acende/apaga o status de voz da sidebar e pinta o botão de mic do dock.
+// Enquanto conecta (jamPending), o painel mostra "Conectando…" em âmbar
 function voiceUI () {
-  $('#voice-status').hidden = !jamJoined
-  if (jamJoined) $('#vs-room').textContent = jamRoom
+  const connecting = !!jamPending && !jamJoined
+  $('#voice-status').hidden = !(jamJoined || connecting)
+  $('#vs-label').textContent = connecting ? 'Conectando…' : 'Voz conectada'
+  $('#vs-room').textContent = connecting ? jamPending : (jamRoom ?? '')
+  document.querySelector('.vs-dot')
+    ?.classList.toggle('connecting', connecting)
   const b = $('#dock-mic')
   b.classList.toggle('off', !jamJoined)
   if (!jamJoined) {
-    b.title = 'Entrar no canal de voz'
+    b.title = connecting ? 'Conectando…' : 'Entrar no canal de voz'
     b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>'
     return
   }
@@ -3848,6 +3860,7 @@ function jamLevels ({ self, peers }) {
 // (conversa: Opus mono, jitter folgado, AEC/NS/AGC por padrão)
 async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
   const btn = $('#jam-toggle')
+  if (jamPending) return   // já conectando: espera terminar (é rápido)
   jamErrSet(null)
   try {
     if (jamJoined) {
@@ -3871,6 +3884,11 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
       $('#jam-main').classList.remove('joined')
       return
     }
+    // entrada otimista: entra na UI na hora ("Conectando…") e fecha o
+    // back por trás — WS e mic em paralelo lá dentro
+    jamPending = room
+    voiceUI()
+    renderVoice()
     jam = await jamFor(mode)
     // captura nativa quando disponível e o filtro de stream não estiver usando
     // o helper; falhando, cai pro getUserMedia sem processamento de voz.
@@ -3897,6 +3915,7 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
     jamJoined = true
     jamRoom = room
     jamMode = mode
+    jamPending = null
     btn.textContent = 'Sair'
     $('#jam-entry').hidden = true
     $('#jam-card').hidden = true
@@ -3908,8 +3927,10 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
     jamRender()
     jamTimer = setInterval(jamRender, 1000)
     voiceUI()
+    renderVoice()
   } catch (e) {
-    jamNativeStop(); jamErrSet(e.message); voiceUI()
+    jamPending = null
+    jamNativeStop(); jamErrSet(e.message); voiceUI(); renderVoice()
     // entrou pela sidebar/dock: o painel do Estúdio não está na tela pra
     // mostrar o erro — ele precisa chegar até quem clicou no canal
     if (!$('#jam-view').classList.contains('on'))
