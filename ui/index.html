@@ -3228,6 +3228,7 @@ const jamFor = async mode => {
 }
 let jamRoom = null       // canal de voz em que estou conectado
 let jamPending = null    // canal que estamos conectando (entrada otimista)
+const jamLeft = new Map()   // sala -> quando saímos (server pode levar um poll)
 let dockMuted = false    // mic silenciado pelo dock (não derruba a conexão)
 let voiceState = []      // salas do /api/fixed/jam: [{ room, members }]
 // canais de voz da sidebar são conversa (modo 'voice'); a sala do Estúdio é
@@ -3250,6 +3251,14 @@ function renderVoice () {
     // aparecendo enquanto o poll do salas não me alcançar (até 5s de atraso)
     if ((jamPending === room || (jamJoined && jamRoom === room)) &&
         !members.includes(nick)) members.unshift(nick)
+    // saída otimista no sentido inverso: sai da sala, some na hora — o
+    // servidor pode demorar um ciclo do poll pra registrar o WS fechado
+    for (const [left, at] of jamLeft)
+      if (Date.now() - at > 6000) jamLeft.delete(left)
+    if (jamLeft.has(room)) {
+      const i = members.indexOf(nick)
+      if (i >= 0) members.splice(i, 1)
+    }
     const b = document.createElement('button')
     b.className = 'tab' + (jamJoined && jamRoom === room ? ' on' : '') +
       (jamPending === room ? ' connecting' : '')
@@ -3872,6 +3881,7 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
       jamJoined = false
       jamRoom = null
       dockMuted = false
+      if (room) jamLeft.set(room, Date.now())
       voiceUI()
       jam.leave().catch(() => {})
       jamNativeStop()
@@ -3908,6 +3918,7 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
       // espelha na UI (status, dock, gráfico) sem esperar clique nenhum
       if (!jam.joined && jamJoined) {
         jamJoined = false
+        if (jamRoom) jamLeft.set(jamRoom, Date.now())
         jamRoom = null
         dockMuted = false
         voiceUI()
