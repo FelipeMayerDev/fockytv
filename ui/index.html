@@ -3260,6 +3260,8 @@ function voiceUI () {
   b.innerHTML = dockMuted
     ? '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/></svg>'
     : '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>'
+  // bola do mic: cinza sem fala, verde falando, vermelho mutado
+  b.classList.toggle('muted', dockMuted)
 }
 
 $('#dock-mic').onclick = () => {
@@ -3708,7 +3710,7 @@ function jamLevels ({ self, peers }) {
     const level = id === nick ? (self ?? 0) : (peers[id]?.level ?? 0)
     row.classList.toggle('talking', level > TALK_THRESHOLD)
   }
-  // e no dock: meu mic falando acende o botão
+  // e no dock: meu mic falando acende a bola em verde
   $('#dock-mic').classList.toggle('talking',
     jamJoined && !dockMuted && (self ?? 0) > TALK_THRESHOLD)
   $('#jam-selfmeter').style.width = Math.min(100, (self ?? 0) * 160) + '%'

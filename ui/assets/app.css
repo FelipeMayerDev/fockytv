@@ -206,9 +206,11 @@ button.icon { width:36px; padding:0 }
 }
 .dock-btn.primary:hover { animation-play-state:paused }
 .dock-btn.destructive { background:hsl(var(--destructive)); color:#fff }
-.dock-btn.talking { box-shadow:0 0 0 2px hsl(var(--success));
+.dock-btn.talking { background:hsl(var(--success)); color:#fff;
   animation:talk-ring 1.1s ease-out infinite }
-.dock-btn.talking:hover { background:hsl(var(--surface-2) / .8) }
+.dock-btn.talking:hover { background:hsl(var(--success)) }
+.dock-btn.muted { background:hsl(var(--destructive)); color:#fff }
+.dock-btn.muted:hover { background:hsl(var(--destructive)) }
 .dock-btn-sm { width:20px; height:44px; border-radius:0; background:transparent;
   color:hsl(var(--muted-foreground)) }
 .dock-btn-sm:hover { background:transparent; transform:none; color:hsl(var(--foreground)) }
