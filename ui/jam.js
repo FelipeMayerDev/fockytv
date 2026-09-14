@@ -42,7 +42,7 @@ export async function initJam ({ serverUrl }) {
   let selfLevel = 0
 
   const ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 })
-  await ctx.audioWorklet.addModule(new URL('./jam-worklet.js?v=5', import.meta.url))
+  await ctx.audioWorklet.addModule(new URL('./jam-worklet.js?v=6', import.meta.url))
 
   const mixNode = new AudioWorkletNode(ctx, 'jam-mix', { outputChannelCount: [2] })
   mixNode.connect(ctx.destination)                    // monitor local

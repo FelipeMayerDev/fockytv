@@ -70,10 +70,16 @@ class JamMix extends AudioWorkletProcessor {
           // carência na entrada: underrun antes do primeiro pacote chegar é
           // o buffer enchendo, não falha de rede — não conta
           graceUntil: currentTime + 0.6,
+          // pré-buffer: só começa a consumir quando enche até o alvo
+          started: false,
         })
       } else if (m.type === 'remove') this.peers.delete(m.id)
       else if (m.type === 'gain') { const p = this.peers.get(m.id); if (p) p.gain = m.v }
-      else if (m.type === 'target') this.target = Math.max(FRAME, m.ms * 48 | 0)
+      else if (m.type === 'target') {
+        this.target = Math.max(FRAME, m.ms * 48 | 0)
+        // alvo mudou: todo mundo re-preenche (troca de modo de sala)
+        for (const p of this.peers.values()) p.started = false
+      }
       else if (m.type === 'audio') {
         const p = this.peers.get(m.id)
         if (p) this.write(p, m.data)
@@ -97,6 +103,12 @@ class JamMix extends AudioWorkletProcessor {
     const out = outputs[0]
     const n = out[0].length
     for (const p of this.peers.values()) {
+      // pré-buffer: fica mudo até o ring encher até o alvo (80ms voz, 30ms
+      // música). Perdeu pacote e secou: volta a encher antes de retomar.
+      if (!p.started) {
+        if (p.w - p.r < this.target) continue
+        p.started = true
+      }
       let peak = 0
       let starved = false
       for (let i = 0; i < n; i++) {
@@ -104,12 +116,15 @@ class JamMix extends AudioWorkletProcessor {
         for (let c = 0; c < 2; c++) {
           const s = p.ring[c][p.r % p.cap] * p.gain
           out[c][i] += s
-          const a = s < 0 ? -s : s
-          if (a > peak) peak = a
+          const av = s < 0 ? -s : s
+          if (av > peak) peak = av
         }
         p.r++
       }
-      if (starved && currentTime > p.graceUntil) p.underruns++
+      if (starved && currentTime > p.graceUntil) {
+        p.underruns++
+        p.started = false   // secou de verdade: re-preenche antes de retomar
+      }
       p.peak = Math.max(p.peak * 0.85, peak)
     }
     // telemetria ~2x/s: buffer de cada peer, underruns e nível
