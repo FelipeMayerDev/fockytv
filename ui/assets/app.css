@@ -139,6 +139,7 @@ label { font-size:13px; font-weight:500; color:hsl(var(--muted-foreground)) }
 
 /* status de voz no rodapé da sidebar */
 #voice-status {
+  position:relative;
   flex:none; display:flex; align-items:center; gap:8px; padding:10px 12px;
   border-top:1px solid var(--glass-border); background:hsl(var(--background) / .35);
 }
@@ -150,6 +151,28 @@ label { font-size:13px; font-weight:500; color:hsl(var(--muted-foreground)) }
 .vs-txt .muted { font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
 .vs-acts { display:flex; gap:2px }
 .vs-acts .vs-leave:hover { background:hsl(var(--destructive) / .15); color:hsl(var(--destructive)) }
+
+/* latência da voz: sparkline na barra; hover abre painel com o gráfico
+   grande e os detalhes (mín/médio/máx, jitter, buffer, peers) */
+.vs-net { display:flex; align-items:center; gap:6px; padding:4px 8px;
+  border:1px solid hsl(var(--border)); border-radius:var(--radius);
+  cursor:default; flex:none }
+.vs-net:hover { background:hsl(var(--muted)) }
+#vs-ms { font-size:11.5px; font-variant-numeric:tabular-nums; color:hsl(var(--muted-foreground)) }
+.vs-pop {
+  position:absolute; bottom:calc(100% + 10px); right:10px; z-index:9; width:268px;
+  padding:12px 14px; border:1px solid var(--glass-border);
+  border-radius:var(--radius-card); box-shadow:var(--glass-shadow);
+  background:var(--glass-bg-strong);
+  backdrop-filter:blur(var(--glass-blur));
+  -webkit-backdrop-filter:blur(var(--glass-blur));
+}
+.vs-pop[hidden] { display:none }
+#vs-chart { width:100%; display:block; margin-bottom:10px }
+.vs-det { display:flex; flex-direction:column; gap:3px; font-size:12px;
+  color:hsl(var(--muted-foreground)) }
+.vs-big { font-family:var(--font-display); font-size:22px; font-weight:800;
+  letter-spacing:-.02em }
 
 .me-row {
   flex:none; display:flex; padding:8px 12px calc(8px + env(safe-area-inset-bottom));

@@ -83,16 +83,20 @@
         <span class="vs-dot"></span>
         <div class="vs-txt"><b>Voz conectada</b><span id="vs-room" class="muted">Sala</span></div>
       </div>
+      <!-- latência da conexão: gráfico na barra; hover abre o painel com o
+           gráfico grande e os detalhes -->
+      <div class="vs-net" id="vs-net" title="Latência da conexão">
+        <canvas id="vs-spark" width="56" height="20"></canvas>
+        <span id="vs-ms">—</span>
+      </div>
       <div class="vs-acts">
-        <button class="ghost icon" id="vs-cam" title="Câmera" aria-label="Câmera">
-          <svg viewBox="0 0 24 24"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>
-        </button>
-        <button class="ghost icon" id="vs-screen" title="Compartilhar tela" aria-label="Compartilhar tela">
-          <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
-        </button>
         <button class="ghost icon vs-leave" id="vs-leave" title="Desconectar da voz" aria-label="Desconectar da voz">
         <svg viewBox="0 0 24 24"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="22" y1="2" x2="16" y2="8"/></svg>
         </button>
+      </div>
+      <div class="vs-pop glass" id="vs-pop" hidden>
+        <canvas id="vs-chart" width="236" height="72"></canvas>
+        <div id="vs-det" class="vs-det"></div>
       </div>
     </div>
   </aside>
@@ -3262,6 +3266,8 @@ function voiceUI () {
     : '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>'
   // bola do mic: cinza sem fala, verde falando, vermelho mutado
   b.classList.toggle('muted', dockMuted)
+  // amostragem de latência vive enquanto a conexão existir
+  if (jamJoined) { if (!vsTimer) vsStart() } else vsStop()
 }
 
 $('#dock-mic').onclick = () => {
@@ -3270,9 +3276,97 @@ $('#dock-mic').onclick = () => {
   jam.setMicGain(dockMuted ? 0 : (+localStorage.getItem('jam-micgain') || 1))
   voiceUI()
 }
-$('#vs-cam').onclick = () => $('#share-cam').click()
-$('#vs-screen').onclick = () => $('#share').click()
 $('#vs-leave').onclick = () => jamToggleJoin()
+
+// ── latência da voz: sparkline na barra + painel de detalhes no hover ────
+// A fonte é o ping no DataChannel do jam (1 RTT por peer, a cada 2s): aqui
+// vira média entre os peers conectados, com histórico de 2 minutos.
+const vsHist = []
+let vsTimer = null
+const cssHsl = (name, a = 1) => {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return `hsl(${v} / ${a})`
+}
+const vsGrade = ms => ms <= 80 ? ['success', 'boa'] : ms <= 200 ? ['warning', 'instável'] : ['destructive', 'ruim']
+
+function vsSample () {
+  if (!jamJoined || !jam) return
+  const rtts = jam.state.peers
+    .filter(p => p.connected && p.rtt != null).map(p => p.rtt)
+  const ms = rtts.length ? Math.round(rtts.reduce((a, b) => a + b, 0) / rtts.length) : null
+  vsHist.push(ms)
+  if (vsHist.length > 60) vsHist.shift()
+  const el = $('#vs-ms')
+  if (ms == null) { el.textContent = '—'; el.style.color = '' }
+  else {
+    const [tok] = vsGrade(ms)
+    el.textContent = ms + ' ms'
+    el.style.color = cssHsl('--' + tok)
+  }
+  vsDraw($('#vs-spark'), 56, 20)
+  if (!$('#vs-pop').hidden) vsDetails()
+}
+
+function vsDraw (canvas, w, h, pad = 2) {
+  const ctx = canvas.getContext('2d')
+  ctx.clearRect(0, 0, w, h)
+  const pts = vsHist.filter(v => v != null)
+  if (pts.length < 2) return
+  const max = Math.max(150, ...pts)
+  const x = i => pad + i * (w - pad * 2) / (vsHist.length - 1)
+  const y = v => h - pad - (v / max) * (h - pad * 2)
+  // faixa "boa" como referência
+  ctx.fillStyle = cssHsl('--success', .1)
+  ctx.fillRect(0, y(80), w, h - y(80))
+  ctx.strokeStyle = cssHsl('--accent', .9)
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  let first = true
+  vsHist.forEach((v, i) => {
+    if (v == null) { first = true; return }
+    first ? ctx.moveTo(x(i), y(v)) : ctx.lineTo(x(i), y(v))
+    first = false
+  })
+  ctx.stroke()
+  // ponto atual
+  const last = [...vsHist].reverse().find(v => v != null)
+  if (last != null) {
+    ctx.fillStyle = cssHsl('--' + vsGrade(last)[0])
+    ctx.beginPath()
+    ctx.arc(x(vsHist.length - 1), y(last), 2.2, 0, 7)
+    ctx.fill()
+  }
+}
+
+function vsDetails () {
+  const pts = vsHist.filter(v => v != null)
+  const det = $('#vs-det')
+  if (!pts.length) { det.textContent = 'medindo…'; return }
+  const avg = Math.round(pts.reduce((a, b) => a + b, 0) / pts.length)
+  const min = Math.min(...pts), max = Math.max(...pts)
+  const jit = Math.round(Math.sqrt(pts.reduce((s, v) => s + (v - avg) ** 2, 0) / pts.length))
+  const nPeers = jam ? jam.state.peers.filter(p => p.connected).length : 0
+  const buf = jam ? jam.state.peers.map(p => p.bufferMs).filter(v => v != null) : []
+  const bufAvg = buf.length ? Math.round(buf.reduce((a, b) => a + b, 0) / buf.length) : null
+  const [tok, label] = vsGrade(avg)
+  det.innerHTML =
+    `<div class="vs-big" style="color:hsl(var(--${tok}))">${avg} ms</div>
+     <div>conexão ${label} · ${nPeers} peer${nPeers === 1 ? '' : 's'}</div>
+     <div>mín ${min} · médio ${avg} · máx ${max} ms</div>
+     <div>jitter ~${jit} ms${bufAvg != null ? ` · buffer ${bufAvg} ms` : ''}</div>`
+}
+function vsStart () {
+  clearInterval(vsTimer)
+  vsSample()
+  vsTimer = setInterval(vsSample, 2000)
+}
+function vsStop () { clearInterval(vsTimer); vsTimer = null; vsHist.length = 0 }
+$('#vs-net').onmouseenter = () => {
+  $('#vs-pop').hidden = false
+  vsDraw($('#vs-chart'), 236, 72, 4)
+  vsDetails()
+}
+$('#vs-net').onmouseleave = () => { $('#vs-pop').hidden = true }
 
 // ── configuração do microfone (popover do dock) ──────────────────────────
 // O padrão segue voz crua (música, AEC/NS/AGC fora); ligar os toggles vira
