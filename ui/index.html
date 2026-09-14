@@ -3295,7 +3295,7 @@ const cssHsl = (name, a = 1) => {
 const vsGrade = ms => ms <= 80 ? ['success', 'boa'] : ms <= 200 ? ['warning', 'instável'] : ['destructive', 'ruim']
 
 function vsSample () {
-  if (!jamJoined || !jam) return
+  if (!jamJoined || !jam) { vsStop(); return }   // desconectou: para de medir
   const rtts = jam.state.peers
     .filter(p => p.connected && p.rtt != null).map(p => p.rtt)
   const ms = rtts.length ? Math.round(rtts.reduce((a, b) => a + b, 0) / rtts.length) : null
@@ -3851,7 +3851,18 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
       try { ms = await jamNativeStart() }
       catch (e) { toast('Captura nativa indisponível, usando o mic do navegador.', null, 'warning') }
     }
-    await jam.join(room, nick, jamRender,
+    await jam.join(room, nick, st => {
+      jamRender()
+      // queda de WS/expulsão: o motor sai da sala por conta própria —
+      // espelha na UI (status, dock, gráfico) sem esperar clique nenhum
+      if (!jam.joined && jamJoined) {
+        jamJoined = false
+        jamRoom = null
+        dockMuted = false
+        voiceUI()
+        toast('Você foi desconectado da voz.', null, 'warning')
+      }
+    },
       ms ? { micStream: ms }
          : { deviceId: jamMicDevice(), audio: jamMicOpts(mode), mode })
     jam.setMicGain(dockMuted ? 0 : (+localStorage.getItem('jam-micgain') || 1))
