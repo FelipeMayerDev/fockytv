@@ -30,83 +30,121 @@
   </div>
 </dialog>
 
-<header class="bar">
-  <button class="ghost icon" id="back" hidden title="Voltar" aria-label="Voltar">
-    <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
-  </button>
-  <img src="assets/logo.png" alt="" style="width:22px;height:22px;flex:none">
-  <h1 id="brand">FockyTV</h1>
+<!-- shell estilo Discord: rail de servidor · sidebar de canais · área central -->
+<div class="shell">
 
-  <!-- abas principais: ao vivo (home), canais fixos e sala de baixa latência -->
-  <nav class="tabs" id="tabs">
-    <button class="tab on" data-tab="live">Ao vivo</button>
-    <button class="tab" data-tab="music">Música</button>
-    <button class="tab" data-tab="tv">Vídeo</button>
-    <button class="tab" data-tab="jam">Estúdio (baixa latência)</button>
-    <button class="tab" data-tab="clips">Clips</button>
+  <nav class="rail" aria-label="Servidor">
+    <a class="rail-brand" href="#" id="brand" title="FockyTV">
+      <img src="assets/logo.png" alt="FockyTV">
+    </a>
+    <span class="rail-sep"></span>
+    <div class="rail-bottom">
+      <!-- update pronto: só aparece quando o download termina; clicar reinicia -->
+      <button class="ghost icon" id="update-btn" hidden
+              title="Atualização pronta — clique para instalar" aria-label="Atualização pronta">
+        <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/>
+          <path d="M5 21h14"/></svg>
+      </button>
+      <button class="rail-user" id="change-nick" title="trocar nick">
+        <span class="avatar" id="me-avatar"></span>
+        <span id="who" hidden></span>
+      </button>
+      <button class="ghost icon" id="cfg" title="Configurações" aria-label="Configurações">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
   </nav>
 
-  <div class="pill" id="live-pill" hidden>
-    <span class="dot"></span>
-    <span>No ar</span>
-    <span class="sep"></span>
-    <span class="muted" id="live-stats">—</span>
-  </div>
+  <aside class="sidebar glass">
+    <div class="side-scroll">
+      <div class="side-cat">Canais</div>
+      <!-- canais de vídeo: ao vivo (home), canais fixos e clips -->
+      <nav class="chans" id="tabs">
+        <button class="tab on" data-tab="live">
+          <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="m10 8.5 5 2.5-5 2.5z"/></svg>
+          Ao vivo</button>
+        <button class="tab" data-tab="music">
+          <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          Música</button>
+        <button class="tab" data-tab="tv">
+          <svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="15" rx="2"/><path d="m17 2-5 5-5-5"/></svg>
+          Vídeo</button>
+        <button class="tab" data-tab="jam">
+          <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+          Estúdio</button>
+        <button class="tab" data-tab="clips">
+          <svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
+            <path d="M20 4 8.12 15.88"/><path d="M14.47 14.48 20 20"/><path d="M8.12 8.12 12 12"/></svg>
+          Clips</button>
+      </nav>
 
-  <!-- quem está assistindo, do /api/status (sessions[].viewer) -->
-  <div class="pill" id="viewers-pill" hidden>
-    <span class="muted" id="viewers-label">—</span>
-  </div>
-
-  <div class="spacer"></div>
-
-  <div class="player-ctl" id="player-ctl" hidden>
-    <div class="pill" id="net" title="Qualidade da conexão">
-      <span class="dot" id="net-dot"></span>
-      <span class="muted" id="net-stats">—</span>
+      <div class="side-cat">Canais de voz</div>
+      <div class="chans" id="voice-chans"></div>
     </div>
-    <button class="ghost icon" id="mute" title="Mudo" aria-label="Mudo">
-      <svg viewBox="0 0 24 24" id="ico-vol"><path d="M11 5 6 9H2v6h4l5 4z"/>
-        <path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
-    </button>
-    <input type="range" id="vol" min="0" max="1" step="0.05" value="1"
-           title="Volume" aria-label="Volume">
-  </div>
 
-  <button class="outline icon" id="swap" hidden title="Trocar janela" aria-label="Trocar janela">
-    <svg viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M10 20H4v-6"/>
-      <path d="M20 4 13 11"/><path d="M4 20l7-7"/></svg>
-  </button>
-  <button class="destructive icon" id="stop" hidden title="Parar transmissão" aria-label="Parar transmissão">
-    <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>
-  </button>
-  <button id="share">
-    <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/>
-      <path d="M8 21h8"/><path d="M12 17v4"/></svg>
-    Compartilhar tela
-  </button>
+    <!-- status de voz: só existe conectado; espelha o que o dock faz -->
+    <div id="voice-status" hidden>
+      <div class="vs-info">
+        <span class="vs-dot"></span>
+        <div class="vs-txt"><b>Voz conectada</b><span id="vs-room" class="muted">Sala</span></div>
+      </div>
+      <div class="vs-acts">
+        <button class="ghost icon" id="vs-cam" title="Câmera" aria-label="Câmera">
+          <svg viewBox="0 0 24 24"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>
+        </button>
+        <button class="ghost icon" id="vs-screen" title="Compartilhar tela" aria-label="Compartilhar tela">
+          <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
+        </button>
+        <button class="ghost icon vs-leave" id="vs-leave" title="Desconectar da voz" aria-label="Desconectar da voz">
+          <svg viewBox="0 0 24 24"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="22" y1="2" x2="16" y2="8"/></svg>
+        </button>
+      </div>
+    </div>
 
-  <button class="outline icon" id="share-cam" title="Compartilhar WebCam" aria-label="Compartilhar WebCam">
-    <svg viewBox="0 0 24 24"><path d="m22 8-6 4 6 4V8Z"/>
-      <rect x="2" y="6" width="14" height="12" rx="2"/></svg>
-  </button>
+    <div class="me-row">
+      <button class="user" id="me-row-nick" title="trocar nick">
+        <span class="avatar sm" id="me-row-avatar"></span>
+        <span id="who"></span>
+      </button>
+    </div>
+  </aside>
 
-  <button class="user" id="change-nick" title="trocar nick">
-    <span class="avatar sm" id="me-avatar"></span>
-    <span id="who"></span>
-  </button>
+  <div class="main-col">
+    <header class="ctx-bar glass">
+      <button class="ghost icon" id="back" hidden title="Voltar" aria-label="Voltar">
+        <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+      </button>
+      <span id="ctx-title">Ao vivo</span>
 
-  <!-- update pronto: só aparece quando o download termina; clicar reinicia -->
-  <button class="ghost icon" id="update-btn" hidden
-          title="Atualização pronta — clique para instalar" aria-label="Atualização pronta">
-    <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/>
-      <path d="M5 21h14"/></svg>
-  </button>
+      <div class="pill" id="live-pill" hidden>
+        <span class="dot"></span>
+        <span>No ar</span>
+        <span class="sep"></span>
+        <span class="muted" id="live-stats">—</span>
+      </div>
 
-  <button class="ghost icon" id="cfg" title="Configurações" aria-label="Configurações">
-    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-  </button>
-</header>
+      <!-- quem está assistindo, do /api/status (sessions[].viewer) -->
+      <div class="pill" id="viewers-pill" hidden>
+        <span class="muted" id="viewers-label">—</span>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="player-ctl" id="player-ctl" hidden>
+        <div class="pill" id="net" title="Qualidade da conexão">
+          <span class="dot" id="net-dot"></span>
+          <span class="muted" id="net-stats">—</span>
+        </div>
+        <button class="ghost icon" id="mute" title="Mudo" aria-label="Mudo">
+          <svg viewBox="0 0 24 24" id="ico-vol"><path d="M11 5 6 9H2v6h4l5 4z"/>
+            <path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+        </button>
+        <input type="range" id="vol" min="0" max="1" step="0.05" value="1"
+               title="Volume" aria-label="Volume">
+      </div>
+    </header>
+
+    <main>
 
 <!-- áudio do canal música: conexão própria, segue tocando fora da aba Música -->
 <audio id="music-audio" autoplay></audio>
@@ -206,11 +244,6 @@
     <button class="ghost icon" id="fixed-panel-toggle" hidden title="Ocultar busca" aria-label="Ocultar busca">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16M11 9l-3 3 3 3"/></svg>
     </button>
-    <!-- canais fixos: chat abre por botão flutuante sobre o vídeo -->
-    <button class="ghost icon" id="chat-fab" hidden title="Chat" aria-label="Chat">
-      <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-      <span class="badge" id="chat-fab-badge" hidden></span>
-    </button>
     <!-- canal 🎸 Sala: conexão no centro, quem está na sala no painel da direita -->
     <div id="jam-view">
       <div id="jam-main">
@@ -262,17 +295,6 @@
       <button id="jam-leave" hidden style="width:100%;margin-bottom:10px">Sair da sala</button>
       <div id="jam-pills"></div>
     </aside>
-
-    <!-- chat de streams de pessoas (sem sidesheet): mesmo visual do painel fixo -->
-    <aside id="chat-panel" hidden>
-      <h3>Chat</h3>
-      <p class="desc" id="chat-online"></p>
-      <div class="chat-msgs" id="chat-msgs"></div>
-      <form class="chat-form" id="chat-form">
-        <input id="chat-input" maxlength="500" placeholder="fala com a galera…" autocomplete="off">
-        <button>Enviar</button>
-      </form>
-    </aside>
   </div>
   <div id="stage-wrap">
     <canvas id="stage"></canvas>
@@ -284,6 +306,46 @@
     </div>
   </div>
 </main>
+
+  <!-- chat de streams de pessoas (sem sidesheet): mesmo visual do painel fixo -->
+  <aside id="chat-panel" hidden>
+    <h3>Chat</h3>
+    <p class="desc" id="chat-online"></p>
+    <div class="chat-msgs" id="chat-msgs"></div>
+    <form class="chat-form" id="chat-form">
+      <input id="chat-input" maxlength="500" placeholder="fala com a galera…" autocomplete="off">
+      <button>Enviar</button>
+    </form>
+  </aside>
+  <!-- canais fixos: chat abre por botão flutuante sobre o vídeo -->
+  <button class="ghost icon" id="chat-fab" hidden title="Chat" aria-label="Chat">
+    <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    <span class="badge" id="chat-fab-badge" hidden></span>
+  </button>
+
+  <!-- dock de chamada: vidro flutuante; voz + publicar + encerrar -->
+  <div id="call-dock" class="glass">
+    <button class="dock-btn" id="dock-mic" title="Entrar no canal de voz">
+      <svg viewBox="0 0 24 24" class="ico-mic-off"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/><path d="m3 3 18 18" opacity=".9"/></svg>
+    </button>
+    <button class="dock-btn" id="share-cam" title="Compartilhar WebCam" aria-label="Compartilhar WebCam">
+      <svg viewBox="0 0 24 24"><path d="m22 8-6 4 6 4V8Z"/>
+        <rect x="2" y="6" width="14" height="12" rx="2"/></svg>
+    </button>
+    <button class="dock-btn primary" id="share" title="Compartilhar tela" aria-label="Compartilhar tela">
+      <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/>
+        <path d="M8 21h8"/><path d="M12 17v4"/></svg>
+    </button>
+    <button class="dock-btn" id="swap" hidden title="Trocar janela" aria-label="Trocar janela">
+      <svg viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M10 20H4v-6"/>
+        <path d="M20 4 13 11"/><path d="M4 20l7-7"/></svg>
+    </button>
+    <button class="dock-btn destructive" id="stop" hidden title="Parar transmissão" aria-label="Parar transmissão">
+      <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>
+    </button>
+  </div>
+  </div><!-- /main-col -->
+</div><!-- /shell -->
 
 <div id="toast"></div>
 
@@ -479,7 +541,6 @@ let poll = null, swapping = false, camOnly = false
 let picked = null, pickedIsWindow = false, filterMode = null   // áudio por app
 let cam = null       // MediaStream da câmera, quando ela entra junto com a tela
 let overlay = null   // composição tela+câmera: { canvas, sv, cv, out, box, timer, gain }
-const thumbs = new Map()   // streamKey -> dataURL, pra não regerar a cada refresh
 
 // ── Discord Activity (só acorda dentro do iframe do Discord) ──────────────
 // Fora dele o import é pulado: o esm.sh nem é requisitado no Electron/navegador.
@@ -769,7 +830,12 @@ function setTab (tab) {
 document.querySelectorAll('#tabs .tab').forEach(b => {
   b.onclick = () => {
     const t = b.dataset.tab
-    if (t === 'live') { clipMode = false; closePlayer() }
+    if (t === 'live') {
+      clipMode = false
+      releaseTiles()
+      $('#grid-live').replaceChildren()   // clips saem da grade
+      closePlayer()
+    }
     else if (t === 'clips') openClips()
     else if (!FIXED_KEYS.includes(t)) return
     else if (fixedKey !== t) { clipMode = false; openFixed(t) }
@@ -781,6 +847,10 @@ function showPlayer (key) {
   $('#grid-live').style.display = key ? 'none' : ''
   $('#back').hidden = !key
   $('#player-ctl').hidden = !key
+  // título da barra de contexto: canal aberto, clips ou a grade ao vivo
+  $('#ctx-title').textContent = !key
+    ? (clipMode ? 'Clips' : 'Ao vivo')
+    : FIXED_LABEL[key] ?? `canal de ${key}`
   setVideoControls(false)
   // aba do header acompanha a view: canais de pessoa não têm aba (só a home tem)
   setTab(key === 'music' || key === 'tv' || key === 'jam' ? key : 'live')
@@ -891,7 +961,6 @@ function stop () {
   release(pc); pc = null; sender = null; audioSender = null; camOnly = false
   stream?.getTracks().forEach(t => t.stop()); stream = null
   setLive(false)
-  thumbs.delete(nick)        // a miniatura antiga não vale mais
   showPlayer(null)           // parou: volta pra listagem
   refresh().catch(() => {})
 }
@@ -1748,34 +1817,11 @@ async function showNet (pc) {
       (loss >= 0.1 ? ` · ${loss.toFixed(1)}% perda` : '')
 }
 
-// ── grade ao vivo (tela padrão) ──────────────────────────────────────────
-// miniatura: conecta escondido, pega o 1º quadro, desliga. Sem endpoint novo.
-async function grabThumb (key) {
-  const v = document.createElement('video')
-  v.muted = true; v.autoplay = true; v.playsInline = true
-  let tmp
-  try {
-    tmp = await watch(key, v)
-    await new Promise((res, rej) => {
-      v.onloadeddata = res
-      setTimeout(() => rej(new Error('timeout')), 8000)
-    })
-    const c = document.createElement('canvas')
-    c.width = 480
-    c.height = Math.round(480 * (v.videoHeight / v.videoWidth || 0.5625))
-    c.getContext('2d').drawImage(v, 0, 0, c.width, c.height)
-    return c.toDataURL('image/jpeg', 0.7)
-  } finally {
-    release(tmp); v.srcObject = null
-  }
-}
-
+// ── grade ao vivo ────────────────────────────────────────────────────────
 const since = iso => {
   const m = Math.floor((Date.now() - new Date(iso)) / 60000)
   return m < 1 ? 'começou agora' : m < 60 ? `há ${m} min` : `há ${Math.floor(m / 60)} h`
 }
-
-const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`
 
 // Sem videoTracks = sessão sem host. O servidor cria uma sessão a cada WHEP,
 // então uma stream já encerrada volta a aparecer só porque a miniatura se
@@ -1828,6 +1874,107 @@ function openJam () {
   fixedTimer = setInterval(fixedTick, fixedPollMs)
 }
 
+// ── grade multi-view: cada tile É a transmissão ao vivo (WHEP próprio) ───
+// Os tiles persistem entre polls: o refresh cria/destrói sessões conforme a
+// listagem muda, em vez de regerar cards. Áudio vem mutado — vários streams
+// com som aberto ao mesmo tempo é cacofonia; o usuário liga o que quiser.
+const tiles = new Map()   // streamKey -> { el, video, pc, loading, vol, on }
+let focusKey = null       // tile em destaque (modo foco), ou null
+
+function releaseTiles () {
+  for (const [, t] of tiles) release(t.pc)
+  tiles.clear()
+  focusKey = null
+  const grid = $('#grid-live')
+  grid.classList.remove('focus-mode')
+  delete grid.dataset.n
+}
+
+function toggleFocus (key) {
+  focusKey = focusKey === key ? null : key
+  const grid = $('#grid-live')
+  grid.classList.toggle('focus-mode', !!focusKey)
+  for (const [k, t] of tiles) {
+    t.el.classList.toggle('focus', k === focusKey)
+    t.el.style.order = k === focusKey ? '-1' : ''
+  }
+}
+
+function buildTile (st) {
+  const key = st.streamKey
+  const el = document.createElement('div')
+  el.className = 'stream'
+  el.innerHTML =
+    `<video autoplay playsinline muted></video><div class="skeleton"></div>
+     <span class="badge">LIVE</span>
+     <span class="badge time" data-start="${st.streamStart ?? ''}"></span>
+     <div class="s-ov">
+       <div style="min-width:0">
+         <div class="s-title"></div>
+         <div class="s-nick"><span class="avatar sm"></span><span class="s-sub"></span></div>
+       </div>
+       <div class="s-acts">
+         <input type="range" class="s-volr" min="0" max="1" step="0.05" value="1"
+                title="Volume" aria-label="Volume dessa transmissão">
+         <button class="s-vol" title="Som">
+           <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/></svg>
+         </button>
+         <button class="s-focus" title="Focar" aria-label="Focar transmissão">
+           <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/>
+             <path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+         </button>
+         <button class="s-chat" title="Chat" aria-label="Chat">
+           <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+         </button>
+       </div>
+     </div>`
+  el.querySelector('.avatar').textContent = key.slice(0, 1)
+  el.querySelector('.s-title').textContent = key + (key === nick ? ' (você)' : '')
+
+  const video = el.querySelector('video')
+  const t = { el, video, pc: null, loading: false, vol: 1, on: false }
+  const applyVol = () => {
+    video.volume = t.vol
+    video.muted = !t.on || t.vol === 0
+  }
+  applyVol()
+
+  // skeleton sai quando o primeiro quadro chega
+  video.addEventListener('playing', () =>
+    el.querySelector('.skeleton')?.remove(), { once: true })
+
+  el.onclick = () => toggleFocus(key)
+  el.ondblclick = () => (document.fullscreenElement
+    ? document.exitFullscreen()
+    : el.requestFullscreen()).catch(() => {})
+
+  const paintVol = () => el.querySelector('.s-vol').innerHTML = t.on && t.vol > 0
+    ? '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>'
+    : '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/></svg>'
+  el.querySelector('.s-acts').onclick = e => e.stopPropagation()
+  el.querySelector('.s-volr').oninput = e => { t.vol = +e.target.value; applyVol(); paintVol() }
+  el.querySelector('.s-vol').onclick = () => { t.on = !t.on; applyVol(); paintVol() }
+  el.querySelector('.s-focus').onclick = () => toggleFocus(key)
+  el.querySelector('.s-chat').onclick = () => {
+    chatOpen(key)
+    const p = $('#chat-panel')
+    p.hidden = false
+    $('#chat-input').focus()
+  }
+  paintVol()
+  return t
+}
+
+// (re)conecta a sessão WHEP de um tile; chamado pelo refresh a cada poll
+function ensureTileSession (key, t) {
+  if (t.pc || t.loading) return
+  t.loading = true
+  watch(key, t.video, nick)
+    .then(pc => { t.pc = pc })
+    .catch(() => {})   // falhou: o próximo poll tenta de novo
+    .finally(() => { t.loading = false })
+}
+
 async function refresh () {
   const live = await status()
 
@@ -1839,7 +1986,13 @@ async function refresh () {
   await Promise.all(FIXED_KEYS.map(k =>
     fixed(k).then(s => fixedStates[k] = s).catch(() => {})))
 
-  // no ar: lista de quem assiste no header, atualizada neste mesmo poll
+  // canais de voz da sidebar (salas + membros, do sidecar)
+  fetch(cfg.serverUrl + '/api/fixed/jam').then(r => r.json())
+    .then(j => { voiceState = j.rooms ?? [] })
+    .catch(() => { voiceState = [] })
+    .finally(() => renderVoice())
+
+  // no ar: lista de quem assiste na barra de contexto, neste mesmo poll
   const mine = live.find(st => st.streamKey === nick)
   const names = mine ? viewersOf(mine) : []
   if (pc) {
@@ -1849,52 +2002,50 @@ async function refresh () {
     $('#viewers-pill').title = names.join(', ')
   }
 
-  // Os canais fixos (TV, Música, Sala) são abas do header: não viram tiles.
+  if (clipMode) return   // a grade está mostrando a lista de clips
+
+  // Canais fixos (TV, Música) são canais da sidebar: não viram tiles.
   // A grade lista só quem está transmitindo de verdade.
+  const grid = $('#grid-live')
   const others = live.filter(st => !FIXED_KEYS.includes(st.streamKey))
+
+  // tiles de streams que acabaram: solta a sessão e sai da grade
+  for (const [key, t] of [...tiles]) {
+    if (!others.some(st => st.streamKey === key)) {
+      release(t.pc); t.el.remove(); tiles.delete(key)
+      if (focusKey === key) toggleFocus(key)
+    } else if (t.pc && ['failed', 'closed'].includes(t.pc.connectionState)) {
+      release(t.pc); t.pc = null   // host recriado: reconecta no ciclo abaixo
+    }
+  }
+  grid.dataset.n = others.length
+
   if (!others.length) {
-    const empty = document.createElement('div')
-    empty.className = 'empty'
-    empty.innerHTML =
-      `<svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/>
-         <path d="m10 8.5 5 2.5-5 2.5z"/></svg>
-       <h4>Ninguém no ar agora</h4>
-       <p>Compartilhe sua tela e comece a transmissão!</p>`
-    $('#grid-live').replaceChildren(empty)
+    releaseTiles()
+    if (!grid.querySelector('.empty')) {
+      const empty = document.createElement('div')
+      empty.className = 'empty'
+      empty.innerHTML =
+        `<svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/>
+           <path d="m10 8.5 5 2.5-5 2.5z"/></svg>
+         <h4>Ninguém no ar agora</h4>
+         <p>Compartilhe sua tela e comece a transmissão!</p>`
+      grid.replaceChildren(empty)
+    }
     return
   }
-  $('#grid-live').replaceChildren(...others.map(st => {
-    const el = document.createElement('div')
-    el.className = 'vid'
-    const timeBadge = `<span class="badge time" data-start="${st.streamStart ?? ''}"></span>`
-    el.innerHTML =
-      `<div class="thumb"><div class="skeleton"></div><span class="badge">AO VIVO</span>${timeBadge}</div>
-       <div class="meta"><div class="avatar"></div>
-         <div style="min-width:0">
-           <div class="title"></div><div class="sub"></div>
-         </div></div>`
-    el.querySelector('.avatar').textContent = st.streamKey.slice(0, 1)
-    el.querySelector('.title').textContent = st.streamKey +
-      (st.streamKey === nick ? ' (você)' : '')
-    el.querySelector('.sub').textContent =
-      `${plural(viewersOf(st).length, 'assistindo', 'assistindo')} · ${since(st.streamStart)}`
-    el.onclick = () => openPlayer(st.streamKey)
+  grid.querySelector('.empty')?.remove()
 
-    const thumb = el.querySelector('.thumb')
-    const paint = url => {
-      const img = new Image(); img.src = url
-      thumb.replaceChildren(img)
-      thumb.insertAdjacentHTML('beforeend',
-        `<span class="badge">AO VIVO</span>${timeBadge}`)
-    }
-    if (thumbs.has(st.streamKey)) paint(thumbs.get(st.streamKey))
-    else grabThumb(st.streamKey)
-      .then(url => { thumbs.set(st.streamKey, url); paint(url) })
-      .catch(() => thumb.firstChild.replaceWith(Object.assign(
-        document.createElement('span'), { className: 'muted', textContent: 'sem prévia' })))
-
-    return el
-  }))
+  for (const st of others) {
+    const key = st.streamKey
+    let t = tiles.get(key)
+    if (!t) { t = buildTile(st); tiles.set(key, t); grid.append(t.el) }
+    ensureTileSession(key, t)
+    t.el.querySelector('.s-sub').textContent =
+      `${viewersOf(st).length} assistindo · ${since(st.streamStart)}`
+    t.el.querySelector('.badge.time').dataset.start = st.streamStart ?? ''
+  }
+  grid.classList.toggle('focus-mode', !!focusKey)
 }
 
 // duração no canto direito da thumb: conta de segundo em segundo enquanto o
@@ -1910,22 +2061,7 @@ setInterval(() => document.querySelectorAll('.badge.time[data-start]').forEach(b
   b.textContent = Number.isNaN(t) ? '' : fmtElapsed(Date.now() - t)
 }), 1000)
 
-let viewer = null   // pc de quem assiste, separado do pc de quem publica
-
-function openPlayer (key) {
-  sfx.watch()
-  last = null
-  $('#net-stats').textContent = '—'
-  $('#net-dot').style.background = ''
-  release(viewer); viewer = null
-  $('#player-wrap').classList.remove('tv-panel')
-  showPlayer(key)
-  chatOpen(key)
-  $('#clip-btn').hidden = false
-  watch(key, $('#player-wrap video'), nick)
-    .then(p => { viewer = p; setVideoControls(true) })
-    .catch(e => { toast(e.message); closePlayer() })
-}
+let viewer = null   // pc de quem assiste canal fixo/clip, separado do de quem publica
 
 function closePlayer () {
   if (viewer) sfx.end()
@@ -1946,6 +2082,7 @@ let clipPlaying = 0   // id do clip em reprodução (0 = nenhum)
 
 function openClips () {
   clipMode = true
+  releaseTiles()   // sessões WHEP da grade não valem na lista de clips
   if (viewer || fixedKey || clipPlaying) closePlayer()
   else { closeFixed(); chatClose(); showPlayer(null) }
   setTab('clips')
@@ -2733,6 +2870,75 @@ function showNews () {
 // UI: entrada na sala, lista de peers com ganho/mudo e telemetria (RTT via
 // ping no DataChannel, buffer e underruns do jitter buffer, nível do sinal).
 let jam = null, jamTimer = null, jamJoined = false
+let jamRoom = null       // canal de voz em que estou conectado
+let dockMuted = false    // mic silenciado pelo dock (não derruba a conexão)
+let voiceState = []      // salas do /api/fixed/jam: [{ room, members }]
+const VOICE_MAIN = 'sala'   // canal de voz fixo do servidor; os demais vêm da API
+
+// sidebar: canais de voz com membros; LIVE vermelho em quem está no ar
+function renderVoice () {
+  const box = $('#voice-chans')
+  const liveKeys = new Set([...tiles.keys()])
+  const rooms = [...new Set([VOICE_MAIN, ...voiceState.map(r => r.room)])]
+  box.replaceChildren(...rooms.map(room => {
+    const wrap = document.createElement('div')
+    wrap.className = 'vchan'
+    const members = voiceState.find(r => r.room === room)?.members ?? []
+    const b = document.createElement('button')
+    b.className = 'tab' + (jamJoined && jamRoom === room ? ' on' : '')
+    b.innerHTML = `<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/>
+      <path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>`
+    b.append(Object.assign(document.createElement('span'), { textContent: room }))
+    if (members.length)
+      b.append(Object.assign(document.createElement('span'),
+        { className: 'vcount', textContent: String(members.length) }))
+    b.title = jamJoined && jamRoom === room ? 'Sair do canal de voz'
+      : `Entrar no canal de voz "${room}"`
+    b.onclick = () => {
+      if (jamJoined) jamToggleJoin()          // conectado: o clique desconecta
+      else jamToggleJoin(room).catch(e => toast(e.message))
+    }
+    wrap.append(b)
+    for (const m of members) {
+      const row = document.createElement('div')
+      row.className = 'vmem' + (m === nick ? ' on' : '')
+      row.innerHTML = '<span class="vdot"></span>'
+      row.append(Object.assign(document.createElement('span'), { textContent: m }))
+      if (liveKeys.has(m))
+        row.insertAdjacentHTML('beforeend', '<span class="vm-live">LIVE</span>')
+      wrap.append(row)
+    }
+    return wrap
+  }))
+}
+
+// acende/apaga o status de voz da sidebar e pinta o botão de mic do dock
+function voiceUI () {
+  $('#voice-status').hidden = !jamJoined
+  if (jamJoined) $('#vs-room').textContent = jamRoom
+  const b = $('#dock-mic')
+  b.classList.toggle('off', !jamJoined)
+  if (!jamJoined) {
+    b.title = 'Entrar no canal de voz'
+    b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>'
+    return
+  }
+  b.title = dockMuted ? 'Reativar microfone' : 'Silenciar microfone'
+  b.innerHTML = dockMuted
+    ? '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/></svg>'
+    : '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>'
+}
+
+$('#dock-mic').onclick = () => {
+  if (!jamJoined) return jamToggleJoin(VOICE_MAIN).catch(e => toast(e.message))
+  dockMuted = !dockMuted
+  jam.setMicGain(dockMuted ? 0 : (+localStorage.getItem('jam-micgain') || 1))
+  voiceUI()
+}
+$('#vs-cam').onclick = () => $('#share-cam').click()
+$('#vs-screen').onclick = () => $('#share').click()
+$('#vs-leave').onclick = () => jamToggleJoin()
+
 // chat da sala: mensagens vivem só na sessão (o relay do servidor não guarda
 // histórico); as próprias mensagens entram no log na hora do envio
 let jamChatLog = []
@@ -2981,7 +3187,7 @@ function jamLevels ({ self, peers }) {
 }
 
 
-async function jamToggleJoin () {
+async function jamToggleJoin (room = 'sala') {
   const btn = $('#jam-toggle')
   jamErrSet(null)
   try {
@@ -2991,6 +3197,8 @@ async function jamToggleJoin () {
       jamYtClear()
       clearInterval(jamTimer)
       jamJoined = false
+      jamRoom = null
+      dockMuted = false
       $('#jam-pills').replaceChildren()
       jamChatLog = []
       jamChatRender()
@@ -3000,10 +3208,9 @@ async function jamToggleJoin () {
       $('#jam-chat').hidden = true
       $('#jam-leave').hidden = true
       $('#jam-main').classList.remove('joined')
+      voiceUI()
       return
     }
-    // sala única do canal: entrar nele É entrar na sala (sem nome pra digitar)
-    const room = 'sala'
     jam ??= await import('./jam.js?v=6').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
       .then(j => {
         j.onChat(m => {
@@ -3022,8 +3229,9 @@ async function jamToggleJoin () {
     }
     await jam.join(room, nick, jamRender,
       ms ? { micStream: ms } : { deviceId: $('#jam-dev').value || undefined })
-    jam.setMicGain(+localStorage.getItem('jam-micgain') || 1)
+    jam.setMicGain(dockMuted ? 0 : (+localStorage.getItem('jam-micgain') || 1))
     jamJoined = true
+    jamRoom = room
     btn.textContent = 'Sair'
     $('#jam-entry').hidden = true
     $('#jam-card').hidden = true
@@ -3032,14 +3240,22 @@ async function jamToggleJoin () {
     $('#jam-main').classList.add('joined')
     jamChatLog = []
     jamChatRender()
-    $('#jam-msg').focus()
+    if (!$('#jam-view').classList.contains('on')) {
+      // entrou pela sidebar/dock: o Estúdio nem precisa abrir
+      toast(`Você entrou no canal de voz "${room}". Fones de ouvido!`, null, 'info')
+    }
     jamRender()
     jamTimer = setInterval(jamRender, 1000)
-    // dialog fica aberto: é o painel da sala (peers, ganho, latência ao vivo)
-    toast('Você entrou na sala. Fones de ouvido!')
-  } catch (e) { jamNativeStop(); jamErrSet(e.message) }
+    voiceUI()
+  } catch (e) {
+    jamNativeStop(); jamErrSet(e.message); voiceUI()
+    // entrou pela sidebar/dock: o painel do Estúdio não está na tela pra
+    // mostrar o erro — ele precisa chegar até quem clicou no canal
+    if (!$('#jam-view').classList.contains('on'))
+      toast('Não deu para entrar no canal de voz: ' + e.message)
+  }
 }
-$('#jam-toggle').onclick = jamToggleJoin
+$('#jam-toggle').onclick = () => jamToggleJoin()
 // lista os dispositivos de entrada; os nomes só vêm depois da permissão de
 // mic, então se vierem em branco pede um acesso descartável e lista de novo
 async function jamListMics () {

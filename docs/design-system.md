@@ -82,3 +82,34 @@ fallback é `system-ui` — o layout não quebra, só perde caráter.
 3. Um acento por tela, um CTA primário por tela.
 4. Alvo de clique ≥ 36px (44px onde é toque, como o player).
 5. Copy em português, minúsculo e direto, no tom do resto do app.
+
+## Liquid glass
+
+Superfícies translúcidas com blur leve (shell estilo Discord: rail, sidebar,
+dock de chamada, barras flutuantes). Os tokens vivem no `theme.css`:
+
+- `--glass-bg` / `--glass-bg-strong` — fundo translúcido (normal / mais opaco,
+  para conteúdo que corre por trás de texto longo).
+- `--glass-border` — hairline branco translúcido; `--glass-highlight` —
+  borda superior de 1px, o "brilho" do vidro.
+- `--glass-blur` — o blur (14px). **Único valor de `backdrop-filter` do app:**
+  nenhuma outra superfície define blur próprio.
+- `--glass-shadow` — sombra suave, mais leve que `--shadow-card`.
+
+Componente pronto: classe `.glass` (ver `app.css`) — fundo, borda, raio,
+blur e highlight de uma vez. Não recrie vidro à mão; e vidro não se sobrepõe
+a vidro (uma camada por borda da tela).
+
+## Padrões do shell (canais ao vivo)
+
+- **Rail** (64px) e **sidebar** (260px): rail guarda marca, canais de voz em
+  uso e conta do usuário; sidebar lista canais em duas categorias ("canais"
+  de texto/vídeo e "canais de voz"). Item ativo: fundo `--muted` + pill
+  âmbar à esquerda. Vidro só na sidebar.
+- **Tile de transmissão** (`.stream`): é o vídeo ao vivo de verdade (WHEP por
+  tile), 16/9, `--radius-card`. Badge `LIVE` vermelho no canto superior
+  direito; overlay inferior em gradiente→`--scrim` com título e nick; no
+  hover, menu `...` com volume individual e focar.
+- **Dock de chamada**: pílula flutuante de vidro centrada no rodapé da área
+  central; botões circulares 44px, desconectar em `--destructive`. Só existe
+  conectado a um canal de voz.

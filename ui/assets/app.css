@@ -60,35 +60,133 @@ label { font-size:13px; font-weight:500; color:hsl(var(--muted-foreground)) }
 .switch input:disabled + span { opacity:.45 }
 .switch input:checked + span::after { transform:translateX(18px) }
 
-/* header */
-.bar {
-  display:flex; align-items:center; gap:10px; padding:10px 20px; flex:none;
-  border-bottom:1px solid hsl(var(--border));
-  background:hsl(var(--background)); position:sticky; top:0; z-index:5;
+/* ── shell estilo Discord: rail · sidebar de canais · área central ─────── */
+.shell { flex:1; display:flex; min-height:0 }
+
+.glass {
+  background:var(--glass-bg);
+  backdrop-filter:blur(var(--glass-blur));
+  -webkit-backdrop-filter:blur(var(--glass-blur));
 }
-.bar h1 { font-family:var(--font-display); font-size:19px; font-weight:800;
-          letter-spacing:-.03em }
+
+/* rail: marca, conta e configuração */
+.rail {
+  width:64px; flex:none; display:flex; flex-direction:column; align-items:center;
+  gap:10px; padding:12px 0;
+  background:hsl(var(--background)); border-right:1px solid hsl(var(--border));
+}
+.rail-brand img { width:36px; height:36px; border-radius:50%; display:block;
+  transition:border-radius .15s }
+.rail-brand:hover img { border-radius:12px }
+.rail-sep { width:28px; height:1px; flex:none; background:hsl(var(--border)) }
+.rail-bottom { margin-top:auto; display:flex; flex-direction:column; align-items:center; gap:8px }
+.rail-user { background:transparent; border:0; padding:0; height:auto }
+.rail-user:hover { opacity:1 }
+.rail-user .avatar { width:36px; height:36px; transition:box-shadow .15s }
+.rail-user:hover .avatar { box-shadow:0 0 0 2px hsl(var(--accent)) }
+
+/* sidebar: canais em duas categorias + status de voz no rodapé */
+.sidebar {
+  width:260px; flex:none; display:flex; flex-direction:column; min-height:0;
+  border-right:1px solid var(--glass-border);
+}
+.side-scroll { flex:1; overflow-y:auto; padding:10px 8px 4px }
+.side-cat {
+  font-size:11px; font-weight:600; letter-spacing:.05em; text-transform:uppercase;
+  color:hsl(var(--muted-foreground)); padding:14px 8px 6px;
+}
+.chans { display:flex; flex-direction:column; gap:2px }
+
+/* canal (antiga aba do header): linha da sidebar com pill âmbar na ativa */
+.tab {
+  display:flex; align-items:center; gap:10px; height:36px; padding:0 10px;
+  background:transparent; border:none; border-radius:var(--radius);
+  font-size:14px; font-weight:500; font-family:var(--font-sans);
+  color:hsl(var(--muted-foreground)); white-space:nowrap; position:relative;
+  text-align:left; justify-content:flex-start;
+}
+.tab svg { width:18px; height:18px; flex:none; fill:none; stroke:currentColor;
+  stroke-width:2; stroke-linecap:round; stroke-linejoin:round; opacity:.7 }
+.tab:hover { background:hsl(var(--muted)); color:hsl(var(--foreground)); opacity:1 }
+.tab.on { background:hsl(var(--muted)); color:hsl(var(--foreground)) }
+.tab.on::before {
+  content:''; position:absolute; left:-8px; top:8px; bottom:8px; width:3px;
+  border-radius:999px; background:hsl(var(--accent));
+}
+
+/* canais de voz: canal clicável + membros embaixo (verde = conectado,
+   LIVE vermelho = compartilhando tela) */
+.vmem {
+  display:flex; align-items:center; gap:8px; padding:4px 10px 4px 28px;
+  font-size:13px; color:hsl(var(--muted-foreground));
+}
+.vmem .vdot { width:8px; height:8px; border-radius:50%; flex:none;
+  background:hsl(var(--muted-foreground)) }
+.vmem.on .vdot { background:hsl(var(--success)) }
+.vm-live {
+  margin-left:auto; background:hsl(var(--destructive)); color:#fff;
+  font-size:9px; font-weight:700; letter-spacing:.05em; padding:1px 5px; border-radius:4px;
+}
+.vcount { margin-left:auto; font-size:11px; color:hsl(var(--muted-foreground)) }
+
+/* status de voz no rodapé da sidebar */
+#voice-status {
+  flex:none; display:flex; align-items:center; gap:8px; padding:10px 12px;
+  border-top:1px solid var(--glass-border); background:hsl(var(--background) / .35);
+}
+.vs-info { flex:1; display:flex; align-items:center; gap:10px; min-width:0 }
+.vs-dot { width:9px; height:9px; border-radius:50%; flex:none; background:hsl(var(--success));
+  box-shadow:0 0 8px hsl(var(--success) / .6) }
+.vs-txt { display:flex; flex-direction:column; line-height:1.25; min-width:0 }
+.vs-txt b { font-size:12.5px }
+.vs-txt .muted { font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.vs-acts { display:flex; gap:2px }
+.vs-acts .vs-leave:hover { background:hsl(var(--destructive) / .15); color:hsl(var(--destructive)) }
+
+.me-row {
+  flex:none; display:flex; padding:8px 12px calc(8px + env(safe-area-inset-bottom));
+  border-top:1px solid var(--glass-border);
+}
+.me-row .user { flex:1 }
+
+/* área central: barra de contexto em cima, conteúdo embaixo */
+.main-col { flex:1; min-width:0; display:flex; flex-direction:column; position:relative }
+.ctx-bar {
+  display:flex; align-items:center; gap:10px; height:48px; padding:0 16px; flex:none;
+  background:var(--glass-bg-strong);
+  backdrop-filter:blur(var(--glass-blur));
+  -webkit-backdrop-filter:blur(var(--glass-blur));
+  border-bottom:1px solid var(--glass-border); z-index:5;
+}
+#ctx-title { font-weight:600; font-size:15px; letter-spacing:-.01em }
+
 .spacer { flex:1 }
 button svg { width:16px; height:16px; flex:none; fill:none;
   stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round }
 button.icon { width:36px; padding:0 }
 .player-ctl { display:flex; align-items:center; gap:4px }
 
-/* abas do header: pílula na ativa, texto apagado nas demais */
-.tabs { display:flex; align-items:center; gap:4px; margin-left:8px }
-.tab {
-  background:transparent; border:none; height:32px; padding:0 14px;
-  border-radius:999px; font-size:13px; font-weight:500; font-family:var(--font-sans);
-  color:hsl(var(--muted-foreground)); white-space:nowrap;
+/* dock de chamada: pílula de vidro flutuante, centralizada no rodapé */
+#call-dock {
+  position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:8;
+  display:flex; align-items:center; gap:6px; padding:8px;
+  border:1px solid var(--glass-border); border-radius:var(--radius-pill);
+  box-shadow:var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
 }
-.tab:hover { background:hsl(var(--muted)); color:hsl(var(--foreground)); opacity:1 }
-.tab.on { background:hsl(var(--muted)); color:hsl(var(--foreground)) }
-@media (max-width:1000px) { .tab { padding:0 10px } }
-@media (max-width:780px) {
-  .tabs { margin-left:2px; gap:2px }
-  .tab { padding:0 8px; font-size:12px }
-  .tab[data-tab="jam"] { display:none }   /* apelido longo sai em telas estreitas */
+.dock-btn {
+  width:44px; height:44px; padding:0; border-radius:50%; border:none;
+  background:hsl(var(--surface-2) / .8); color:hsl(var(--foreground));
+  transition:background .15s, transform .12s;
 }
+.dock-btn:hover { opacity:1; background:hsl(var(--muted)); transform:translateY(-1px) }
+.dock-btn svg { width:20px; height:20px }
+.dock-btn.primary {
+  background:hsl(var(--accent)); color:hsl(var(--primary-foreground));
+  animation:share-pulse 2.4s ease-out infinite;
+}
+.dock-btn.primary:hover { animation-play-state:paused }
+.dock-btn.destructive { background:hsl(var(--destructive)); color:#fff }
+#call-dock[hidden] { display:none }
 
 /* header apertado: cai por etapas em vez de estourar */
 @media (max-width:1280px) {
@@ -132,25 +230,72 @@ button.icon { width:36px; padding:0 }
   height:36px; padding:0 12px 0 6px; gap:8px; font-size:13px; font-weight:500;
 }
 .user:hover { background:hsl(var(--muted)); opacity:1 }
-/* CTA principal do header: pílula âmbar, como no design */
-#share {
-  height:38px; padding:0 18px; border-radius:var(--radius-pill);
-  background:hsl(var(--accent)); color:hsl(var(--primary-foreground)); font-weight:600;
-  animation:share-pulse 2.4s ease-out infinite;
-}
-#share:hover { opacity:.9; animation-play-state:paused }
+/* CTA principal agora vive no dock (.dock-btn.primary) — o anel de pulso: */
 /* anel que se expande do próprio botão, na cor do CTA */
 @keyframes share-pulse {
   0% { box-shadow:0 0 0 0 hsl(var(--accent) / .5) }
   70%, 100% { box-shadow:0 0 0 9px hsl(var(--accent) / 0) }
 }
 @media (prefers-reduced-motion: reduce) { #share { animation:none } }
-main { flex:1; overflow:hidden; display:flex; flex-direction:column }
+main { flex:1; overflow:hidden; display:flex; flex-direction:column; position:relative }
 
-/* grade estilo youtube */
-#grid-live { flex:1; overflow:auto; padding:32px; display:grid; gap:26px 24px;
+/* ── grade multi-view: cada tile é a transmissão ao vivo de verdade ──────
+   (sessão WHEP própria, áudio mutado por padrão, volume individual).      */
+#grid-live { flex:1; overflow:auto; padding:20px; display:grid; gap:14px;
              background:var(--glow-top);
-             grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); align-content:start }
+             grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));
+             align-content:start }
+.stream {
+  position:relative; aspect-ratio:16/9; border-radius:var(--radius-card);
+  overflow:hidden; background:#000; border:1px solid hsl(var(--border)); cursor:pointer;
+  transition:border-color .15s, box-shadow .15s;
+}
+.stream video { width:100%; height:100%; object-fit:contain; display:block }
+.stream:hover { border-color:hsl(var(--accent) / .55); box-shadow:var(--shadow-card) }
+.stream .badge {
+  position:absolute; top:10px; right:10px; z-index:2;
+  background:hsl(var(--destructive)); color:#fff; font-size:11px; font-weight:700;
+  letter-spacing:.05em; padding:2px 8px; border-radius:4px;
+}
+.stream .badge.time {
+  top:auto; bottom:10px; right:10px; background:var(--scrim); color:hsl(var(--foreground));
+  font-weight:600; letter-spacing:0; font-variant-numeric:tabular-nums;
+}
+/* overlay inferior: título + nick + ações no hover */
+.stream .s-ov {
+  position:absolute; left:0; right:0; bottom:0; z-index:2;
+  display:flex; align-items:flex-end; gap:10px; padding:30px 12px 10px;
+  background:linear-gradient(transparent, var(--scrim)); pointer-events:none;
+}
+.stream .s-title { font-weight:600; font-size:14px; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap }
+.stream .s-nick { display:flex; align-items:center; gap:6px; font-size:12px;
+  color:hsl(var(--muted-foreground)); margin-top:2px }
+.stream .s-acts { margin-left:auto; display:flex; align-items:center; gap:4px;
+  pointer-events:auto; opacity:0; transition:opacity .15s }
+.stream:hover .s-acts, .stream:focus-within .s-acts { opacity:1 }
+.s-acts button {
+  width:32px; height:32px; padding:0; border-radius:var(--radius);
+  background:var(--scrim); border:1px solid hsl(var(--border)); color:hsl(var(--foreground));
+}
+.s-acts button:hover { background:hsl(var(--surface-2) / .9); opacity:1 }
+.s-acts input[type=range] {
+  width:88px; height:4px; padding:0; border:0; appearance:none; cursor:pointer;
+  background:hsl(var(--border)); border-radius:999px;
+}
+.s-acts input[type=range]::-webkit-slider-thumb { appearance:none; width:12px; height:12px;
+  border-radius:50%; background:hsl(var(--foreground)) }
+/* foco: tile em destaque atravessa a grade (16/9 da largura toda);
+   os outros dois continuam lado a lado embaixo */
+#grid-live.focus-mode { grid-template-columns:repeat(2,1fr) }
+.stream.focus { grid-column:1/-1 }
+#grid-live.focus-mode[data-n="3"] > .stream:last-child:nth-child(odd) {
+  grid-column:auto; width:auto; justify-self:stretch }
+/* três tiles: dois em cima, um embaixo centralizado */
+#grid-live[data-n="3"] { grid-template-columns:1fr 1fr }
+#grid-live[data-n="3"] > .stream:last-child:nth-child(odd) {
+  grid-column:1/-1; width:min(100%, calc(50% - 7px)); justify-self:center }
+.stream .skeleton { border-radius:0 }
 .vid { cursor:pointer }
 .vid .thumb {
   position:relative; aspect-ratio:16/9; border-radius:var(--radius-card); overflow:hidden;
@@ -324,7 +469,7 @@ main { flex:1; overflow:hidden; display:flex; flex-direction:column }
 
 /* mini player do canal música: segue tocando fora da aba Música */
 #mini-bar {
-  position:fixed; left:50%; bottom:16px; transform:translateX(-50%); z-index:8;
+  position:fixed; left:50%; bottom:76px; transform:translateX(-50%); z-index:8;
   display:flex; align-items:center; gap:12px; padding:10px 14px;
   width:min(560px, calc(100vw - 32px));
   background:hsl(var(--card)); border:1px solid hsl(var(--border));
@@ -600,21 +745,32 @@ body.no-screenshare #share-cam::after { content:'Câmera' }
   /* toque: abaixo de 16px o iOS dá zoom ao focar o campo */
   input, select, textarea { font-size:16px }
 
-  /* header em duas linhas: marca + ações em cima, abas rolando embaixo */
-  .bar { flex-wrap:wrap; gap:8px; padding:8px 12px;
-         padding-top:calc(8px + env(safe-area-inset-top)) }
-  .bar h1 { font-size:17px }
-  .spacer { display:none }   /* com wrap, o empurrão viraria quebra de linha */
-  .tabs { order:10; flex-basis:100%; margin-left:0; gap:4px;
-          overflow-x:auto; scrollbar-width:none }
-  .tabs::-webkit-scrollbar { display:none }
-  .tab { padding:0 12px; font-size:13px; height:34px }
-  .tab[data-tab="jam"] { display:inline-flex }   /* na linha própria cabe */
-  #live-pill { order:9 }
+  /* shell vira coluna: rail horizontal em cima, sidebar com canais rolando */
+  .rail { width:100%; flex:none; flex-direction:row; height:48px; padding:0 12px;
+          border-right:0; border-bottom:1px solid var(--border);
+          padding-top:env(safe-area-inset-top) }
+  .rail-sep { display:none }
+  .rail-bottom { margin:0 0 0 auto; flex-direction:row }
+  .shell { flex-direction:column }
+  .sidebar { width:100%; flex:none; flex-direction:row; align-items:center;
+             border-right:0; border-bottom:1px solid var(--glass-border) }
+  .side-scroll { display:flex; flex-direction:row; align-items:center; gap:4px;
+                 padding:6px 8px; overflow-x:auto; scrollbar-width:none }
+  .side-scroll::-webkit-scrollbar { display:none }
+  .side-cat { display:none }
+  .chans { flex-direction:row }
+  .tab { height:32px; padding:0 10px; font-size:13px; border-radius:var(--radius-pill) }
+  .tab.on::before { display:none }
+  #voice-chans .vmem, .vcount { display:none }   /* na palma: só o canal */
+  #voice-status { border-top:0; padding:0 4px; background:transparent }
+  .vs-txt, .vs-info { display:none }
+  .me-row { display:none }
 
   /* grade: uma coluna cheia, sem o respiro de desktop */
-  #grid-live { padding:16px; gap:18px 14px;
-               grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr)) }
+  #grid-live { padding:12px; gap:12px; grid-template-columns:1fr }
+  #grid-live[data-n="3"] { grid-template-columns:1fr }
+  #grid-live[data-n="3"] > .stream:last-child:nth-child(odd) {
+    grid-column:auto; width:auto; justify-self:stretch }
   .empty { min-height:46vh }
   .empty h4 { font-size:22px }
 
