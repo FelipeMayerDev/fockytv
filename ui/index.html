@@ -2042,7 +2042,9 @@ $('#share-go').onclick = async () => {
       // fonte de áudio visível pro host: filtro que falhou em silêncio é a
       // pior falha possível (o Discord entra e ninguém sabe o porquê)
       if (!cam) toast(semAudioCapturado
-        ? 'Foi no ar só o vídeo: marque o áudio no SELETOR do navegador (checkbox "compartilhar áudio da aba/sistema") — o toggle daqui não força ele.'
+        ? (navigator.userAgent.includes('Firefox')
+          ? 'Firefox não captura o som da tela — use Chrome/Edge, ou compartilhe Áudio/Vídeo do YouTube (esse som vai perfeito).'
+          : 'Foi no ar só o vídeo: marque o áudio no SELETOR do navegador (checkbox "compartilhar áudio da aba/sistema") — o toggle daqui não força ele.')
         : audioFail
         ? 'FILTRO DE ÁUDIO FALHOU (' + audioFail + ') — foi o som do sistema, Discord incluso'
         : audioOpts
