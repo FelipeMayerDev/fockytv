@@ -1234,6 +1234,38 @@ app.get("/api/fixed/jam", (req, res) => {
              total: rooms.reduce((n, r) => n + r.members.length, 0) })
 })
 
+// ── tipo de stream por chave (compartilhamento de YouTube) ───────────────
+// O broadcast-box não sabe o que o host está mandando; o host registra aqui
+// o tipo (yt-video/yt-audio), título e fila no ato de publicar. Memória
+// volátil: quem parou de transmitir limpa a própria entrada (DELETE).
+const streamKinds = new Map()
+app.get("/api/fixed/streams/kinds", (req, res) =>
+  res.json(Object.fromEntries(streamKinds)))
+app.post("/api/fixed/streams/:key/kind", (req, res) => {
+  const { kind = "", title = "", videoId = "", queue = null } = req.body ?? {}
+  if (!["yt-video", "yt-audio"].includes(kind))
+    return res.status(400).json({ error: "kind inválido" })
+  const prev = streamKinds.get(req.params.key) ?? { queue: [] }
+  streamKinds.set(req.params.key, {
+    ...prev, kind, title, videoId,
+    ...(Array.isArray(queue) ? { queue } : {}),
+  })
+  res.json({ ok: true })
+})
+app.delete("/api/fixed/streams/:key/kind", (req, res) => {
+  streamKinds.delete(req.params.key)
+  res.json({ ok: true })
+})
+
+// letra por vídeo do YouTube (reusa o lookup do LRCLIB do canal música)
+app.get("/api/fixed/jam/yt/lyrics", wrap(async (req, res) => {
+  const id = (req.query.id ?? "").toString()
+  if (!/^[\w-]{11}$/.test(id)) return res.status(400).json({ error: "id inválido" })
+  // jamYtMeta não traz o id: lyricsOf cacheia por ele
+  const meta = { ...await jamYtMeta(id), id }
+  res.json({ id, lines: (await lyricsOf(meta)) ?? [] })
+}))
+
 
 // docker stop/recreate: mata os hosts com DELETE, senão o broadcast-box fica
 // com sessão fantasma ("already has a host"). Registrado UMA vez aqui — no

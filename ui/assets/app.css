@@ -220,6 +220,78 @@ button.icon { width:36px; padding:0 }
 .pop-row + .pop-row { border-top:1px solid hsl(var(--border)) }
 .dock-pop .desc { margin-top:10px; font-size:11.5px }
 
+/* seletor de fonte do compartilhar (tela / YT vídeo / YT áudio) */
+.seg { display:flex; gap:4px; background:hsl(var(--background));
+  border:1px solid hsl(var(--border)); border-radius:var(--radius); padding:3px }
+.seg button {
+  flex:1; height:30px; padding:0 10px; background:transparent; border:none;
+  color:hsl(var(--muted-foreground)); font-size:12.5px; font-weight:500;
+  border-radius:calc(var(--radius) - 2px);
+}
+.seg button:hover { color:hsl(var(--foreground)); opacity:1 }
+.seg button.on { background:hsl(var(--muted)); color:hsl(var(--foreground)) }
+
+/* elemento-fonte do YouTube: fora da tela mas renderizável (display:none
+   não gera quadros pro captureStream) */
+.yt-src { position:fixed; left:-9999px; top:0; width:640px }
+
+/* barra do host de YouTube: mesma linguagem do mini player */
+#yt-bar {
+  position:absolute; left:50%; bottom:80px; transform:translateX(-50%); z-index:8;
+  display:flex; align-items:center; gap:8px; padding:10px 14px;
+  width:min(680px, calc(100% - 32px));
+  border:1px solid var(--glass-border); border-radius:var(--radius-card);
+  box-shadow:var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+}
+#yt-bar[hidden] { display:none }
+#ytb-seek { flex:1; height:4px; padding:0; border:0; appearance:none; cursor:pointer;
+  background:hsl(var(--muted)); border-radius:999px }
+#ytb-seek::-webkit-slider-thumb { appearance:none; width:12px; height:12px;
+  border-radius:50%; background:hsl(var(--accent)) }
+#ytb-seek:focus { outline:none }
+#ytb-pos, #ytb-dur { font-size:12px; flex:none; font-variant-numeric:tabular-nums }
+#ytb-queue { width:160px; flex:none; height:32px; font-size:12px }
+#ytb-add { height:32px; padding:0 12px; font-size:12px; flex:none }
+
+/* player do áudio compartilhado: pílula no topo da área central; hover
+   derruba o painel com capa grande, letra e fila */
+#music-dock { position:absolute; top:60px; left:50%; transform:translateX(-50%);
+  z-index:7; width:min(520px, calc(100% - 32px)) }
+#music-dock[hidden] { display:none }
+.md-bar {
+  display:flex; align-items:center; gap:10px; padding:8px 12px;
+  border:1px solid var(--glass-border); border-radius:var(--radius-pill);
+  box-shadow:var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+}
+.md-bar img { width:34px; height:34px; border-radius:50%; object-fit:cover; flex:none }
+.md-txt { flex:1; min-width:0; display:flex; flex-direction:column; line-height:1.25 }
+.md-txt b { font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.md-txt .muted { font-size:11px }
+.md-eq { display:flex; align-items:flex-end; gap:2px; height:14px; flex:none }
+.md-eq i { width:3px; background:hsl(var(--accent)); border-radius:1px;
+  animation:eq 1s ease-in-out infinite }
+.md-eq i:nth-child(2) { animation-delay:.2s }
+.md-eq i:nth-child(3) { animation-delay:.4s }
+@keyframes eq { 0%, 100% { height:4px } 50% { height:14px } }
+@media (prefers-reduced-motion:reduce) { .md-eq i { animation:none; height:10px } }
+.md-panel {
+  display:none; margin-top:8px; padding:16px;
+  border:1px solid var(--glass-border); border-radius:var(--radius-card);
+  box-shadow:var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+  background:var(--glass-bg-strong);
+  backdrop-filter:blur(var(--glass-blur));
+  -webkit-backdrop-filter:blur(var(--glass-blur));
+}
+#music-dock:hover .md-panel { display:block }
+.mdp-head { display:flex; gap:14px; align-items:center; margin-bottom:12px }
+.mdp-head img { width:88px; height:88px; border-radius:var(--radius-media);
+  object-fit:cover; flex:none }
+.mdp-head b { font-family:var(--font-display); font-size:17px; letter-spacing:-.01em }
+.mdp-body { display:grid; grid-template-columns:1fr 1fr; gap:8px;
+  max-height:min(320px, 42vh); overflow:auto }
+#mdp-lyrics .lyr { cursor:default }
+#mdp-lyrics .lyr:hover { color:hsl(var(--muted-foreground)) }
+
 /* header apertado: cai por etapas em vez de estourar */
 @media (max-width:1280px) {
   #live-stats, #net-stats, .pill .sep { display:none }
@@ -289,6 +361,9 @@ main { flex:1; overflow:hidden; display:flex; flex-direction:column; position:re
   background:hsl(var(--destructive)); color:#fff; font-size:11px; font-weight:700;
   letter-spacing:.05em; padding:2px 8px; border-radius:4px;
 }
+.stream .badge.ytt { background:hsl(var(--accent)); color:hsl(var(--primary-foreground)) }
+/* ícone alternativo do par play/pause em qualquer barra */
+button svg.off { display:none }
 .stream .badge.time {
   top:auto; bottom:10px; right:10px; background:var(--scrim); color:hsl(var(--foreground));
   font-weight:600; letter-spacing:0; font-variant-numeric:tabular-nums;

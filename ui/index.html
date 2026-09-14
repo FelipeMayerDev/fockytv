@@ -58,17 +58,12 @@
   <aside class="sidebar glass">
     <div class="side-scroll">
       <div class="side-cat">Canais</div>
-      <!-- canais de vídeo: ao vivo (home), canais fixos e clips -->
+      <!-- canais de vídeo: ao vivo (home), estúdio e clips. TV e Música
+           saíram: agora o YouTube entra pelo compartilhar (vídeo ou áudio) -->
       <nav class="chans" id="tabs">
         <button class="tab on" data-tab="live">
           <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="m10 8.5 5 2.5-5 2.5z"/></svg>
           Ao vivo</button>
-        <button class="tab" data-tab="music">
-          <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-          Música</button>
-        <button class="tab" data-tab="tv">
-          <svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="15" rx="2"/><path d="m17 2-5 5-5-5"/></svg>
-          Vídeo</button>
         <button class="tab" data-tab="jam">
           <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
           Estúdio</button>
@@ -321,6 +316,52 @@
     <span class="badge" id="chat-fab-badge" hidden></span>
   </button>
 
+  <!-- controles do host durante compartilhamento de YouTube (vídeo/áudio) -->
+  <div id="yt-bar" class="glass" hidden>
+    <button class="ghost icon" id="ytb-prev" title="-10s" aria-label="Voltar 10 segundos">
+      <svg viewBox="0 0 24 24"><path d="M19 20 9 12l10-8v16Z"/><rect x="5" y="4" width="2" height="16"/></svg>
+    </button>
+    <button class="ghost icon" id="ytb-toggle" title="Tocar/Pausar" aria-label="Tocar ou pausar">
+      <svg viewBox="0 0 24 24" id="ytb-ico-play"><path d="M7 4.5l13 7.5-13 7.5v-15Z"/></svg>
+      <svg viewBox="0 0 24 24" id="ytb-ico-pause" class="off"><path d="M7 4h3.6v16H7zM13.4 4H17v16h-3.6z"/></svg>
+    </button>
+    <button class="ghost icon" id="ytb-next" title="+10s" aria-label="Avançar 10 segundos">
+      <svg viewBox="0 0 24 24"><path d="M5 4l10 8-10 8V4Z"/><rect x="17" y="4" width="2" height="16"/></svg>
+    </button>
+    <span class="muted" id="ytb-pos">0:00</span>
+    <input type="range" id="ytb-seek" min="0" max="100" step="0.1" value="0"
+           title="Posição" aria-label="Posição">
+    <span class="muted" id="ytb-dur">0:00</span>
+    <input id="ytb-queue" placeholder="link pra fila…" maxlength="200" autocomplete="off">
+    <button class="outline" id="ytb-add">Fila</button>
+  </div>
+
+  <!-- player do áudio compartilhado: barra no topo; hover abre capa/letra/fila -->
+  <div id="music-dock" hidden>
+    <div class="md-bar glass">
+      <span class="md-eq"><i></i><i></i><i></i></span>
+      <img id="md-art" alt="">
+      <div class="md-txt"><b id="md-title"></b><span class="muted" id="md-sub"></span></div>
+      <button class="ghost icon" id="md-toggle" title="Tocar/Pausar (aqui pra você)" aria-label="Tocar ou pausar localmente">
+        <svg viewBox="0 0 24 24" id="md-ico-play"><path d="M7 4.5l13 7.5-13 7.5v-15Z"/></svg>
+        <svg viewBox="0 0 24 24" id="md-ico-pause" class="off"><path d="M7 4h3.6v16H7zM13.4 4H17v16h-3.6z"/></svg>
+      </button>
+    </div>
+    <div class="md-panel glass">
+      <div class="mdp-head">
+        <img id="mdp-art" alt="">
+        <div style="min-width:0">
+          <b id="mdp-title"></b>
+          <p class="muted" id="mdp-host" style="margin:0"></p>
+        </div>
+      </div>
+      <div class="mdp-body">
+        <div id="mdp-lyrics"><p class="muted" style="padding:8px">sem letra pra esta música</p></div>
+        <div id="mdp-queue"><p class="muted" style="padding:8px">fila vazia</p></div>
+      </div>
+    </div>
+  </div>
+
   <!-- dock de chamada: vidro flutuante; voz + publicar + encerrar -->
   <div id="call-dock" class="glass">
     <button class="dock-btn" id="dock-mic" title="Entrar no canal de voz">
@@ -474,6 +515,20 @@
   <h3 id="share-title">Compartilhar tela</h3>
   <p class="desc" id="share-desc">Escolha o que transmitir e ajuste a qualidade.</p>
 
+  <!-- fonte: tela do computador ou conteúdo do YouTube (vídeo/áudio) -->
+  <div class="field">
+    <label for="share-src">Fonte</label>
+    <div class="seg" id="share-src">
+      <button type="button" data-src="screen" class="on">Tela</button>
+      <button type="button" data-src="yt-video">Vídeo do YouTube</button>
+      <button type="button" data-src="yt-audio">Áudio do YouTube</button>
+    </div>
+  </div>
+  <div class="field" id="yt-row" hidden>
+    <label for="yt-url">Link do YouTube</label>
+    <input id="yt-url" placeholder="cole o link do vídeo ou da música">
+  </div>
+
   <div id="sources"></div>
   <p class="desc" id="portal-note" hidden>
     O seletor do sistema vai abrir para você escolher a tela ou janela.
@@ -498,7 +553,7 @@
     </div>
   </div>
 
-  <div class="row">
+  <div class="row" id="audio-row">
     <div>
       <label style="color:hsl(var(--foreground))" id="audio-label">Compartilhar som</label>
       <p class="desc" style="margin:2px 0 0" id="audio-desc">áudio do sistema junto com o vídeo</p>
@@ -683,6 +738,95 @@ async function watch (key, videoEl, viewer) {
   // A miniatura não manda — sessão de prévia não é gente.
   await signal('/api/whep' + (viewer ? `?viewer=${encodeURIComponent(viewer)}` : ''), key, pc)
   return pc
+}
+
+// ── compartilhar YouTube (vídeo ou só áudio) ─────────────────────────────
+// A mídia toca localmente no elemento (yt-dlp + proxy com Range do sidecar,
+// já pré-carregada antes de entrar no ar) e é publicada via WHIP como uma
+// transmissão comum. O broadcast-box não sabe o que é: o tipo/título/fila
+// ficam no registro de kinds do sidecar, e a UI lê de lá.
+let ytShare = null          // { kind, el, videoId, title, queue, duration }
+let streamKindsState = {}   // key -> { kind, title, videoId, queue }
+
+const postKind = (key, data) => fetch(`${cfg.serverUrl}/api/fixed/streams/${encodeURIComponent(key)}/kind`, {
+  method: data ? 'POST' : 'DELETE',
+  headers: { 'content-type': 'application/json' },
+  body: data ? JSON.stringify(data) : undefined,
+}).catch(() => {})
+
+// WHIP só-áudio: sem transceiver de vídeo, a sessão nasce sem track de tela
+async function publishAudio (key, st) {
+  const pc = new RTCPeerConnection()
+  st.getAudioTracks().forEach(t => pc.addTrack(t, st))
+  await signal('/api/whip', key, pc)
+  return pc
+}
+
+// capa queimada no canvas do modo áudio: o /api/status só lista sessão com
+// videoTracks, então o áudio vai com uma capa estática de vídeo
+async function coverTrack (videoId, title) {
+  const canvas = document.createElement('canvas')
+  canvas.width = 640; canvas.height = 360
+  const ctx2 = canvas.getContext('2d')
+  const paint = () => {
+    ctx2.fillStyle = '#111'; ctx2.fillRect(0, 0, 640, 360)
+    ctx2.fillStyle = '#f4f2ef'
+    ctx2.font = '600 22px system-ui, sans-serif'
+    ctx2.textAlign = 'center'
+    ctx2.fillText('♪', 320, 330)
+  }
+  paint()
+  const img = new Image()
+  img.crossOrigin = 'anonymous'
+  img.onload = () => { ctx2.drawImage(img, 0, 0, 640, 360) }
+  img.src = imgSrc(`https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`)
+  return canvas.captureStream(1).getVideoTracks()[0]
+}
+
+// resolve o link, carrega a mídia (pré-buffer até dar play) e devolve a stream
+async function ytSource (videoId, audioOnly) {
+  const meta = await fetch(cfg.serverUrl + '/api/fixed/jam/yt?id=' + videoId)
+    .then(async r => {
+      if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `yt ${r.status}`)
+      return r.json()
+    })
+  const el = audioOnly ? new Audio()
+    : Object.assign(document.createElement('video'), { playsInline: true, muted: false })
+  // fora da tela mas renderizável: vídeo display:none não gera quadros pro captureStream
+  el.className = 'yt-src'
+  el.src = cfg.serverUrl + '/api/fixed/jam/yt/stream?u=' + encodeURIComponent(meta.url)
+  el.preload = 'auto'
+  document.body.append(el)
+  await new Promise((res, rej) => {
+    el.addEventListener('canplay', res, { once: true })
+    el.addEventListener('error', () => rej(new Error('não consegui carregar a mídia')), { once: true })
+    setTimeout(() => rej(new Error('tempo esgotado ao carregar do YouTube')), 30000)
+  })
+  await el.play()
+  const raw = el.captureStream?.() ?? el.mozCaptureStream?.()
+  if (!raw) { el.remove(); throw new Error('captureStream indisponível neste navegador') }
+  const stream = audioOnly
+    ? new MediaStream([...raw.getAudioTracks(), await coverTrack(videoId, meta.title)])
+    : raw
+  ytShare = { kind: audioOnly ? 'yt-audio' : 'yt-video', el,
+              videoId, title: meta.title, duration: meta.duration ?? 0, queue: [] }
+  return stream
+}
+
+async function ytLoadNext () {
+  const next = ytShare.queue.shift()
+  if (!next) return stop()   // fila vazia: encerra como qualquer transmissão
+  const { el: old, kind } = ytShare
+  const queue = ytShare.queue          // ytSource zera o estado; guarda a fila
+  const stream = await ytSource(next.videoId, kind === 'yt-audio')
+  ytShare.queue = queue
+  old.remove()
+  // a conexão WHIP continua no ar: troca as trilhas sem renegociar
+  if (sender) await sender.replaceTrack(stream.getVideoTracks()[0] ?? null).catch(() => {})
+  if (audioSender) await audioSender.replaceTrack(stream.getAudioTracks()[0] ?? null).catch(() => {})
+  await postKind(nick, { kind, title: ytShare.title,
+                         videoId: ytShare.videoId, queue })
+  ytBarPaint()
 }
 
 // ── sons ────────────────────────────────────────────────────────────────
@@ -974,6 +1118,14 @@ function stop () {
   dropCam()
   stopCompose()
   stopFilteredAudio()
+  // YouTube: limpa o registro de tipo e a barra do host
+  if (ytShare) {
+    postKind(nick, null)
+    ytShare.el.pause()
+    ytShare.el.remove()
+    ytShare = null
+    ytBarHide()
+  }
   release(pc); pc = null; sender = null; audioSender = null; camOnly = false
   stream?.getTracks().forEach(t => t.stop()); stream = null
   setLive(false)
@@ -1518,6 +1670,10 @@ async function openShareDialog (isSwap, cam) {
     return
   }
   $('#share-err').textContent = ''
+  // troca de janela e câmera por cima só existem na fonte tela
+  if (isSwap || (cam && pc)) shareSrc = 'screen'
+  document.querySelectorAll('#share-src button').forEach(x =>
+    x.classList.toggle('on', x.dataset.src === shareSrc))
   const adding = !!cam && !!pc          // câmera entrando por cima da tela
   $('#share-title').textContent = isSwap ? 'Trocar janela'
     : adding ? 'Adicionar WebCam' : cam ? 'Compartilhar WebCam' : 'Compartilhar tela'
@@ -1545,6 +1701,7 @@ async function openShareDialog (isSwap, cam) {
     $('#portal-note').hidden = true
     $('#faudio-row').hidden = true
     $('#dlg-share').dataset.swap = ''
+    updateShareSrcUI()
     $('#dlg-share').showModal()
     return
   }
@@ -1604,10 +1761,34 @@ async function openShareDialog (isSwap, cam) {
   }))
 
   $('#dlg-share').dataset.swap = isSwap ? '1' : ''
+  updateShareSrcUI()
   updateShareAudio(picked)
 }
 
 // ── opções de áudio por aplicativo ────────────────────────────────────────
+// fonte do compartilhar: tela, vídeo do YouTube ou só áudio
+let shareSrc = 'screen'
+document.querySelectorAll('#share-src button').forEach(b => b.onclick = () => {
+  shareSrc = b.dataset.src
+  document.querySelectorAll('#share-src button').forEach(x =>
+    x.classList.toggle('on', x === b))
+  updateShareSrcUI()
+})
+function updateShareSrcUI () {
+  const yt = shareSrc !== 'screen'
+  $('#yt-row').hidden = !yt
+  if (yt) {
+    $('#sources').hidden = true
+    $('#portal-note').hidden = true
+    $('.opts').hidden = true
+    $('#audio-row').hidden = true
+    $('#cursor-row').hidden = true
+  } else {
+    $('#audio-row').hidden = false
+    $('#cursor-row').hidden = !!$('#dlg-share').dataset.swap
+  }
+}
+
 // Regra fixa (sem toggle): JANELA compartilhada = sai só o áudio do processo
 // dela (helper WASAPI/PipeWire, quando disponível); TELA toda = sai o sistema
 // MENOS o Discord. Sem helper (navegador), o áudio é do sistema inteiro — não
@@ -1707,6 +1888,21 @@ $('#share-go').onclick = async () => {
       await doSwap(picked)
     } else if (cam && pc) {
       await addCam($('#audio').checked)
+    } else if (shareSrc !== 'screen') {
+      // YouTube: mídia pré-carregada tocando localmente, publicada via WHIP
+      const id = ytParse($('#yt-url').value)
+      if (!id) throw new Error('cole um link válido do YouTube')
+      stream = await ytSource(id, shareSrc === 'yt-audio')
+      pc = shareSrc === 'yt-audio'
+        ? await publishAudio(nick, stream)
+        : await publish(nick, stream, 30, '')
+      camOnly = false
+      setLive(true)
+      sfx.live()
+      await postKind(nick, { kind: ytShare.kind, title: ytShare.title,
+                             videoId: ytShare.videoId, queue: [] })
+      ytBarOpen()
+      toast(`Transmitindo do YouTube: ${ytShare.title}`, null, 'info')
     } else {
       const fps = +$('#fps').value
       if (cam) {
@@ -1921,13 +2117,14 @@ function toggleFocus (key) {
   }
 }
 
-function buildTile (st) {
+function buildTile (st, kind = null) {
   const key = st.streamKey
+  const isYt = kind?.kind === 'yt-video'
   const el = document.createElement('div')
   el.className = 'stream'
   el.innerHTML =
     `<video autoplay playsinline muted></video><div class="skeleton"></div>
-     <span class="badge">LIVE</span>
+     <span class="badge${isYt ? ' ytt' : ''}">${isYt ? 'YT' : 'LIVE'}</span>
      <span class="badge time" data-start="${st.streamStart ?? ''}"></span>
      <div class="s-ov">
        <div style="min-width:0">
@@ -1955,7 +2152,8 @@ function buildTile (st) {
        </div>
      </div>`
   el.querySelector('.avatar').textContent = key.slice(0, 1)
-  el.querySelector('.s-title').textContent = key + (key === nick ? ' (você)' : '')
+  el.querySelector('.s-title').textContent =
+    isYt ? (kind.title || key) : key + (key === nick ? ' (você)' : '')
 
   const video = el.querySelector('video')
   const t = { el, video, pc: null, loading: false, vol: 1, on: false }
@@ -2008,6 +2206,9 @@ function ensureTileSession (key, t) {
 
 async function refresh () {
   const live = await status()
+  // tipos de stream (YouTube compartilhado): título, tag e fila
+  streamKindsState = await fetch(cfg.serverUrl + '/api/fixed/streams/kinds')
+    .then(r => r.json()).catch(() => ({}))
 
   // quantos estão ouvindo o canal música (sessões com nick de verdade)
   const mst = live.find(st => st.streamKey === 'music')
@@ -2036,9 +2237,10 @@ async function refresh () {
   if (clipMode) return   // a grade está mostrando a lista de clips
 
   // Canais fixos (TV, Música) são canais da sidebar: não viram tiles.
-  // A grade lista só quem está transmitindo de verdade.
+  // Áudio do YouTube vira o player do topo, não tile. O resto vira tile.
   const grid = $('#grid-live')
-  const others = live.filter(st => !FIXED_KEYS.includes(st.streamKey))
+  const others = live.filter(st => !FIXED_KEYS.includes(st.streamKey) &&
+    streamKindsState[st.streamKey]?.kind !== 'yt-audio')
 
   // tiles de streams que acabaram: solta a sessão e sai da grade
   for (const [key, t] of [...tiles]) {
@@ -2069,14 +2271,24 @@ async function refresh () {
 
   for (const st of others) {
     const key = st.streamKey
+    const kind = streamKindsState[key] ?? null
     let t = tiles.get(key)
-    if (!t) { t = buildTile(st); tiles.set(key, t); grid.append(t.el) }
+    if (!t) { t = buildTile(st, kind); tiles.set(key, t); grid.append(t.el) }
     ensureTileSession(key, t)
+    // o tipo pode chegar depois do tile (o host registra o kind logo após
+    // publicar): pinta tag e título no próprio poll
+    const yt = kind?.kind === 'yt-video'
+    const badge = t.el.querySelector('.badge')
+    badge.classList.toggle('ytt', yt)
+    badge.textContent = yt ? 'YT' : 'LIVE'
+    if (yt) t.el.querySelector('.s-title').textContent = kind.title || key
     t.el.querySelector('.s-sub').textContent =
+      (yt ? `por ${key} · ` : '') +
       `${viewersOf(st).length} assistindo · ${since(st.streamStart)}`
     t.el.querySelector('.badge.time').dataset.start = st.streamStart ?? ''
   }
   grid.classList.toggle('solo', !!focusKey)
+  musicDockTick()
 }
 
 // duração no canto direito da thumb: conta de segundo em segundo enquanto o
@@ -3047,6 +3259,135 @@ $('#dock-dev').addEventListener('change', () => {
   localStorage.setItem('jam-device', $('#dock-dev').value)
   applyMicSettings()
 })
+
+// ── barra do host: controles do compartilhamento de YouTube ──────────────
+// play/pause, seek e fila agem na mídia local — quem assiste recebe o áudio/
+// vídeo resultante pela transmissão, igual a uma tela.
+let ytBarTimer = null, ytSeekDrag = false
+function ytBarOpen () {
+  $('#yt-bar').hidden = false
+  clearInterval(ytBarTimer)
+  ytBarTimer = setInterval(ytBarTick, 500)
+  ytBarTick()
+}
+function ytBarHide () {
+  $('#yt-bar').hidden = true
+  clearInterval(ytBarTimer); ytBarTimer = null
+}
+function ytBarTick () {
+  if (!ytShare) return
+  const el = ytShare.el
+  if (!ytSeekDrag && el.duration)
+    $('#ytb-seek').value = Math.min(100, 100 * el.currentTime / el.duration)
+  $('#ytb-pos').textContent = mmss(el.currentTime || 0)
+  $('#ytb-dur').textContent = mmss(el.duration || ytShare.duration || 0)
+  $('#ytb-ico-play').classList.toggle('off', !el.paused)
+  $('#ytb-ico-pause').classList.toggle('off', el.paused)
+}
+$('#ytb-toggle').onclick = () => {
+  if (!ytShare) return
+  if (ytShare.el.paused) ytShare.el.play().catch(() => {})
+  else ytShare.el.pause()
+}
+$('#ytb-prev').onclick = () => {
+  if (ytShare) ytShare.el.currentTime = Math.max(0, ytShare.el.currentTime - 10)
+}
+$('#ytb-next').onclick = () => {
+  if (ytShare) ytShare.el.currentTime = Math.min(ytShare.el.duration || 1e9, ytShare.el.currentTime + 10)
+}
+$('#ytb-seek').addEventListener('input', () => ytSeekDrag = true)
+$('#ytb-seek').addEventListener('change', e => {
+  ytSeekDrag = false
+  if (ytShare?.el.duration) ytShare.el.currentTime = (+e.target.value / 100) * ytShare.el.duration
+})
+async function ytQueueAdd () {
+  const id = ytParse($('#ytb-queue').value)
+  if (!ytShare || !id) return
+  $('#ytb-queue').value = ''
+  try {
+    const meta = await fetch(cfg.serverUrl + '/api/fixed/jam/yt?id=' + id).then(r => r.json())
+    ytShare.queue.push({ videoId: id, title: meta.title ?? id })
+    await postKind(nick, { kind: ytShare.kind, title: ytShare.title,
+                           videoId: ytShare.videoId, queue: ytShare.queue })
+    toast(`Na fila: ${meta.title ?? id}`, null, 'info')
+  } catch (e) { toast('Fila falhou: ' + e.message) }
+}
+$('#ytb-add').onclick = ytQueueAdd
+$('#ytb-queue').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); ytQueueAdd() }
+})
+
+// ── player do áudio compartilhado (topo da grade; hover abre o resto) ────
+// A barra é enxuta: capa pequena, título e mute local. O hover carrega o
+// painel com capa grande, letra e fila — conectado à sessão WHEP do áudio.
+let mdPc = null, mdLyricsFor = null
+function musicDockTick () {
+  const entry = Object.entries(streamKindsState).find(([k, v]) =>
+    v.kind === 'yt-audio' && k !== nick)
+  $('#music-dock').hidden = !entry
+  if (!entry) {
+    if (mdPc) { release(mdPc); mdPc = null; musicAudio.srcObject = null }
+    return
+  }
+  const [key, info] = entry
+  $('#md-title').textContent = info.title
+  $('#md-sub').textContent = `por ${key} · ao vivo`
+  $('#mdp-title').textContent = info.title
+  $('#mdp-host').textContent = `compartilhado por ${key}`
+  const art = imgSrc(`https://i.ytimg.com/vi/${info.videoId}/hqdefault.jpg`)
+  $('#md-art').src = art
+  $('#mdp-art').src = art
+
+  // áudio: conexão WHEP dedicada (a do canal música, reaproveitada)
+  if (mdPc && ['failed', 'closed'].includes(mdPc.connectionState)) {
+    release(mdPc); mdPc = null; musicAudio.srcObject = null
+  }
+  if (!mdPc) watch(key, musicAudio, nick).then(p => { mdPc = p }).catch(() => {})
+
+  // fila
+  const q = $('#mdp-queue')
+  if (info.queue?.length) {
+    q.replaceChildren(...info.queue.map(item => {
+      const row = document.createElement('div')
+      row.className = 'q-item'
+      row.innerHTML = `<img alt="" loading="lazy">
+        <span style="flex:1;min-width:0"><span class="q-title"></span></span>`
+      row.querySelector('img').src = imgSrc(`https://i.ytimg.com/vi/${item.videoId}/default.jpg`)
+      row.querySelector('.q-title').textContent = item.title
+      return row
+    }))
+  } else q.innerHTML = '<p class="muted" style="padding:8px">fila vazia</p>'
+
+  // letra: uma busca por vídeo (o servidor procura no LRCLIB)
+  if (mdLyricsFor !== info.videoId) {
+    mdLyricsFor = info.videoId
+    const box = $('#mdp-lyrics')
+    box.innerHTML = '<p class="muted" style="padding:8px">procurando letra…</p>'
+    fetch(cfg.serverUrl + '/api/fixed/jam/yt/lyrics?id=' + info.videoId)
+      .then(r => r.json())
+      .then(l => {
+        if (mdLyricsFor !== info.videoId) return
+        if (!l.lines?.length)
+          return box.innerHTML = '<p class="muted" style="padding:8px">sem letra pra esta música</p>'
+        box.replaceChildren(...l.lines.map(line => {
+          const el = document.createElement('div')
+          el.className = 'lyr'
+          el.textContent = line.text
+          return el
+        }))
+      })
+      .catch(() => {
+        if (mdLyricsFor === info.videoId)
+          box.innerHTML = '<p class="muted" style="padding:8px">sem letra pra esta música</p>'
+      })
+  }
+}
+$('#md-toggle').onclick = () => {
+  // pausar aqui é só pra você: a transmissão segue do outro lado
+  musicAudio.muted = !musicAudio.muted
+  $('#md-ico-play').classList.toggle('off', !musicAudio.muted)
+  $('#md-ico-pause').classList.toggle('off', musicAudio.muted)
+}
 
 // chat da sala: mensagens vivem só na sessão (o relay do servidor não guarda
 // histórico); as próprias mensagens entram no log na hora do envio
