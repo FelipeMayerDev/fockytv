@@ -149,8 +149,11 @@ label { font-size:13px; font-weight:500; color:hsl(var(--muted-foreground)) }
 }
 .me-row .user { flex:1 }
 
-/* área central: barra de contexto em cima, conteúdo embaixo */
-.main-col { flex:1; min-width:0; display:flex; flex-direction:column; position:relative }
+/* área central: barra de contexto em cima, conteúdo embaixo. O brilho do
+   tema vive aqui (não só na grade) — senão a faixa do player de música
+   aparece como um bandão preto em volta da pílula */
+.main-col { flex:1; min-width:0; display:flex; flex-direction:column;
+  position:relative; background:var(--glow-top) }
 .ctx-bar {
   display:flex; align-items:center; gap:10px; height:48px; padding:0 16px; flex:none;
   background:var(--glass-bg-strong);
