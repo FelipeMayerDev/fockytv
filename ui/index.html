@@ -1128,6 +1128,13 @@ function stop () {
     ytShare = null
     ytBarHide()
   }
+  // espelho publicado: solta o canvas
+  if (mirrorPipe) {
+    clearInterval(mirrorPipe.timer)
+    mirrorPipe.out.getTracks().forEach(t => t.stop())
+    mirrorPipe.v.remove()
+    mirrorPipe = null
+  }
   release(pc); pc = null; sender = null; audioSender = null; camOnly = false
   stream?.getTracks().forEach(t => t.stop()); stream = null
   setLive(false)
@@ -1216,6 +1223,44 @@ async function startCompose () {
               timer: setInterval(draw, 1000 / fps) }
   await sender.replaceTrack(out.getVideoTracks()[0])
   return overlay
+}
+
+// espelho publicado: webcam sozinha no ar — redesenha o vídeo flipado num
+// canvas e troca a trilha no sender (replaceTrack, ninguém cai). Com
+// composição ativa (tela+câmera/overlay) não se aplica: o canvas é dela.
+let mirrorPipe = null
+async function setPublishedMirror (on) {
+  if (!pc || !camOnly || overlay) return
+  if (!on) {
+    if (!mirrorPipe) return
+    clearInterval(mirrorPipe.timer)
+    mirrorPipe.out.getTracks().forEach(t => t.stop())
+    mirrorPipe.v.srcObject = null
+    mirrorPipe = null
+    return sender.replaceTrack(stream.getVideoTracks()[0]).catch(() => {})
+  }
+  if (mirrorPipe) return
+  const v = Object.assign(document.createElement('video'),
+    { srcObject: stream, muted: true, autoplay: true })
+  v.className = 'yt-src'
+  document.body.append(v)
+  await v.play().catch(() => {})
+  const set = stream.getVideoTracks()[0].getSettings()
+  const canvas = document.createElement('canvas')
+  canvas.width = set.width ?? 640
+  canvas.height = set.height ?? 480
+  const ctx = canvas.getContext('2d')
+  const fps = Math.round(set.frameRate ?? 30)
+  const timer = setInterval(() => {
+    ctx.save()
+    ctx.translate(canvas.width, 0)
+    ctx.scale(-1, 1)
+    ctx.drawImage(v, 0, 0, canvas.width, canvas.height)
+    ctx.restore()
+  }, 1000 / fps)
+  const out = canvas.captureStream(fps)
+  await sender.replaceTrack(out.getVideoTracks()[0])
+  mirrorPipe = { v, out, timer }
 }
 
 // desfaz a composição: volta a publicar a tela crua (sem re-encode do canvas)
@@ -2186,6 +2231,21 @@ function buildTile (st, kind = null) {
     // o PiP é do elemento de vídeo do tile: segue tocando solto na tela
     if (document.pictureInPictureElement === video) document.exitPictureInPicture().catch(() => {})
     else video.requestPictureInPicture().catch(e => toast(e.message))
+  }
+  // espelhar: só no meu tile. Local sempre vira na hora; no ar só com a
+  // câmera, o canvas também espelha o que é publicado (replaceTrack)
+  if (key === nick) {
+    const mb = document.createElement('button')
+    mb.className = 's-mirror'
+    mb.title = 'Espelhar imagem'
+    mb.setAttribute('aria-label', 'Espelhar imagem')
+    mb.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="m8 7-4 5 4 5"/><path d="m16 7 4 5-4 5"/></svg>'
+    el.querySelector('.s-acts').prepend(mb)
+    mb.onclick = () => {
+      const on = video.classList.toggle('mirror')
+      mb.classList.toggle('on', on)
+      setPublishedMirror(on).catch(e => toast('Espelho falhou: ' + e.message))
+    }
   }
   el.querySelector('.s-focus').onclick = () => toggleFocus(key)
   el.querySelector('.s-chat').onclick = () => {
