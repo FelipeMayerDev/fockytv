@@ -2232,20 +2232,21 @@ function buildTile (st, kind = null) {
     if (document.pictureInPictureElement === video) document.exitPictureInPicture().catch(() => {})
     else video.requestPictureInPicture().catch(e => toast(e.message))
   }
-  // espelhar: só no meu tile. Local sempre vira na hora; no ar só com a
-  // câmera, o canvas também espelha o que é publicado (replaceTrack)
-  if (key === nick) {
-    const mb = document.createElement('button')
-    mb.className = 's-mirror'
-    mb.title = 'Espelhar imagem'
-    mb.setAttribute('aria-label', 'Espelhar imagem')
-    mb.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="m8 7-4 5 4 5"/><path d="m16 7 4 5-4 5"/></svg>'
-    el.querySelector('.s-acts').prepend(mb)
-    mb.onclick = () => {
-      const on = video.classList.toggle('mirror')
-      mb.classList.toggle('on', on)
-      setPublishedMirror(on).catch(e => toast('Espelho falhou: ' + e.message))
-    }
+  // espelhar: botão DENTRO do player, visível só quando a webcam está no ar.
+  // Local sempre vira na hora; só câmera publicando, o canvas também
+  // espelha o que vai pro ar (replaceTrack)
+  const mb = document.createElement('button')
+  mb.className = 's-mirror'
+  mb.hidden = true
+  mb.title = 'Espelhar imagem'
+  mb.setAttribute('aria-label', 'Espelhar imagem')
+  mb.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="m8 7-4 5 4 5"/><path d="m16 7 4 5-4 5"/></svg>'
+  el.append(mb)
+  mb.onclick = e => {
+    e.stopPropagation()
+    const on = video.classList.toggle('mirror')
+    mb.classList.toggle('on', on)
+    setPublishedMirror(on).catch(err => toast('Espelho falhou: ' + err.message))
   }
   el.querySelector('.s-focus').onclick = () => toggleFocus(key)
   el.querySelector('.s-chat').onclick = () => {
@@ -2350,6 +2351,9 @@ async function refresh () {
       (yt ? `por ${key} · ` : '') +
       `${viewersOf(st).length} assistindo · ${since(st.streamStart)}`
     t.el.querySelector('.badge.time').dataset.start = st.streamStart ?? ''
+    // espelho mora dentro do player e só existe na minha webcam no ar
+    const mb = t.el.querySelector('.s-mirror')
+    if (mb) mb.hidden = !(key === nick && camOnly)
   }
   grid.classList.toggle('solo', !!focusKey)
   musicDockTick()

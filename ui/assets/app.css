@@ -371,6 +371,18 @@ main { flex:1; overflow:hidden; display:flex; flex-direction:column; position:re
 .stream video { width:100%; height:100%; object-fit:contain; display:block }
 .stream video.mirror { transform:scaleX(-1) }
 .s-acts button.on { border-color:hsl(var(--accent)); color:hsl(var(--accent)) }
+/* espelho: mora dentro do player (canto superior esquerdo), sempre visível
+   enquanto a webcam está no ar — sem depender do hover */
+.s-mirror {
+  position:absolute; top:10px; left:10px; z-index:2; width:32px; height:32px;
+  padding:0; border-radius:50%; display:grid; place-items:center;
+  background:var(--scrim); border:1px solid hsl(var(--border)); color:hsl(var(--foreground));
+}
+.s-mirror[hidden] { display:none }
+.s-mirror:hover { background:hsl(var(--surface-2) / .9); opacity:1 }
+.s-mirror.on { border-color:hsl(var(--accent)); color:hsl(var(--accent)) }
+.s-mirror svg { width:16px; height:16px; fill:none; stroke:currentColor;
+  stroke-width:2; stroke-linecap:round; stroke-linejoin:round }
 .stream:hover { border-color:hsl(var(--accent) / .55); box-shadow:var(--shadow-card) }
 .stream .badge {
   position:absolute; top:10px; right:10px; z-index:2;
