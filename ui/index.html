@@ -2245,13 +2245,27 @@ function buildTile (st, kind = null) {
   el.querySelector('.s-acts').prepend(mb)
   mb.onclick = e => {
     e.stopPropagation()
-    const on = video.classList.toggle('mirror')
-    mb.classList.toggle('on', on)
-    setPublishedMirror(on).catch(err => toast('Espelho falhou: ' + err.message))
+    const now = Date.now()
+    if (now - lastMirrorAt < 300) return   // clique duplicado (alguns browsers/cases disparam 2x)
+    lastMirrorAt = now
+    camMirrored = !camMirrored
+    applyCamMirror()
   }
   el.querySelector('.s-focus').onclick = () => toggleFocus(key)
   paintVol()
   return t
+}
+
+// estado do espelho da minha webcam: centralizado (o botão só alterna e
+// reaplica), e o refresh restaura no tile — rebuild de tile não perde mais
+let camMirrored = false, lastMirrorAt = 0
+function applyCamMirror () {
+  for (const [key, t] of tiles) {
+    if (key !== nick) continue
+    t.video.classList.toggle('mirror', camMirrored)
+    t.el.querySelector('.s-mirror')?.classList.toggle('on', camMirrored)
+  }
+  setPublishedMirror(camMirrored).catch(err => toast('Espelho falhou: ' + err.message))
 }
 
 // (re)conecta a sessão WHEP de um tile; chamado pelo refresh a cada poll
@@ -2346,9 +2360,16 @@ async function refresh () {
       (yt ? `por ${key} · ` : '') +
       `${viewersOf(st).length} assistindo · ${since(st.streamStart)}`
     t.el.querySelector('.badge.time').dataset.start = st.streamStart ?? ''
-    // espelho mora dentro do player e só existe na minha webcam no ar
+    // espelho mora nas ações do player e só existe na minha webcam no ar;
+    // o estado (camMirrored) é reaplicado aqui — rebuild de tile não desfaz
     const mb = t.el.querySelector('.s-mirror')
-    if (mb) mb.hidden = !(key === nick && camOnly)
+    if (mb) {
+      mb.hidden = !(key === nick && camOnly)
+      if (key === nick) {
+        t.video.classList.toggle('mirror', camMirrored)
+        mb.classList.toggle('on', camMirrored)
+      }
+    }
   }
   grid.classList.toggle('solo', !!focusKey)
   musicDockTick()
