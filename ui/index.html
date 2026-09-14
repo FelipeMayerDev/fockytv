@@ -1241,7 +1241,9 @@ async function setPublishedMirror (on) {
     mirrorPipe.out.getTracks().forEach(t => t.stop())
     mirrorPipe.v.srcObject = null
     mirrorPipe = null
-    return sender.replaceTrack(stream.getVideoTracks()[0]).catch(() => {})
+    await sender.replaceTrack(stream.getVideoTracks()[0]).catch(() => {})
+    applyCamMirrorView()
+    return
   }
   if (mirrorPipe) return
   const v = Object.assign(document.createElement('video'),
@@ -1265,6 +1267,7 @@ async function setPublishedMirror (on) {
   const out = canvas.captureStream(fps)
   await sender.replaceTrack(out.getVideoTracks()[0])
   mirrorPipe = { v, out, timer }
+  applyCamMirrorView()
 }
 
 // desfaz a composição: volta a publicar a tela crua (sem re-encode do canvas)
@@ -2257,15 +2260,23 @@ function buildTile (st, kind = null) {
 }
 
 // estado do espelho da minha webcam: centralizado (o botão só alterna e
-// reaplica), e o refresh restaura no tile — rebuild de tile não perde mais
+// reaplica), e o refresh restaura no tile — rebuild de tile não perde mais.
+// IMPORTANTE: com o espelho PUBLICADO (canvas no sender), o tile do host já
+// recebe a imagem flipada pelo WHEP — o flip local ficaria duplo (voltaria
+// a parecer não-espelhado). A classe local só vale no preview (sem pipe).
 let camMirrored = false, lastMirrorAt = 0
-function applyCamMirror () {
+const camViewMirror = () => camMirrored && !mirrorPipe
+function applyCamMirrorView () {
+  const view = camViewMirror()
   for (const [key, t] of tiles) {
     if (key !== nick) continue
-    t.video.classList.toggle('mirror', camMirrored)
+    t.video.classList.toggle('mirror', view)
     t.el.querySelector('.s-mirror')?.classList.toggle('on', camMirrored)
   }
-  setPublishedMirror(camMirrored).catch(err => toast('Espelho falhou: ' + err.message))
+}
+function applyCamMirror () {
+  setPublishedMirror(camMirrored).then(applyCamMirrorView)
+    .catch(err => { toast('Espelho falhou: ' + err.message); applyCamMirrorView() })
 }
 
 // (re)conecta a sessão WHEP de um tile; chamado pelo refresh a cada poll
@@ -2361,12 +2372,13 @@ async function refresh () {
       `${viewersOf(st).length} assistindo · ${since(st.streamStart)}`
     t.el.querySelector('.badge.time').dataset.start = st.streamStart ?? ''
     // espelho mora nas ações do player e só existe na minha webcam no ar;
-    // o estado (camMirrored) é reaplicado aqui — rebuild de tile não desfaz
+    // a classe local segue o que o tile mostra: flip CSS só no preview —
+    // com o espelho publicado, o próprio WHEP já entrega flipado
     const mb = t.el.querySelector('.s-mirror')
     if (mb) {
       mb.hidden = !(key === nick && camOnly)
       if (key === nick) {
-        t.video.classList.toggle('mirror', camMirrored)
+        t.video.classList.toggle('mirror', camViewMirror())
         mb.classList.toggle('on', camMirrored)
       }
     }
