@@ -285,11 +285,11 @@ main { flex:1; overflow:hidden; display:flex; flex-direction:column; position:re
 }
 .s-acts input[type=range]::-webkit-slider-thumb { appearance:none; width:12px; height:12px;
   border-radius:50%; background:hsl(var(--foreground)) }
-/* foco: tile em destaque atravessa a grade (16/9 da largura toda);
-   os outros dois continuam lado a lado embaixo */
-#grid-live.focus-mode { grid-template-columns:repeat(2,1fr) }
-.stream.focus { grid-column:1/-1 }
-#grid-live.focus-mode[data-n="3"] > .stream:last-child:nth-child(odd) {
+/* foco (solo): só a live escolhida fica visível, 16/9 da largura toda;
+   clicar nela de novo volta pra grade */
+#grid-live.solo { grid-template-columns:1fr }
+#grid-live.solo > .stream:not(.focus) { display:none }
+#grid-live.solo[data-n="3"] > .stream:last-child:nth-child(odd) {
   grid-column:auto; width:auto; justify-self:stretch }
 /* três tiles: dois em cima, um embaixo centralizado */
 #grid-live[data-n="3"] { grid-template-columns:1fr 1fr }

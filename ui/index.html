@@ -1882,18 +1882,23 @@ const tiles = new Map()   // streamKey -> { el, video, pc, loading, vol, on }
 let focusKey = null       // tile em destaque (modo foco), ou null
 
 function releaseTiles () {
-  for (const [, t] of tiles) release(t.pc)
+  for (const [, t] of tiles) {
+    if (document.pictureInPictureElement === t.video)
+      document.exitPictureInPicture().catch(() => {})
+    release(t.pc)
+  }
   tiles.clear()
   focusKey = null
   const grid = $('#grid-live')
-  grid.classList.remove('focus-mode')
+  grid.classList.remove('solo')
   delete grid.dataset.n
 }
 
 function toggleFocus (key) {
   focusKey = focusKey === key ? null : key
   const grid = $('#grid-live')
-  grid.classList.toggle('focus-mode', !!focusKey)
+  // foco vira solo: só a live escolhida fica na tela; clicar nela desfoca
+  grid.classList.toggle('solo', !!focusKey)
   for (const [k, t] of tiles) {
     t.el.classList.toggle('focus', k === focusKey)
     t.el.style.order = k === focusKey ? '-1' : ''
@@ -1918,6 +1923,11 @@ function buildTile (st) {
                 title="Volume" aria-label="Volume dessa transmissão">
          <button class="s-vol" title="Som">
            <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/></svg>
+         </button>
+         <button class="s-pip" title="Picture in picture" aria-label="Picture in picture"
+                 ${'pictureInPictureEnabled' in document ? '' : 'hidden'}>
+           <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/>
+             <rect x="12" y="12" width="8" height="6" rx="1"/></svg>
          </button>
          <button class="s-focus" title="Focar" aria-label="Focar transmissão">
            <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/>
@@ -1954,6 +1964,11 @@ function buildTile (st) {
   el.querySelector('.s-acts').onclick = e => e.stopPropagation()
   el.querySelector('.s-volr').oninput = e => { t.vol = +e.target.value; applyVol(); paintVol() }
   el.querySelector('.s-vol').onclick = () => { t.on = !t.on; applyVol(); paintVol() }
+  el.querySelector('.s-pip').onclick = () => {
+    // o PiP é do elemento de vídeo do tile: segue tocando solto na tela
+    if (document.pictureInPictureElement === video) document.exitPictureInPicture().catch(() => {})
+    else video.requestPictureInPicture().catch(e => toast(e.message))
+  }
   el.querySelector('.s-focus').onclick = () => toggleFocus(key)
   el.querySelector('.s-chat').onclick = () => {
     chatOpen(key)
@@ -2045,7 +2060,7 @@ async function refresh () {
       `${viewersOf(st).length} assistindo · ${since(st.streamStart)}`
     t.el.querySelector('.badge.time').dataset.start = st.streamStart ?? ''
   }
-  grid.classList.toggle('focus-mode', !!focusKey)
+  grid.classList.toggle('solo', !!focusKey)
 }
 
 // duração no canto direito da thumb: conta de segundo em segundo enquanto o
