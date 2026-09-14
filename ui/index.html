@@ -3217,7 +3217,7 @@ const jams = {}          // uma instância por modo: não reconfigurar encoder a
 const jamFor = async mode => {
   const key = MODES.has(mode) ? mode : 'music'
   if (jams[key]) return jams[key]
-  const j = await import('./jam.js?v=7').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+  const j = await import('./jam.js?v=8').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
   j.onChat(m => {
     if (m.type === 'yt') return jamYtEvent(m)
     jamChatLog.push(m); jamChatRender()
@@ -3396,6 +3396,10 @@ $('#vs-net').onmouseenter = () => {
   vsDetails()
 }
 $('#vs-net').onmouseleave = () => { $('#vs-pop').hidden = true }
+
+// pré-aquecimento do motor de voz: import + AudioContext + worklets fora do
+// caminho do clique — entrar no canal vira só WS + mic (em paralelo)
+setTimeout(() => { jamFor('voice').catch(() => {}); jamFor('music').catch(() => {}) }, 1500)
 
 // ── configuração do microfone (popover do dock) ──────────────────────────
 // O padrão segue voz crua (música, AEC/NS/AGC fora); ligar os toggles vira
@@ -3847,13 +3851,15 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
   jamErrSet(null)
   try {
     if (jamJoined) {
-      await jam.leave()
-      jamNativeStop()
-      jamYtClear()
-      clearInterval(jamTimer)
+      // saída otimista: a UI responde na hora; o motor desliga por trás
       jamJoined = false
       jamRoom = null
       dockMuted = false
+      voiceUI()
+      jam.leave().catch(() => {})
+      jamNativeStop()
+      jamYtClear()
+      clearInterval(jamTimer)
       $('#jam-pills').replaceChildren()
       jamChatLog = []
       jamChatRender()
@@ -3863,7 +3869,6 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
       $('#jam-chat').hidden = true
       $('#jam-leave').hidden = true
       $('#jam-main').classList.remove('joined')
-      voiceUI()
       return
     }
     jam = await jamFor(mode)
@@ -3884,7 +3889,6 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
         jamRoom = null
         dockMuted = false
         voiceUI()
-        toast('Você foi desconectado da voz.', null, 'warning')
       }
     },
       ms ? { micStream: ms }
@@ -3901,10 +3905,6 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
     $('#jam-main').classList.add('joined')
     jamChatLog = []
     jamChatRender()
-    if (!$('#jam-view').classList.contains('on')) {
-      // entrou pela sidebar/dock: o Estúdio nem precisa abrir
-      toast(`Você entrou no canal de voz "${room}". Fones de ouvido!`, null, 'info')
-    }
     jamRender()
     jamTimer = setInterval(jamRender, 1000)
     voiceUI()

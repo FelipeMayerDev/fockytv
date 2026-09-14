@@ -330,30 +330,42 @@ export async function initJam ({ serverUrl }) {
       ;({ frameMs: fms, frame48: f48, channels: nch } = MODES[mode])
       voiceAcc = null; voicePos = 0
       room = _room; me = _nick; onState = _onState || onState
-      ws = new WebSocket(`${wsUrl}/api/fixed/ws/jam?room=${encodeURIComponent(room)}&nick=${encodeURIComponent(me)}`)
-      ws.onmessage = e => {
-        try { onSignal(JSON.parse(e.data)) } catch {}
-      }
-      ws.onclose = () => { if (room) emit() }
-      await new Promise((res, rej) => {
+      // WS e microfone em PARALELO: os dois custos de entrada são
+      // independentes — em série custam o dobro no melhor caso
+      let micErr = null
+      const wsOpen = new Promise((res, rej) => {
+        ws = new WebSocket(`${wsUrl}/api/fixed/ws/jam?room=${encodeURIComponent(room)}&nick=${encodeURIComponent(me)}`)
+        ws.onmessage = e => {
+          try { onSignal(JSON.parse(e.data)) } catch {}
+        }
         ws.onopen = res
-        ws.onerror = () => rej(new Error('sinalização indisponível'))
+        ws.onerror = () => rej(micErr ?? new Error('sinalização indisponível'))
+        ws.onclose = () => { if (room) emit() }
       })
-
-      // Fonte do microfone: por padrão getUserMedia sem nenhum processamento
-      // de voz (fones são obrigatórios — sem AEC o alto-falante vira eco). No
-      // app desktop, o chamador pode injetar o PCM do helper WASAPI exclusivo
-      // via micStream: captura com ~10ms de latência, fora da pipeline de voz
-      // do Chromium inteira. `audio` sobrescreve os processamentos (a UI de
-      // configuração de mic liga AEC/NS/AGC pra conversa, não pra música).
-      micStream = extMic ?? await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false, noiseSuppression: false, autoGainControl: false,
-          channelCount: nch, sampleRate: 48000,
-          ...(audio ?? {}),
-          ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-        },
+      const micReady = (extMic
+        ? Promise.resolve(extMic)
+        : navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+              channelCount: nch, sampleRate: 48000,
+              ...(audio ?? {}),
+              ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+            },
+          })
+      ).catch(e => {
+        micErr = e
+        throw e
       })
+      try {
+        micStream = await micReady
+        await wsOpen
+      } catch (e) {
+        try { ws?.close() } catch {}
+        ws = null
+        micStream?.getTracks().forEach(t => t.stop())
+        micStream = null
+        throw e
+      }
       await ctx.resume()
       await startSend(micStream)
       // jitter alvo do modo: conversa tolera mais buffer, música não
