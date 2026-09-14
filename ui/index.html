@@ -516,8 +516,9 @@
   <h3 id="share-title">Compartilhar tela</h3>
   <p class="desc" id="share-desc">Escolha o que transmitir e ajuste a qualidade.</p>
 
-  <!-- fonte: tela do computador ou conteúdo do YouTube (vídeo/áudio) -->
-  <div class="field">
+  <!-- fonte: tela do computador ou conteúdo do YouTube (vídeo/áudio).
+       Some quando o diálogo abre pra câmera — ela não tem fonte -->
+  <div class="field" id="src-field">
     <label for="share-src">Fonte</label>
     <div class="seg" id="share-src">
       <button type="button" data-src="screen" class="on">Tela</button>
@@ -1672,7 +1673,9 @@ async function openShareDialog (isSwap, cam) {
   }
   $('#share-err').textContent = ''
   // troca de janela e câmera por cima só existem na fonte tela
-  if (isSwap || (cam && pc)) shareSrc = 'screen'
+  // câmera não tem seletor de fonte (e nem pode herdar um YT escolhido antes)
+  if (isSwap || cam) shareSrc = 'screen'
+  $('#src-field').hidden = !!cam
   document.querySelectorAll('#share-src button').forEach(x =>
     x.classList.toggle('on', x.dataset.src === shareSrc))
   const adding = !!cam && !!pc          // câmera entrando por cima da tela
@@ -1701,8 +1704,8 @@ async function openShareDialog (isSwap, cam) {
     $('#sources').hidden = true
     $('#portal-note').hidden = true
     $('#faudio-row').hidden = true
+    $('#yt-row').hidden = true
     $('#dlg-share').dataset.swap = ''
-    updateShareSrcUI()
     $('#dlg-share').showModal()
     return
   }
