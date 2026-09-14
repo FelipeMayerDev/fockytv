@@ -3237,7 +3237,8 @@ function renderVoice () {
     wrap.append(b)
     for (const m of members) {
       const row = document.createElement('div')
-      row.className = 'vmem' + (m === nick ? ' on' : '')
+      row.className = 'vmem' + (m === nick ? ' on' : '') +
+        (m === nick && jamJoined && dockMuted ? ' muted' : '')
       row.dataset.peer = m
       row.innerHTML = '<span class="vdot"></span>'
       row.append(Object.assign(document.createElement('span'), { textContent: m }))
@@ -3266,6 +3267,10 @@ function voiceUI () {
     : '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>'
   // bola do mic: cinza sem fala, verde falando, vermelho mutado
   b.classList.toggle('muted', dockMuted)
+  // e a minha bola na listagem do canal segue o mesmo semáforo
+  const myRow = document.querySelector(`#voice-chans .vmem[data-peer="${CSS.escape(nick)}"]`)
+  myRow?.classList.toggle('muted', jamJoined && dockMuted)
+  if (dockMuted) myRow?.classList.remove('talking')
   // amostragem de latência vive enquanto a conexão existir
   if (jamJoined) { if (!vsTimer) vsStart() } else vsStop()
 }
