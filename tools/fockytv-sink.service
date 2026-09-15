@@ -1,0 +1,15 @@
+# Sink de áudio sem o Discord, pra transmitir pelo navegador.
+#   cp tools/fockytv-sink.service ~/.config/systemd/user/
+#   systemctl --user enable --now fockytv-sink
+[Unit]
+Description=FockyTV: sink de áudio sem o Discord
+After=pipewire.service pipewire-pulse.service
+Wants=pipewire-pulse.service
+
+[Service]
+ExecStart=/usr/bin/env node %h/Projects/fockytv/tools/fockytv-sink.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

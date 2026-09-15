@@ -21,16 +21,21 @@ const sh = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8' }).trim()
 
 let moduleId = null
 const sinkExists = () => sh('pactl', ['list', 'short', 'sinks']).split('\n').some(l => l.split('\t')[1] === SINK)
-if (sinkExists()) console.log(`sink "${SINK}" já existe, reaproveitando`)
-else {
+// recria se sumir: o módulo morre junto com um pipewire-pulse reiniciado (ou
+// alguém descarregando à mão) e a gente ficaria ligando app num sink fantasma
+const ensureSink = () => {
+  if (sinkExists()) return
   moduleId = sh('pactl', ['load-module', 'module-null-sink', `sink_name=${SINK}`,
     `sink_properties=device.description="FockyTV (sem Discord)"`])
+  linked.clear()
   console.log(`sink "${SINK}" criado (módulo ${moduleId})`)
 }
 console.log('no navegador, escolha "Monitor of FockyTV" como som da transmissão. Ctrl+C para desfazer.')
 
 const linked = new Set()   // object.serial (nunca reusado)
-const tick = () => execFile('pw-dump', { maxBuffer: 16 << 20 }, (err, out) => {
+ensureSink()
+console.log('no navegador, escolha "Monitor of FockyTV" como som da transmissão. Ctrl+C para desfazer.')
+const tick = () => (ensureSink(), execFile('pw-dump', { maxBuffer: 16 << 20 }, (err, out) => {
   if (err) return
   let nodes
   try { nodes = JSON.parse(out).filter(o => o.type === 'PipeWire:Interface:Node') } catch { return }
@@ -47,7 +52,7 @@ const tick = () => execFile('pw-dump', { maxBuffer: 16 << 20 }, (err, out) => {
     execFile('pw-link', [String(n.id), String(sink.id)], e =>
       console.log(e ? `  ${who}: link falhou (${e.message.trim().split('\n').pop()})` : `  + ${who}`))
   }
-})
+}))
 tick()
 const timer = setInterval(tick, 1000)
 
