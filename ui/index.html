@@ -705,6 +705,7 @@ async function capture (fps, withAudio, withCursor) {
       ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
       : false,
     systemAudio: withAudio ? 'include' : 'exclude',
+    windowAudio: withAudio ? 'window' : 'exclude',
     surfaceSwitching: 'include',
   })
 }
