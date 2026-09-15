@@ -52,6 +52,7 @@ const extractBlock = (src, from, to) => {
 
 const code = [
   extractBlock(html, 'const TALK_ON', 'const jamTalking'),
+  extractBlock(html, 'const roomKind', "'voice'"),
   extractFn(html, 'renderVoice'),
   extractFn(html, 'jamLevels'),
 ].join('\n')
@@ -77,7 +78,7 @@ vm.createContext(sandbox)
 // prelude + código extraído: estado global que as funções tocam
 vm.runInContext(`
   let nick = 'ana'
-  let jamJoined = false, jamRoom = null, jamPending = null, dockMuted = false
+  let jamJoined = false, jamRoom = null, jamPending = null, jamPendingMode = null, dockMuted = false
   const jamLeft = new Map()
   let voiceState = []
   const tiles = new Map()
@@ -153,6 +154,36 @@ run('dockMuted = false')
 now = 2300
 run(`jamLevels({ self: 0.5, peers: {} }); jamLoudAt.clear(); renderVoice()`)
 ok(!talking('ana') && !talking('beto'), 'sair da sala apaga a luz de todo mundo')
+
+// ── issue #6: Estúdio (kind music) não é canal de conversa ────────────────
+const chanNames = () =>
+  [...window.document.querySelectorAll('#voice-chans .vchan > button > span:first-of-type')]
+    .map(s => s.textContent)
+
+run(`jamPending = null; jamPendingMode = null
+     voiceState = [
+       { room: 'geral', members: ['ana', 'beto'] },
+       { room: 'sala', kind: 'music', members: ['carla'] },
+       { room: 'outra', members: ['duda'] },
+     ]
+     renderVoice()`)
+ok(chanNames().join() === 'geral,outra',
+  'sala music fica fora da lista; canais de conversa entram')
+
+run(`voiceState = [
+       { room: 'geral', members: ['ana'] },
+       { room: 'sala', members: ['carla'] },   // servidor antigo: sem kind
+     ]
+     renderVoice()`)
+ok(chanNames().join() === 'geral',
+  'sem kind (servidor antigo), convenção de nome esconde o Estúdio')
+
+// meu join do Estúdio não vira canal "conectando…" na sidebar de conversa
+run(`jamPending = 'sala'; jamPendingMode = 'music'; renderVoice()`)
+ok(!chanNames().includes('sala'), 'join do Estúdio não aparece como canal de voz')
+run(`jamPending = 'geral-2'; jamPendingMode = 'voice'; renderVoice()`)
+ok(chanNames().includes('geral-2'), 'join de conversa aparece como canal de voz')
+run('jamPending = null; jamPendingMode = null; renderVoice()')
 
 console.log(failures ? `\n${failures} falha(s)` : '\ntudo PASS')
 process.exit(failures ? 1 : 0)

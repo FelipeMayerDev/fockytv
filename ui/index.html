@@ -3288,7 +3288,7 @@ const jams = {}          // uma instância por modo: não reconfigurar encoder a
 const jamFor = async mode => {
   const key = MODES.has(mode) ? mode : 'music'
   if (jams[key]) return jams[key]
-  const j = await import('./jam.js?v=13').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+  const j = await import('./jam.js?v=14').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
   j.onChat(m => {
     if (m.type === 'yt') return jamYtEvent(m)
     jamChatLog.push(m); jamChatRender()
@@ -3299,6 +3299,7 @@ const jamFor = async mode => {
 }
 let jamRoom = null       // canal de voz em que estou conectado
 let jamPending = null    // canal que estamos conectando (entrada otimista)
+let jamPendingMode = null   // modo do join em andamento: Estúdio não é canal
 const jamLeft = new Map()   // sala -> quando saímos (ponte até o member-left do WS)
 let dockMuted = false    // mic silenciado pelo dock (não derruba a conexão)
 let voiceState = []      // salas: [{ room, members }] — fonte é o WS de presença
@@ -3306,14 +3307,20 @@ let voiceState = []      // salas: [{ room, members }] — fonte é o WS de pres
 // outro ambiente (música) e não aparece na lista
 const VOICE_MAIN = 'geral'
 const ESTUDIO_ROOM = 'sala'
+// tipo da sala: 'music' = Estúdio (pipeline própria), 'voice' = conversa.
+// Servidor novo manda `kind` (primeiro join define); antigo não manda e a
+// convenção de nome cobre o Estúdio — conversa sempre esteve no VOICE_MAIN.
+const roomKind = r => r.kind ?? (r.room === ESTUDIO_ROOM ? 'music' : 'voice')
 
 // sidebar: canais de voz com membros; LIVE vermelho em quem está no ar
 function renderVoice () {
   const box = $('#voice-chans')
   const liveKeys = new Set([...tiles.keys()])
+  // Estúdio (kind music) não é canal de conversa: não entra na lista — nem
+  // como sala alheia, nem como "conectando…" do meu próprio join (#6)
   const rooms = [...new Set([VOICE_MAIN,
-    ...voiceState.map(r => r.room).filter(r => r !== ESTUDIO_ROOM),
-    ...(jamPending ? [jamPending] : [])])]
+    ...voiceState.filter(r => roomKind(r) !== 'music').map(r => r.room),
+    ...(jamPending && jamPendingMode === 'voice' ? [jamPending] : [])])]
   box.replaceChildren(...rooms.map(room => {
     const wrap = document.createElement('div')
     wrap.className = 'vchan'
@@ -3391,7 +3398,7 @@ function presenceConnect () {
     } else if (m.type === 'member-joined') {
       const r = voiceState.find(x => x.room === m.room)
       if (r) { if (!r.members.includes(m.nick)) r.members.push(m.nick) }
-      else voiceState.push({ room: m.room, members: [m.nick] })
+      else voiceState.push({ room: m.room, kind: m.kind, members: [m.nick] })
       // reentrei (ou a queda/expulsão foi só o WS trocando de dono): o
       // marcador otimista de saída perdeu a vez
       if (m.nick === nick) jamLeft.delete(m.room)
@@ -3565,7 +3572,15 @@ const jamMicOpts = (mode = jamMode) => ({
   noiseSuppression: jamMicPref('ns', mode),
   autoGainControl: jamMicPref('agc', mode),
 })
-const jamMicDevice = () => $('#dock-dev').value || $('#jam-dev').value || undefined
+// dispositivo por modo (issue #6): o Estúdio quer a interface de áudio, a
+// conversa quer o fone com mic — cada um com preferência própria. O legado
+// compartilhado ('jam-device') vale como última queda na migração.
+const jamDevKey = mode => 'jam-device-' + (mode === 'music' ? 'music' : 'voice')
+const jamMicDevice = (mode = jamMode) => {
+  const sel = mode === 'voice' ? $('#dock-dev') : $('#jam-dev')
+  return sel?.value || localStorage.getItem(jamDevKey(mode)) ||
+    localStorage.getItem('jam-device') || undefined
+}
 
 function micPopPaint () {
   // o popover é dos canais de voz: mostra os padrões do modo conversa
@@ -3592,14 +3607,14 @@ $('#dock-mic-cfg').onclick = e => {
   e.stopPropagation()
   const pop = $('#mic-pop')
   pop.hidden = !pop.hidden
-  if (!pop.hidden) { micPopPaint(); jamListMics($('#dock-dev')) }
+  if (!pop.hidden) { micPopPaint(); jamListMics($('#dock-dev'), 'voice') }
 }
 $('#mic-pop').onclick = e => e.stopPropagation()   // clique dentro não fecha
 document.addEventListener('click', e => { $('#mic-pop').hidden = true })
 for (const [id, key] of [['#dock-aec', 'aec'], ['#dock-ns', 'ns'], ['#dock-agc', 'agc']])
   $(id).onchange = e => { jamMicPrefs.set(key, e.target.checked); applyMicSettings() }
 $('#dock-dev').addEventListener('change', () => {
-  localStorage.setItem('jam-device', $('#dock-dev').value)
+  localStorage.setItem(jamDevKey('voice'), $('#dock-dev').value)
   applyMicSettings()
 })
 
@@ -4034,6 +4049,7 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
     // entrada otimista: entra na UI na hora ("Conectando…") e fecha o
     // back por trás — WS e mic em paralelo lá dentro
     jamPending = room
+    jamPendingMode = mode
     voiceUI()
     renderVoice()
     jam = await jamFor(mode)
@@ -4059,12 +4075,13 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
       }
     },
       ms ? { micStream: ms }
-         : { deviceId: jamMicDevice(), audio: jamMicOpts(mode), mode })
+         : { deviceId: jamMicDevice(mode), audio: jamMicOpts(mode), mode })
     jam.setMicGain(dockMuted ? 0 : (+localStorage.getItem('jam-micgain') || 1))
     jamJoined = true
     jamRoom = room
     jamMode = mode
     jamPending = null
+    jamPendingMode = null
     // reentrada: marcação de saída antiga não pode me esconder da sala
     // em que acabei de entrar (o member-joined do WS confirmaria do mesmo jeito)
     jamLeft.delete(room)
@@ -4082,6 +4099,7 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
     renderVoice()
   } catch (e) {
     jamPending = null
+    jamPendingMode = null
     jamNativeStop(); jamErrSet(e.message); voiceUI(); renderVoice()
     // entrou pela sidebar/dock: o painel do Estúdio não está na tela pra
     // mostrar o erro — ele precisa chegar até quem clicou no canal
@@ -4092,7 +4110,7 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
 $('#jam-toggle').onclick = () => jamToggleJoin()
 // lista os dispositivos de entrada; os nomes só vêm depois da permissão de
 // mic, então se vierem em branco pede um acesso descartável e lista de novo
-async function jamListMics (sel = $('#jam-dev')) {
+async function jamListMics (sel = $('#jam-dev'), mode = 'music') {
   const fill = () => {
     sel.replaceChildren(...devices.filter(d => d.kind === 'audioinput').map((d, i) => {
       const opt = document.createElement('option')
@@ -4100,7 +4118,7 @@ async function jamListMics (sel = $('#jam-dev')) {
       opt.textContent = d.label || `Microfone ${i + 1}`
       return opt
     }))
-    const saved = localStorage.getItem('jam-device')
+    const saved = localStorage.getItem(jamDevKey(mode)) || localStorage.getItem('jam-device')
     if (saved && [...sel.options].some(o => o.value === saved)) sel.value = saved
   }
   let devices = await navigator.mediaDevices.enumerateDevices()
@@ -4115,7 +4133,7 @@ async function jamListMics (sel = $('#jam-dev')) {
   }
 }
 $('#jam-dev').addEventListener('change', () =>
-  localStorage.setItem('jam-device', $('#jam-dev').value))
+  localStorage.setItem(jamDevKey('music'), $('#jam-dev').value))
 $('#jam-native').addEventListener('change', () =>
   $('#jam-dev').disabled = $('#jam-native').checked)
 $('#jam-micgain').addEventListener('input', () => {

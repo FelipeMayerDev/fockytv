@@ -1026,6 +1026,11 @@ app.post("/api/fixed/music/stop", wrap(async (req, res) => {
 const jamWss = new WebSocketServer({ noServer: true })
 // sala -> Map(nick -> ws). Reuso de nick derruba o antigo (reconexão).
 const jamRooms = new Map()
+// sala -> 'music' | 'voice'. O primeiro join define (mode do cliente vai na
+// query como type); sala vazia esquece. É o que separa Estúdio de canal de
+// conversa no /api/fixed/jam e nos eventos de presença (campo `kind`) — sem
+// convenção de nome.
+const jamRoomTypes = new Map()
 
 const jamSend = (ws, obj) => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj)) }
 
@@ -1038,13 +1043,17 @@ jamWss.on("connection", (ws, req) => {
   const room = (u.searchParams.get("room") ?? "").trim().slice(0, 64)
   const nick = (u.searchParams.get("nick") ?? "").trim().slice(0, 32)
   if (!room || !nick) return ws.close(4001, "room e nick obrigatórios")
+  // sem type (cliente antigo) a sala é conversa: era o comportamento dos
+  // canais genéricos antes do Estúdio ganhar pipeline própria
+  const type = u.searchParams.get("type") === "music" ? "music" : "voice"
 
   const members = jamRooms.get(room) ?? new Map()
+  if (!jamRooms.has(room)) jamRoomTypes.set(room, type)
   const old = members.get(nick)
   if (old && old !== ws) { jamSend(old, { type: "evicted" }); old.close() }
   members.set(nick, ws)
   jamRooms.set(room, members)
-  presenceBroadcast({ type: "member-joined", room, nick })
+  presenceBroadcast({ type: "member-joined", room, nick, kind: type })
   log(`[jam] ${nick} entrou em "${room}" (${members.size})`)
 
   // quem já está na sala aprende sobre o novo; o novo recebe a lista pra abrir
@@ -1077,9 +1086,9 @@ jamWss.on("connection", (ws, req) => {
     if (members.get(nick) !== ws) return // reconexão já assumiu o nick
     members.delete(nick)
     if (members.size) jamRooms.set(room, members)
-    else jamRooms.delete(room)
+    else { jamRooms.delete(room); jamRoomTypes.delete(room) }
     for (const ows of members.values()) jamSend(ows, { type: "peer-left", nick })
-    presenceBroadcast({ type: "member-left", room, nick })
+    presenceBroadcast({ type: "member-left", room, nick, kind: jamRoomTypes.get(room) ?? type })
     log(`[jam] ${nick} saiu de "${room}" (${members.size})`)
   }
   ws.on("close", leave)
@@ -1096,7 +1105,7 @@ const presenceClients = new Set()
 
 const jamSnapshot = () => {
   const rooms = [...jamRooms.entries()].map(([room, members]) =>
-    ({ room, members: [...members.keys()] }))
+    ({ room, kind: jamRoomTypes.get(room) ?? "voice", members: [...members.keys()] }))
   return { status: rooms.length ? "live" : "idle", rooms,
            total: rooms.reduce((n, r) => n + r.members.length, 0) }
 }

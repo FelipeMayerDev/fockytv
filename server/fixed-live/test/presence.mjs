@@ -56,7 +56,9 @@ await new Promise((res, rej) => {
 })
 
 const base = `ws://127.0.0.1:${PORT}`
-const jamUrl = (room, nick) => `${base}/api/fixed/ws/jam?room=${encodeURIComponent(room)}&nick=${encodeURIComponent(nick)}`
+const jamUrl = (room, nick, type) =>
+  `${base}/api/fixed/ws/jam?room=${encodeURIComponent(room)}&nick=${encodeURIComponent(nick)}` +
+  (type ? `&type=${type}` : '')
 
 let failures = 0
 const ok = (cond, name) => {
@@ -86,17 +88,23 @@ const none = (ws, pred, ms) => new Promise(resolve => {
 })
 
 const opened = ws => new Promise((res, rej) => { ws.on('open', () => res(ws)); ws.on('error', rej) })
+// snapshot via conexão nova: o listener entra ANTES do open — o servidor
+// manda o snapshot no ato da conexão, e evento sem listener é mensagem perdida
 const snapshotOf = async () => {
-  const p = await opened(new WebSocket(`${base}/api/fixed/ws/presence`))
-  const snap = await next(p, m => m.type === 'presence')
+  const p = new WebSocket(`${base}/api/fixed/ws/presence`)
+  const snapP = next(p, m => m.type === 'presence')
+  await opened(p)
+  const snap = await snapP
   p.close()
   return snap
 }
 
 try {
-  // presença: o observador que nunca entra em sala nenhuma
-  const p1 = await opened(new WebSocket(`${base}/api/fixed/ws/presence`))
-  const snap1 = await next(p1, m => m.type === 'presence')
+  // presença 1: o observador que nunca entra em sala nenhuma
+  const p1 = new WebSocket(`${base}/api/fixed/ws/presence`)
+  const snap1P = next(p1, m => m.type === 'presence')
+  await opened(p1)
+  const snap1 = await snap1P
   ok(snap1 && Array.isArray(snap1.rooms) && 'total' in snap1, 'snapshot tem rooms[] e total')
 
   // membro entra: presença aprende na hora, sem poll
@@ -148,6 +156,29 @@ try {
   // ping/pong no canal de presença
   p1.send(JSON.stringify({ type: 'ping', t: 42 }))
   ok((await next(p1, m => m.type === 'pong'))?.t === 42, 'pong ecoa o t')
+
+  // tipos de sala (issue #6): Estúdio (music) x canal de conversa (voice)
+  const carla = await opened(new WebSocket(jamUrl('estudio-x', 'carla', 'music')))
+  const mjKind = await next(p1, m => m.type === 'member-joined' && m.nick === 'carla')
+  ok(mjKind?.kind === 'music' && mjKind?.room === 'estudio-x',
+    'member-joined carrega kind da sala (music)')
+  const snapK = await snapshotOf()
+  ok(snapK?.rooms?.find(r => r.room === 'estudio-x')?.kind === 'music',
+    'snapshot tipa estudio-x como music')
+
+  const duda = await opened(new WebSocket(jamUrl('geral-2', 'duda')))
+  const mjDuda = await next(p1, m => m.type === 'member-joined' && m.nick === 'duda')
+  ok(mjDuda?.kind === 'voice', 'join sem type vira conversa (default voice)')
+
+  // sala que esvazia esquece o tipo: a próxima entrada redefine
+  const mlCarla = next(p1, m => m.type === 'member-left' && m.nick === 'carla')
+  carla.close()
+  ok((await mlCarla)?.kind === 'music', 'member-left também carrega o kind')
+  const carla2 = await opened(new WebSocket(jamUrl('estudio-x', 'carla', 'voice')))
+  ok(await next(p1, m => m.type === 'member-joined' && m.nick === 'carla' && m.kind === 'voice'),
+    'sala vazia esquece o kind antigo (rejoin redefine)')
+  carla2.close(); duda.close()
+  await next(p1, m => m.type === 'member-left' && m.nick === 'duda')
 
   // esvazia tudo: sala some do snapshot da próxima conexão
   const lastLeft = next(p1, m => m.type === 'member-left' && m.nick === 'ana')

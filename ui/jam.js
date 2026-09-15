@@ -312,10 +312,13 @@ export async function initJam ({ serverUrl }) {
       mode = MODES[_mode] ? _mode : 'music'
       room = _room; me = _nick; onState = _onState || onState
       // WS e microfone em PARALELO: os dois custos de entrada são
-      // independentes — em série custam o dobro no melhor caso
+      // independentes — em série custam o dobro no melhor caso.
+      // O modo vai na query como tipo da sala: o servidor tipa a room no
+      // primeiro join e a UI separa Estúdio (music) de canal de conversa
+      // (voice) pelo tipo, não por convenção de nome.
       let micErr = null
       const wsOpen = new Promise((res, rej) => {
-        ws = new WebSocket(`${wsUrl}/api/fixed/ws/jam?room=${encodeURIComponent(room)}&nick=${encodeURIComponent(me)}`)
+        ws = new WebSocket(`${wsUrl}/api/fixed/ws/jam?room=${encodeURIComponent(room)}&nick=${encodeURIComponent(me)}&type=${mode}`)
         ws.onmessage = e => {
           try { onSignal(JSON.parse(e.data)) } catch {}
         }
