@@ -37,6 +37,10 @@ services:
       - ../ui/manifest.json:/broadcast-box/web/build/manifest.json:ro
       - ../ui/du-bist-gut-genug.mp3:/broadcast-box/web/build/du-bist-gut-genug.mp3:ro
       - ../ui/assets:/broadcast-box/web/build/assets:ro
+      # instalador do app pra baixar do próprio site (dist/ não entra no git:
+      # o .exe é copiado pro servidor por scp). Sem a pasta, o mount cria
+      # vazia e o /download só devolve 404 — nada quebra.
+      - ../dist/win:/broadcast-box/web/build/download:ro
 
   # Lives fixas (TV e música): yt-dlp + ffmpeg + werift publicando no
   # broadcast-box via WHIP nas chaves `tv` e `music`. Sem viewers por 60 s a
