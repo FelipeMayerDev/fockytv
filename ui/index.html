@@ -1071,6 +1071,26 @@ async function watchdog (key) {
   toast(`${key} parou de compartilhar.`)
 }
 
+// Som da transmissão sem o Discord, quando se transmite pelo NAVEGADOR: o
+// `tools/fockytv-sink.js` mantém um sink "FockyTV" com todo app menos o
+// Discord, e o monitor dele aparece aqui como entrada de áudio comum. É o
+// mesmo truque do screenshare-with-audio do Discord no Linux, sem userscript
+// — o código é nosso, então dá pra escolher a fonte direto.
+// Sem o script rodando (ou sem permissão de microfone, que é o que revela os
+// labels) devolve null e o fluxo segue com o áudio da captura de tela.
+async function fockySinkTrack () {
+  try {
+    const devs = await navigator.mediaDevices.enumerateDevices()
+    const d = devs.find(x => x.kind === 'audioinput' && /fockytv/i.test(x.label))
+    if (!d) return null
+    const st = await navigator.mediaDevices.getUserMedia({
+      audio: { deviceId: { exact: d.deviceId },
+               echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    })
+    return st.getAudioTracks()[0] ?? null
+  } catch { return null }
+}
+
 // ── áudio por aplicativo: PCM do main vira MediaStreamTrack ───────────────
 // O helper WASAPI manda float32 interleaved pelo IPC; o MediaStreamTrackGenerator
 // (com AudioData) entrega isso como track comum — o WHIP nem fica sabendo da
@@ -1966,6 +1986,7 @@ $('#share-go').onclick = async () => {
   let audioOpts = null   // fonte de áudio escolhida (null = som do sistema/sem filtro)
   let audioFail = null   // filtro pedido mas caiu: vira o toast do fim
   let semAudioCapturado = false   // pediu som e o sistema não entregou trilha
+  let sinkUsed = false            // som veio do monitor do sink FockyTV
   try {
     if (isSwap) {
       await doSwap(picked)
@@ -2012,7 +2033,11 @@ $('#share-go').onclick = async () => {
         // // Chromium). Os filtros são obrigatórios hoje; restaurar se voltarem:
         // else if (useFilter && cfg.linux && !pickedIsWindow)
         //   audioOpts = { mode: 'screen' }
-        stream = await capture(fps, $('#audio').checked && !audioOpts, $('#cursor').checked)
+        // navegador (sem filtro por app do Electron): o monitor do sink
+        // FockyTV, se o tools/fockytv-sink.js estiver de pé, já vem sem Discord
+        const sinkTrack = !audioOpts && $('#audio').checked ? await fockySinkTrack() : null
+        stream = await capture(fps, $('#audio').checked && !audioOpts && !sinkTrack, $('#cursor').checked)
+        if (sinkTrack) { stream.addTrack(sinkTrack); sinkUsed = true }
         // o portal pode aceitar o pedido de áudio e devolver só vídeo (Wayland
         // sem PipeWire, por exemplo) — sem erro nenhum. Detecta e avisa:
         semAudioCapturado = $('#audio').checked && !audioOpts && !stream.getAudioTracks().length
@@ -2051,12 +2076,13 @@ $('#share-go').onclick = async () => {
         ? (audioOpts.mode === 'window' ? 'Som: só o aplicativo da janela'
            : audioOpts.mode === 'exclude' ? 'Som: sistema sem o Discord e sem o FockyTV'
            : 'Som: todos os aplicativos')
+        : sinkUsed ? 'Som: sink FockyTV — sem Discord'
         : $('#audio').checked
-        // por que o filtro não entrou: navegador não tem como excluir um app
-        // (não existe API), no app é PipeWire/helper faltando
+        // por que o filtro não entrou: no app é PipeWire/helper faltando; no
+        // navegador é o tools/fockytv-sink.js que não está rodando
         ? 'Som: sistema inteiro, Discord incluso — ' + (window.focky
           ? 'filtro por aplicativo indisponível (PipeWire/helper)'
-          : 'transmitindo pelo NAVEGADOR; o filtro do Discord só existe no app FockyTV')
+          : 'rode `node tools/fockytv-sink.js` e compartilhe de novo pra tirar o Discord')
         : 'Sem áudio')
     }
     $('#dlg-share').close()

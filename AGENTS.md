@@ -23,3 +23,12 @@ O tema vive em `ui/assets/theme.css` (tokens) e `ui/assets/app.css`
 (componentes); `ui/index.html` não tem mais `<style>`. Regras e padrões:
 `docs/design-system.md`. Cor/raio/tipo novos entram como token, não como
 literal no componente.
+
+## Áudio sem o Discord
+
+- **App (Electron):** automático. Windows = helper WASAPI (`--mix-except`),
+  Linux = `pw-cat --record` com `node.autoconnect=false` e `pw-link` de cada
+  app permitido (`electron/main.js`). Smoke test: `node electron/audio-linux-check.js`.
+- **Navegador:** precisa do `node tools/fockytv-sink.js` rodando — cria o sink
+  `FockyTV` com tudo menos o Discord e a UI publica o monitor dele
+  (`fockySinkTrack` em `ui/index.html`). Smoke test: `node tools/sink-check.js`.
