@@ -2,7 +2,7 @@
   "name": "fockytv-fixed-live",
   "private": true,
   "type": "module",
-  "scripts": { "start": "node index.js" },
+  "scripts": { "start": "node index.js", "test": "node test/presence.mjs" },
   "dependencies": {
     "express": "^4.21.0",
     "better-sqlite3": "^12.4.1",

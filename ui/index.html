@@ -2372,10 +2372,12 @@ async function refresh () {
   await Promise.all(FIXED_KEYS.map(k =>
     fixed(k).then(s => fixedStates[k] = s).catch(() => {})))
 
-  // canais de voz da sidebar (salas + membros, do sidecar)
+  // canais de voz da sidebar: com o WS de presença de pé ele é a fonte (a
+  // resposta deste poll pode estar mais velha que os últimos eventos); o
+  // fetch só assume quando o WS está caído — aí vale como reconcile
   fetch(cfg.serverUrl + '/api/fixed/jam').then(r => r.json())
-    .then(j => { voiceState = j.rooms ?? [] })
-    .catch(() => { voiceState = [] })
+    .then(j => { if (!presenceLive()) voiceState = j.rooms ?? [] })
+    .catch(() => { if (!presenceLive()) voiceState = [] })
     .finally(() => renderVoice())
 
   // no ar: lista de quem assiste na barra de contexto, neste mesmo poll
@@ -3247,6 +3249,7 @@ fockyApi.config().then(async c => {
   else if (discordNick) setNick(discordNick)   // Activity: nick vem do Discord
   else askNick(true)
 
+  presenceConnect()
   refresh().catch(e => toast(e.message))
   poll = setInterval(() => refresh().catch(() => {}), 5000)
   // "você perdeu": depois da UI assentar (e atrás do dialog de nick, se houver)
@@ -3296,9 +3299,9 @@ const jamFor = async mode => {
 }
 let jamRoom = null       // canal de voz em que estou conectado
 let jamPending = null    // canal que estamos conectando (entrada otimista)
-const jamLeft = new Map()   // sala -> quando saímos (server pode levar um poll)
+const jamLeft = new Map()   // sala -> quando saímos (ponte até o member-left do WS)
 let dockMuted = false    // mic silenciado pelo dock (não derruba a conexão)
-let voiceState = []      // salas do /api/fixed/jam: [{ room, members }]
+let voiceState = []      // salas: [{ room, members }] — fonte é o WS de presença
 // canais de voz da sidebar são conversa (modo 'voice'); a sala do Estúdio é
 // outro ambiente (música) e não aparece na lista
 const VOICE_MAIN = 'geral'
@@ -3315,12 +3318,12 @@ function renderVoice () {
     const wrap = document.createElement('div')
     wrap.className = 'vchan'
     const members = [...(voiceState.find(r => r.room === room)?.members ?? [])]
-    // entrada otimista: eu já apareço na sala enquanto conecta — e sigo
-    // aparecendo enquanto o poll do salas não me alcançar (até 5s de atraso)
+    // entrada otimista: eu já apareço na sala enquanto conecta — o
+    // member-joined do WS confirma em instantes (poll é só fallback)
     if ((jamPending === room || (jamJoined && jamRoom === room)) &&
         !members.includes(nick)) members.unshift(nick)
-    // saída otimista no sentido inverso: sai da sala, some na hora — o
-    // servidor pode demorar um ciclo do poll pra registrar o WS fechado
+    // saída otimista no sentido inverso: sai da sala, some na hora —
+    // até chegar o member-left do WS do servidor
     for (const [left, at] of jamLeft)
       if (Date.now() - at > 6000) jamLeft.delete(left)
     if (jamLeft.has(room)) {
@@ -3360,6 +3363,52 @@ function renderVoice () {
     }
     return wrap
   }))
+}
+
+// presença das salas em tempo real: /api/fixed/ws/presence entrega o snapshot
+// na conexão e member-joined/member-left a cada entrada/saída. O WS é a fonte
+// de verdade do voiceState (até pra quem só olha a sidebar, sem WS na sala);
+// o poll de /api/fixed/jam vira fallback pra quando ele está caído.
+let presenceWs = null
+let presenceTimer = null
+
+const presenceLive = () => presenceWs?.readyState === WebSocket.OPEN
+
+function presenceConnect () {
+  if (presenceWs || presenceTimer) return
+  let opened = false
+  const ws = new WebSocket(cfg.serverUrl.replace(/^http/, 'ws') + '/api/fixed/ws/presence')
+  presenceWs = ws
+  ws.onopen = () => { opened = true }
+  ws.onmessage = e => {
+    let m
+    try { m = JSON.parse(e.data) } catch { return }
+    if (m.type === 'presence') {
+      voiceState = m.rooms ?? []
+    } else if (m.type === 'member-joined') {
+      const r = voiceState.find(x => x.room === m.room)
+      if (r) { if (!r.members.includes(m.nick)) r.members.push(m.nick) }
+      else voiceState.push({ room: m.room, members: [m.nick] })
+      // reentrei (ou a queda/expulsão foi só o WS trocando de dono): o
+      // marcador otimista de saída perdeu a vez
+      if (m.nick === nick) jamLeft.delete(m.room)
+    } else if (m.type === 'member-left') {
+      const r = voiceState.find(x => x.room === m.room)
+      if (r) {
+        const i = r.members.indexOf(m.nick)
+        if (i >= 0) r.members.splice(i, 1)
+        if (!r.members.length) voiceState = voiceState.filter(x => x !== r)
+      }
+    } else return
+    renderVoice()
+  }
+  ws.onclose = () => {
+    if (presenceWs === ws) presenceWs = null
+    // mesma cadência do chat: rápido se chegou a abrir, devagar se nem abriu
+    if (!presenceTimer)
+      presenceTimer = setTimeout(() => { presenceTimer = null; presenceConnect() },
+        opened ? 5000 : 15000)
+  }
 }
 
 // acende/apaga o status de voz da sidebar e pinta o botão de mic do dock.
@@ -3945,11 +3994,14 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
   jamErrSet(null)
   try {
     if (jamJoined) {
-      // saída otimista: a UI responde na hora; o motor desliga por trás
+      // saída otimista: a UI responde na hora; o motor desliga por trás.
+      // A sala marcada é a de verdade (jamRoom) — o parâmetro traz o
+      // default do Estúdio quando o clique vem da sidebar/dock sem args
+      const left = jamRoom
       jamJoined = false
       jamRoom = null
       dockMuted = false
-      if (room) jamLeft.set(room, Date.now())
+      if (left) jamLeft.set(left, Date.now())
       voiceUI()
       jam.leave().catch(() => {})
       jamNativeStop()
@@ -3999,6 +4051,9 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
     jamRoom = room
     jamMode = mode
     jamPending = null
+    // reentrada: marcação de saída antiga não pode me esconder da sala
+    // em que acabei de entrar (o member-joined do WS confirmaria do mesmo jeito)
+    jamLeft.delete(room)
     btn.textContent = 'Sair'
     $('#jam-entry').hidden = true
     $('#jam-card').hidden = true

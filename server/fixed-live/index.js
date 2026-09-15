@@ -1044,6 +1044,7 @@ jamWss.on("connection", (ws, req) => {
   if (old && old !== ws) { jamSend(old, { type: "evicted" }); old.close() }
   members.set(nick, ws)
   jamRooms.set(room, members)
+  presenceBroadcast({ type: "member-joined", room, nick })
   log(`[jam] ${nick} entrou em "${room}" (${members.size})`)
 
   // quem já está na sala aprende sobre o novo; o novo recebe a lista pra abrir
@@ -1078,9 +1079,45 @@ jamWss.on("connection", (ws, req) => {
     if (members.size) jamRooms.set(room, members)
     else jamRooms.delete(room)
     for (const ows of members.values()) jamSend(ows, { type: "peer-left", nick })
+    presenceBroadcast({ type: "member-left", room, nick })
     log(`[jam] ${nick} saiu de "${room}" (${members.size})`)
   }
   ws.on("close", leave)
+})
+
+// ── presença das salas: espelho vivo do jamRooms pra sidebar ────────────
+// Só membro tem WS na sala; quem apenas olha a lista de canais ficava no
+// poll HTTP de 5s (e sem poll nenhum nas views de player). Este canal é o
+// seu olho: um WS só de leitura por cliente recebe o snapshot completo na
+// conexão e member-joined/member-left a cada entrada/saída — o poll vira
+// fallback pra quando o WS está caído.
+const presenceWss = new WebSocketServer({ noServer: true })
+const presenceClients = new Set()
+
+const jamSnapshot = () => {
+  const rooms = [...jamRooms.entries()].map(([room, members]) =>
+    ({ room, members: [...members.keys()] }))
+  return { status: rooms.length ? "live" : "idle", rooms,
+           total: rooms.reduce((n, r) => n + r.members.length, 0) }
+}
+
+const presenceBroadcast = obj => {
+  const data = JSON.stringify(obj)
+  for (const ws of presenceClients) if (ws.readyState === ws.OPEN) ws.send(data)
+}
+
+presenceWss.on("error", e => log("[presence] wss error:", e.message))
+
+presenceWss.on("connection", ws => {
+  ws.on("error", e => log("[presence] ws error:", e.message))
+  presenceClients.add(ws)
+  ws.send(JSON.stringify({ type: "presence", ...jamSnapshot() }))
+  ws.on("message", data => {
+    let msg
+    try { msg = JSON.parse(data) } catch { return }
+    if (msg.type === "ping") ws.send(JSON.stringify({ type: "pong", t: msg.t }))
+  })
+  ws.on("close", () => presenceClients.delete(ws))
 })
 
 // upgrade do WebSocket na mesma porta do express
@@ -1088,6 +1125,7 @@ const httpServer = app.listen(PORT, () => log(`fixed-live na porta ${PORT}, broa
 httpServer.on("upgrade", (req, sock, head) => {
   // sob o prefixo do proxy do broadcast-box (ReverseProxy repassa o upgrade do WS)
   if (req.url.startsWith("/api/fixed/ws/jam")) jamWss.handleUpgrade(req, sock, head, ws => jamWss.emit("connection", ws, req))
+  else if (req.url.startsWith("/api/fixed/ws/presence")) presenceWss.handleUpgrade(req, sock, head, ws => presenceWss.emit("connection", ws, req))
   else if (req.url.startsWith("/api/fixed/ws/chat")) chatWss.handleUpgrade(req, sock, head, ws => chatWss.emit("connection", ws, req))
   else sock.destroy()
 })
@@ -1227,12 +1265,7 @@ app.get("/api/fixed/clips/:id/file", (req, res) => {
 })
 
 // lista de salas pra UI, no formato de canal fixo (status + conteúdo)
-app.get("/api/fixed/jam", (req, res) => {
-  const rooms = [...jamRooms.entries()].map(([room, members]) =>
-    ({ room, members: [...members.keys()] }))
-  res.json({ status: rooms.length ? "live" : "idle", rooms,
-             total: rooms.reduce((n, r) => n + r.members.length, 0) })
-})
+app.get("/api/fixed/jam", (req, res) => res.json(jamSnapshot()))
 
 // ── tipo de stream por chave (compartilhamento de YouTube) ───────────────
 // O broadcast-box não sabe o que o host está mandando; o host registra aqui
