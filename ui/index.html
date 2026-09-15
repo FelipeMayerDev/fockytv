@@ -3210,7 +3210,10 @@ if (localStorage.getItem('noIntro') !== '1') {
   intro.play().catch(() => {
     document.body.classList.remove('intro')
     toast('Clique em qualquer lugar para tocar a abertura.')
-    document.addEventListener('pointerdown', () => intro.play().catch(() => {}), { once: true })
+    document.addEventListener('pointerdown', () => {
+      document.body.classList.add('intro')   // autoplay bloqueado: com o gesto o gif/tremor voltam
+      intro.play().catch(() => document.body.classList.remove('intro'))
+    }, { once: true })
   })
 }
 
