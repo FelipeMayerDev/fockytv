@@ -30,7 +30,6 @@ const ensureSink = () => {
   linked.clear()
   console.log(`sink "${SINK}" criado (módulo ${moduleId})`)
 }
-console.log('no navegador, escolha "Monitor of FockyTV" como som da transmissão. Ctrl+C para desfazer.')
 
 const linked = new Set()   // object.serial (nunca reusado)
 ensureSink()
