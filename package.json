@@ -4,17 +4,20 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "test": "node ui/test/talk-indicator.mjs"
   },
   "devDependencies": {
     "electron": "^44.2.0",
-    "electron-builder": "^26.0.0"
+    "electron-builder": "^26.0.0",
+    "jsdom": "^30.0.1"
   },
   "build": {
     "appId": "tv.focky.client",
     "files": [
       "electron/**",
       "ui/**",
+      "!ui/test/**",
       "build/icon.png",
       "config.json",
       "package.json"

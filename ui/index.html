@@ -3352,8 +3352,11 @@ function renderVoice () {
     wrap.append(b)
     for (const m of members) {
       const row = document.createElement('div')
+      // talking vem do mapa de histerese (jamLevels), não do último evento:
+      // re-render do poll/presença não pode apagar a luz de quem fala (#3)
       row.className = 'vmem' + (m === nick ? ' on' : '') +
-        (m === nick && jamJoined && dockMuted ? ' muted' : '')
+        (m === nick && jamJoined && dockMuted ? ' muted' : '') +
+        (jamTalking(m) ? ' talking' : '')
       row.dataset.peer = m
       row.innerHTML = '<span class="vdot"></span>'
       row.append(Object.assign(document.createElement('span'), { textContent: m }))
@@ -3965,23 +3968,32 @@ function jamYtEvent (m) {
   }
 }
 
-// voice detection: pílula acende com o pico de nível do worklet (~8x/s)
-const TALK_THRESHOLD = 0.03
+// voice detection: pílula acende com o pico de nível do worklet (~8x/s).
+// O pico decai rápido (0.85 por quantum no jam-mix) e os ticks vêm a cada
+// 125–200ms — limiar seco liga/desliga a cada pausa entre sílabas (issue #3).
+// Histerese temporal: pico acima de TALK_ON renova o registro; a luz só
+// apaga TALK_HOLD depois do ÚLTIMO pico alto. Pausa entre palavras não pisca.
+const TALK_ON = 0.03
+const TALK_HOLD = 350
+const jamLoudAt = new Map()   // nick -> último pico acima de TALK_ON (ms)
+const jamTalking = id => Date.now() - (jamLoudAt.get(id) ?? 0) < TALK_HOLD
+
 function jamLevels ({ self, peers }) {
+  const level = id => id === nick ? (self ?? 0) : (peers[id]?.level ?? 0)
   for (const pill of $('#jam-pills').children) {
     const id = pill.dataset.peer
-    const level = id === nick ? (self ?? 0) : (peers[id]?.level ?? 0)
-    pill.classList.toggle('talking', level > TALK_THRESHOLD)
+    if (level(id) > TALK_ON) jamLoudAt.set(id, Date.now())
+    pill.classList.toggle('talking', jamTalking(id))
   }
   // voice presence na sidebar: quem fala ganha a pílula pulsando
   for (const row of document.querySelectorAll('#voice-chans .vmem[data-peer]')) {
     const id = row.dataset.peer
-    const level = id === nick ? (self ?? 0) : (peers[id]?.level ?? 0)
-    row.classList.toggle('talking', level > TALK_THRESHOLD)
+    if (level(id) > TALK_ON) jamLoudAt.set(id, Date.now())
+    row.classList.toggle('talking', jamTalking(id))
   }
   // e no dock: meu mic falando acende a bola em verde
   $('#dock-mic').classList.toggle('talking',
-    jamJoined && !dockMuted && (self ?? 0) > TALK_THRESHOLD)
+    jamJoined && !dockMuted && jamTalking(nick))
   $('#jam-selfmeter').style.width = Math.min(100, (self ?? 0) * 160) + '%'
 }
 
@@ -4002,6 +4014,7 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
       jamRoom = null
       dockMuted = false
       if (left) jamLeft.set(left, Date.now())
+      jamLoudAt.clear()   // luz de fala não sobra depois de sair
       voiceUI()
       jam.leave().catch(() => {})
       jamNativeStop()
@@ -4041,6 +4054,7 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
         if (jamRoom) jamLeft.set(jamRoom, Date.now())
         jamRoom = null
         dockMuted = false
+        jamLoudAt.clear()   // luz de fala não sobra depois de cair
         voiceUI()
       }
     },
