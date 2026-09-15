@@ -802,6 +802,15 @@ dialog .desc { font-size:13px; color:hsl(var(--muted-foreground)); margin-bottom
 body.intro #brand, body.intro button { animation: shake .18s infinite }
 @media (prefers-reduced-motion: reduce) { body.intro #brand, body.intro button { animation: none } }
 
+/* vídeo da abertura: roda em loop na tela toda, meio transparente, até a
+   música acabar (a classe .intro é o que liga os dois) */
+#intro-gif {
+  position:fixed; inset:0; z-index:100; pointer-events:none;
+  background:url('du-bist-gut-genug.gif') center/cover no-repeat;
+  opacity:0; transition:opacity .3s ease;
+}
+body.intro #intro-gif { opacity:.35 }
+
 /* lives fixas: busca e fila */
 .results { display:flex; flex-direction:column; gap:4px; margin-bottom:12px; max-height:240px; overflow:auto }
 .results button {
