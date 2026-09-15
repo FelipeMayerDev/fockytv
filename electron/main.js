@@ -5,7 +5,7 @@ const path = require('node:path')
 const fs = require('node:fs')
 
 const hasTool = t => { try { execFileSync('sh', ['-c', `command -v ${t}`], { stdio: 'ignore' }); return true } catch { return false } }
-const linuxAudio = process.platform === 'linux' && hasTool('pw-dump') && hasTool('pw-cat')
+const linuxAudio = process.platform === 'linux' && hasTool('pw-dump') && hasTool('pw-cat') && hasTool('pw-link')
 
 // config.json editável fica ao lado do arquivo que o usuário abriu.
 // No AppImage, exe aponta pro mount temporário — o caminho real é $APPIMAGE.
@@ -270,12 +270,16 @@ function audioStop () {
 }
 
 // ── áudio por aplicativo no Linux (PipeWire) ──────────────────────────────
-// Cada app que toca som é um nó "Stream/Output/Audio" no PipeWire com
-// binary/pid nas props. O supervisor enumera (pw-dump), grava cada nó da
-// seleção (pw-cat --target <serial>, f32 48k estéreo) e mistura em JS.
-// Sem app tocando sai silêncio — o clock do RTP segue andando.
-let linuxPoller = null, linuxMixTimer = null
-const linuxProcs = new Map()   // serial → { proc, bufs: Buffer[] }
+// Um nó de gravação só (pw-cat --record com node.autoconnect=false: stream,
+// não dispositivo) e cada app que deve entrar é LIGADO nele com pw-link. O
+// PipeWire mistura — sem mixer em JS, que era de onde vinha o áudio
+// craquelando (relógio do setInterval contra o do som). Enquanto nada está
+// ligado o nó não recebe clock nenhum e não sai PCM: o jitter buffer do
+// renderer trata como underrun e reprima os 250ms quando o som volta.
+// Relink a cada 1s: app que abriu o som no meio da transmissão entra sozinho.
+let linuxPoller = null, linuxProc = null, linuxTail = null
+let linuxId = 0                    // id do nosso nó de captura
+const linuxLinked = new Set()      // object.serial já ligado (serial não é reusado)
 
 // Nunca entram no áudio da transmissão: o Discord (a conversa é privada) e o
 // próprio FockyTV — o canal de música tocando aqui é som que voltaria pra
@@ -283,9 +287,14 @@ const linuxProcs = new Map()   // serial → { proc, bufs: Buffer[] }
 const AUDIO_NEVER = /^(discord|fockytv)/i
 // mesma lista pro helper do Windows (prefixo de nome do executável)
 const AUDIO_NEVER_WIN = 'Discord,FockyTV,electron'
+// nome único por captura: o pw-cat não publica o próprio PID nas props, e um
+// órfão de sessão anterior com o mesmo nome roubaria os links
+const LINUX_NODE = 'fockytv-capture'
+let linuxNode = LINUX_NODE
 
 function linuxSelect (props, opts) {
   if (props['media.class'] !== 'Stream/Output/Audio') return false
+  if ((props['node.name'] ?? '').startsWith(LINUX_NODE)) return false
   // janela escolhida: é o pid dela que manda, ninguém mais entra
   if (opts.mode === 'window') return +props['application.process.pid'] === opts.pid
   return !AUDIO_NEVER.test(props['application.process.binary'] ?? '')
@@ -308,102 +317,62 @@ function startLinuxAudio (opts) {
     opts = { ...opts, pid: linuxPidOfHwnd(opts.hwnd) }
     if (!opts.pid) return { ok: false, error: 'não achei o processo da janela' }
   }
-  const RATE = 48000, CH = 2
-  const PRIME = RATE * 0.04 * CH * 4   // 40ms de fila antes de a fonte entrar
-  const MAXQ = RATE * 0.2 * CH * 4     // teto de 200ms por fonte
+  const RATE = 48000, CH = 2, FRAME = CH * 4
+  linuxNode = `${LINUX_NODE}-${process.pid}-${Date.now()}`
+
+  // `--record`, não `record`: o pw-cat do PipeWire 1.6 recusa o modo como
+  // argumento solto e sai na hora — e a transmissão ia muda.
+  linuxProc = spawn('pw-cat',
+    ['--record', '--raw', '--format', 'f32', '--rate', String(RATE), '--channels', String(CH),
+     '-P', `{ node.autoconnect=false node.name=${linuxNode} }`, '-'],
+    { stdio: ['ignore', 'pipe', 'pipe'] })
   win?.webContents.send('audio-meta', { rate: RATE, channels: CH })
+  // o pipe corta em qualquer byte: frame pela metade desloca o interleave do
+  // resto da transmissão (é o "som quebrado"). Sobra fica pro próximo chunk.
+  linuxProc.stdout.on('data', d => {
+    const buf = linuxTail ? Buffer.concat([linuxTail, d]) : d
+    const cut = buf.length - buf.length % FRAME
+    linuxTail = cut < buf.length ? buf.subarray(cut) : null
+    if (cut) win?.webContents.send('audio-pcm', buf.subarray(0, cut))
+  })
+  let perr = ''
+  linuxProc.stderr.on('data', d => { perr = (perr + d).slice(-500) })
+  linuxProc.on('error', e => alog('pw-cat não subiu: ' + e.message))
+  linuxProc.on('exit', code => alog('captura saiu (' + code + ')' + (perr.trim() ? ' ' + perr.trim() : '')))
 
   linuxPoller = setInterval(() => {
     execFile('pw-dump', { maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
       if (err || !linuxPoller) return
       let nodes
       try { nodes = JSON.parse(stdout).filter(o => o.type === 'PipeWire:Interface:Node') } catch { return }
-      const wanted = new Set()
+      if (!linuxId) {
+        const mine = nodes.find(n => n.info?.props?.['node.name'] === linuxNode)
+        if (!mine) return   // o nó ainda não registrou: tenta no próximo tick
+        linuxId = mine.id
+      }
       for (const n of nodes) {
         const p = n.info?.props ?? {}
         if (!linuxSelect(p, opts)) continue
         const serial = +(p['object.serial'] ?? 0)
-        if (!serial || linuxProcs.has(serial)) { if (serial) wanted.add(serial); continue }
-        wanted.add(serial)
-        alog('capturando serial ' + serial + ' (' + (p['application.process.binary'] ?? p['node.name'] ?? '?') + ')')
-        // `--record`, não `record`: o pw-cat do PipeWire 1.6 recusa o modo como
-        // argumento solto ("one of the playback/record options must be
-        // provided") e sai na hora — o supervisor respawnava a cada segundo e
-        // a transmissão ia muda, porque o mixer só tinha silêncio pra mandar.
-        const proc = spawn('pw-cat',
-          ['--record', '--raw', '--format', 'f32', '--rate', '48000', '--channels', '2',
-           '--target', String(serial), '-'],
-          { stdio: ['ignore', 'pipe', 'pipe'] })
-        // PRIME: 40ms na fila antes de entrar no mix. MAXQ: teto de 200ms —
-        // atrasou (fonte mais rápida que o relógio), o mais velho se perde.
-        const entry = { proc, bufs: [], bytes: 0, live: false }
-        proc.stdout.on('data', d => {
-          entry.bufs.push(d)
-          entry.bytes += d.length
-          if (!entry.live && entry.bytes >= PRIME) entry.live = true
-          while (entry.bytes > MAXQ) entry.bytes -= entry.bufs.shift().length
-        })
-        // stderr no log, não no terminal: foi o 'inherit' que escondeu o erro
-        // acima até alguém abrir uma transmissão e ouvir o silêncio
-        let perr = ''
-        proc.stderr.on('data', d => { perr = (perr + d).slice(-500) })
-        proc.on('error', e => alog('pw-cat não subiu: ' + e.message))
-        proc.on('exit', code => {
-          linuxProcs.delete(serial)
-          alog(`serial ${serial} saiu (${code})` + (perr.trim() ? ' ' + perr.trim() : ''))
-        })
-        linuxProcs.set(serial, entry)
+        if (!serial || linuxLinked.has(serial)) continue
+        linuxLinked.add(serial)
+        const who = p['application.process.binary'] ?? p['node.name'] ?? '?'
+        // nó↔nó: o pw-link casa os canais sozinho. O app continua tocando nos
+        // alto-falantes — isto ADICIONA um link, não move o áudio.
+        execFile('pw-link', [String(n.id), String(linuxId)], e =>
+          alog(e ? `link ${who} (${n.id}) falhou: ${e.message.trim()}` : `ligado ${who} (${n.id})`))
       }
-      for (const [serial, e] of linuxProcs)
-        if (!wanted.has(serial)) { alog('largando serial ' + serial); e.proc.kill(); linuxProcs.delete(serial) }
     })
   }, 1000)
   linuxPoller.refresh()   // enumera já, sem esperar 1s
-
-  // Mixer: quantos frames o RELÓGIO já deve, não "960 por tick". setInterval
-  // entrega ~20,15ms, e consumir 960 fixos deixava o mixer 0,7% mais lento que
-  // o tempo real: a fila crescia até bater no teto e despejar mais de um
-  // segundo de áudio de uma vez, e o renderer (que toca pelo relógio) passava
-  // o tempo em underrun. Medido: 47.672 frames/s antes, 48.112 depois.
-  let emitted = 0
-  const t0 = Date.now()
-  linuxMixTimer = setInterval(() => {
-    const owed = Math.round((Date.now() - t0) * RATE / 1000) - emitted
-    if (owed <= 0) return
-    const mix = Buffer.allocUnsafe(owed * CH * 4)
-    mix.fill(0)
-    const out = new Float32Array(mix.buffer, mix.byteOffset, owed * CH)
-    for (const e of linuxProcs.values()) {
-      // fonte recém-nascida enche PRIME antes de entrar: sem isso o começo de
-      // cada app que abre o som vira um punhado de zeros no meio da mistura
-      if (!e.live) continue
-      let need = owed * CH * 4
-      const src = []
-      while (need > 0 && e.bufs.length) {
-        const b = e.bufs[0]
-        if (b.length <= need) { src.push(b); need -= b.length; e.bytes -= b.length; e.bufs.shift() }
-        else { src.push(b.subarray(0, need)); e.bufs[0] = b.subarray(need); e.bytes -= need; need = 0 }
-      }
-      let off = 0
-      for (const b of src) {
-        for (let i = 0; i + 4 <= b.length && off < out.length; i += 4, off++)
-          out[off] += b.readFloatLE(i)
-      }
-      if (need > 0) e.live = false   // secou: reprime antes de voltar pro mix
-    }
-    for (let i = 0; i < out.length; i++)
-      if (out[i] > 1) out[i] = 1; else if (out[i] < -1) out[i] = -1
-    emitted += owed
-    win?.webContents.send('audio-pcm', mix)
-  }, 20)
   return { ok: true, rate: RATE, channels: CH }
 }
 
 function stopLinuxAudio () {
   clearInterval(linuxPoller); linuxPoller = null
-  clearInterval(linuxMixTimer); linuxMixTimer = null
-  for (const e of linuxProcs.values()) e.proc.kill()
-  linuxProcs.clear()
+  linuxLinked.clear(); linuxId = 0; linuxTail = null
+  // os links morrem junto com o nó de captura
+  if (linuxProc) { const p = linuxProc; linuxProc = null; p.kill() }
 }
 
 // ── seno de teste (dev em não-Windows): mesma interface do helper ─────────
