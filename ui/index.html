@@ -24,7 +24,7 @@
   <p class="desc">Esse nome identifica sua transmissão. Fica salvo pra próxima vez.</p>
   <div class="field">
     <label for="nick">Nick</label>
-    <input id="nick" maxlength="32" placeholder="focky" autofocus>
+    <input id="nick" maxlength="32" placeholder="seu nick" autofocus>
   </div>
   <p class="err" id="nick-err"></p>
   <div class="actions">
@@ -1431,8 +1431,15 @@ $('#stage').onpointerup = $('#stage').onpointercancel = () => {
 }
 
 // ── nick (cache em localStorage; com nick salvo o app já abre direto) ────
+// Primeiro acesso sugere uma identidade aleatória — o "focky" fixo fazia
+// todo mundo aceitar o padrão e virar a MESMA stream key (conflito de nick).
+// Hífen no lugar do espaço: nick vira stream key (validação lá embaixo).
+const NICK_IDEAS = ['piloto-de-fulga', 'guitar-hero', 'vibe-coder', 'programmer',
+  'gamer', 'speed-runner', 'motoqueiro-fantasma', 'otaku', 'nitendista']
+const nickIdea = () => NICK_IDEAS[Math.floor(Math.random() * NICK_IDEAS.length)]
+
 function askNick (first) {
-  $('#nick').value = nick ?? cfg.displayName ?? ''
+  $('#nick').value = nick ?? nickIdea()
   $('#nick-err').textContent = ''
   $('#nick-cancel').hidden = first
   $('#dlg-nick').showModal()
