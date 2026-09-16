@@ -1781,6 +1781,15 @@ async function openShareDialog (isSwap, cam) {
   document.querySelectorAll('#share-src button').forEach(x =>
     x.classList.toggle('on', x.dataset.src === shareSrc))
   const adding = !!cam && !!pc          // câmera entrando por cima da tela
+  // nick já no ar em outra janela/pessoa: publicar assume o lugar dessa
+  // transmissão (takeover do servidor) — quem quer as DUAS ao mesmo tempo
+  // precisa de nicks diferentes. Aviso aqui, antes do clique em Compartilhar.
+  if (!isSwap && !adding && !pc)
+    status().catch(() => []).then(live => {
+      if (live.some(st => st.streamKey === nick) && $('#dlg-share').open)
+        $('#share-err').textContent =
+          `O nick "${nick}" já está no ar. Publicar assume o lugar dessa transmissão; pra ficarem as duas no ar, troque o nick.`
+    })
   $('#share-title').textContent = isSwap ? 'Trocar janela'
     : adding ? 'Adicionar WebCam' : cam ? 'Compartilhar WebCam' : 'Compartilhar tela'
   $('#share-desc').textContent = isSwap
@@ -2093,7 +2102,17 @@ $('#share-go').onclick = async () => {
   } catch (e) {
     swapping = false
     stopFilteredAudio()
-    $('#share-err').textContent = e.message
+    // servidor sem takeover: já existe host na mesma chave (nick repetido é
+    // o caso comum). Cru é incompreensível pro usuário — vira orientação.
+    $('#share-err').textContent = /already has a host/.test(e.message)
+      ? `Já existe uma transmissão com o nick "${nick}". Troque o nick (botão do topo) pra ficarem as duas no ar.`
+      : e.message
+    // captura aberta e nada no ar: solta a fonte, senão o indicador de
+    // compartilhamento do navegador fica aceso à toa depois do erro
+    if (!pc && stream && !isSwap) {
+      stream.getTracks().forEach(t => t.stop())
+      stream = null
+    }
     // no Wayland a fonte antiga já foi solta: sem nova, não há o que transmitir
     if (isSwap && cfg.wayland) { $('#dlg-share').close(); stop(); toast('Transmissão encerrada: ' + e.message) }
   }
@@ -2162,17 +2181,17 @@ const since = iso => {
 }
 
 // Sem videoTracks = sessão sem host. O servidor cria uma sessão a cada WHEP,
-// então uma stream já encerrada volta a aparecer só porque a miniatura se
-// conectou nela — e a miniatura, que nunca carrega, é reaberta a cada refresh.
-// Ignorar o fantasma aqui é o que impede o ciclo de se realimentar.
+// então uma stream já encerrada voltaria a aparecer só porque um tile se
+// conectou nela. Ignorar o fantasma aqui é o que impede o ciclo de se
+// realimentar (o tile conecta, a sessão reaparece, o refresh reconecta…).
 async function status () {
   const res = await fetch(cfg.serverUrl + '/api/status')
   return ((await res.json()) ?? []).filter(st => st.videoTracks?.length)
 }
 
-// Quem está assistindo de verdade: sessões com nick. As prévias da grade também
+// Quem está assistindo de verdade: sessões com nick. Os tiles da grade também
 // abrem WHEP (e viram sessões no servidor), mas não mandam viewer — sem isso o
-// "N assistindo" contaria as próprias miniaturas.
+// "N assistindo" contaria as próprias prévias.
 const viewersOf = st => [...new Set((st.sessions ?? []).map(s => s.viewer).filter(Boolean))]
 
 // canal 🎸 Sala: sem mídia nem busca — a vista é o painel da sala em si

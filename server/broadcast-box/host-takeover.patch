@@ -1,0 +1,26 @@
+diff --git i/internal/webrtc/sessions/session/session.go w/internal/webrtc/sessions/session/session.go
+index 057cd66..21afd3a 100644
+--- i/internal/webrtc/sessions/session/session.go
++++ w/internal/webrtc/sessions/session/session.go
+@@ -62,7 +62,20 @@ func (s *Session) AddHost(peerConnection *webrtc.PeerConnection) (err error) {
+ 		}
+ 
+ 		if host.PeerConnection.ConnectionState() != webrtc.PeerConnectionStateClosed {
+-			return fmt.Errorf("session already has a host")
++			// FockyTV (host takeover): um novo publicador na mesma chave assume
++			// o lugar do antigo — cobre nick repetido (duas pessoas no ar) e
++			// reconexão após crash sem DELETE (antes: 400 até o timeout do ICE).
++			// O close dispara notifyClosed assíncrono: neutralizar o callback
++			// ANTES, senão o handleHostClosed tardio RemoveHost() e derruba o
++			// host que acabou de entrar.
++			host.SetOnClosed(func() {})
++			if !s.Host.CompareAndSwap(host, nil) {
++				continue
++			}
++			host.RemovePeerConnection()
++			host.RemoveTracks()
++			slog.Info("Session.AddHost: previous host replaced by new publisher", "streamKey", s.StreamKey)
++			break
+ 		}
+ 
+ 		if s.Host.CompareAndSwap(host, nil) {

@@ -2,15 +2,18 @@
 # trazer o nick de quem assiste (query `?viewer=` no POST do WHEP).
 # + fixed-proxy.patch: `/api/fixed/*` vira proxy reverso pro sidecar
 # fixed-live (lives fixas de TV e música), uma origem só.
-# Patches aditivos — nada do upstream é alterado, só estendido.
+# + host-takeover.patch: novo publicador na mesma stream key assume o lugar
+# do antigo (nick repetido / reconexão pós-crash sem esperar o ICE cair).
+# Os dois primeiros são aditivos; o takeover troca um return por substituição.
 FROM alpine/git AS src
 ARG BROADCAST_BOX_REF=9f43de20e802ee8acc826c3999e021e736dd2a89
 RUN git clone --depth 1 https://github.com/Glimesh/broadcast-box /src \
  && git -C /src fetch --depth 1 origin ${BROADCAST_BOX_REF} \
  && git -C /src checkout FETCH_HEAD
-COPY viewer-identity.patch fixed-proxy.patch /tmp/
+COPY viewer-identity.patch fixed-proxy.patch host-takeover.patch /tmp/
 RUN git -C /src apply /tmp/viewer-identity.patch \
- && git -C /src apply /tmp/fixed-proxy.patch
+ && git -C /src apply /tmp/fixed-proxy.patch \
+ && git -C /src apply /tmp/host-takeover.patch
 
 FROM node:alpine AS web
 COPY --from=src /src /src
