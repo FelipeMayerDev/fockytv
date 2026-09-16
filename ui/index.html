@@ -1084,7 +1084,19 @@ async function watchdog (key) {
 // labels) devolve null e o fluxo segue com o áudio da captura de tela.
 async function fockySinkTrack () {
   try {
-    const devs = await navigator.mediaDevices.enumerateDevices()
+    let devs = await navigator.mediaDevices.enumerateDevices()
+    // Firefox (#7): os labels só aparecem depois de uma permissão de
+    // microfone — sem esta probe o monitor do sink nunca é encontrado e a
+    // transmissão sai muda (o getDisplayMedia do Firefox não entrega áudio).
+    // A probe pede microfone UMA vez; daí em diante a permissão persiste.
+    // Só no Firefox: no Chrome o seletor já entrega o som do sistema, e o
+    // pedido extra de microfone seria só atrapalhar.
+    if (!devs.some(x => x.kind === 'audioinput' && x.label) &&
+        navigator.userAgent.includes('Firefox')) {
+      const probe = await navigator.mediaDevices.getUserMedia({ audio: true })
+      probe.getTracks().forEach(t => t.stop())
+      devs = await navigator.mediaDevices.enumerateDevices()
+    }
     const d = devs.find(x => x.kind === 'audioinput' && /fockytv/i.test(x.label))
     if (!d) return null
     const st = await navigator.mediaDevices.getUserMedia({
@@ -1950,8 +1962,11 @@ function updateShareAudio (srcId) {
   $('#audio-desc').textContent =
     !pickedIsWindow || !cfg?.windowFilter
       ? (cfg?.audioFilter ? 'o Discord fica de fora da transmissão'
-         // sem helper (navegador/Linux sem PipeWire): não há como excluir
-         : 'áudio do sistema')
+         // sem helper (navegador/Linux sem PipeWire): não há como excluir.
+         // Firefox: o som da tela só existe via sink (#7).
+         : navigator.userAgent.includes('Firefox')
+           ? 'som do sistema via sink FockyTV (rode `node tools/fockytv-sink.js`)'
+           : 'áudio do sistema')
     // navegador: janela não tem som separado — mas o Chrome dá o som só da
     // aba quando o compartilhamento é de aba
     : 'o áudio sai só do aplicativo da janela (ou só da ABA, no navegador)'
@@ -2100,7 +2115,7 @@ $('#share-go').onclick = async () => {
       // pior falha possível (o Discord entra e ninguém sabe o porquê)
       if (!cam) toast(semAudioCapturado
         ? (navigator.userAgent.includes('Firefox')
-          ? 'Firefox não captura o som da tela — use Chrome/Edge, ou compartilhe Áudio/Vídeo do YouTube (esse som vai perfeito).'
+          ? 'Saiu sem som: o Firefox não captura o áudio da tela. No Linux, rode `node tools/fockytv-sink.js` (e aceite o microfone) e compartilhe de novo — ou use o compartilhamento de Áudio/Vídeo do YouTube.'
           : 'Foi no ar só o vídeo: marque o áudio no SELETOR do navegador (checkbox "compartilhar áudio da aba/sistema") — o toggle daqui não força ele.')
         : audioFail
         ? 'FILTRO DE ÁUDIO FALHOU (' + audioFail + ') — foi o som do sistema, Discord incluso'
