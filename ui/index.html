@@ -1229,6 +1229,23 @@ const camRect = () => {
 // passa a ser o canvas — é o que dá lugar pra desenhar por cima (câmera,
 // overlay de quem está assistindo). Vale sozinha: o overlay não depende de
 // câmera nenhuma. Ligar/desligar é replaceTrack, ninguém cai.
+
+// canvas acompanha o tamanho real da fonte (#11): janela redimensionada ao
+// vivo mudava de proporção e o draw esticava a imagem no canvas antigo. As
+// frações da caixa da câmera sobrevivem à mudança; a posição precisa do
+// clamp pra não sair da borda (o mesmo do arraste).
+function syncComposeSize () {
+  if (!overlay) return
+  const { sv, canvas } = overlay
+  if (!sv.videoWidth || !sv.videoHeight) return
+  if (canvas.width === sv.videoWidth && canvas.height === sv.videoHeight) return
+  canvas.width = sv.videoWidth
+  canvas.height = sv.videoHeight
+  const r = camRect()
+  overlay.box.x = clamp(overlay.box.x, 0, 1 - r.w)
+  overlay.box.y = clamp(overlay.box.y, 0, 1 - r.h)
+}
+
 async function startCompose () {
   if (overlay) return overlay
   const scr = stream.getVideoTracks()[0].getSettings()
@@ -1239,6 +1256,9 @@ async function startCompose () {
   const sv = hiddenVideo(stream)
   await sv.play().catch(() => {})
   const fps = Math.round(scr.frameRate ?? +$('#fps').value)
+  // fonte mudou de tamanho (janela redimensionada, troca de janela): o
+  // canvas segue — sem renegociar nada, o encoder re-codifica no novo tamanho
+  sv.addEventListener('resize', syncComposeSize)
 
   // quem está assistindo, queimado no canto (toggle "overlay" das configurações)
   const drawViewers = () => {
@@ -1317,6 +1337,13 @@ async function setPublishedMirror (on) {
   const canvas = document.createElement('canvas')
   canvas.width = set.width ?? 640
   canvas.height = set.height ?? 480
+  // webcam mudou de resolução: canvas acompanha (#11, mesma classe do compose)
+  v.addEventListener('resize', () => {
+    if (v.videoWidth && v.videoHeight) {
+      canvas.width = v.videoWidth
+      canvas.height = v.videoHeight
+    }
+  })
   const ctx = canvas.getContext('2d')
   const fps = Math.round(set.frameRate ?? 30)
   const timer = setInterval(() => {
@@ -1992,12 +2019,11 @@ async function doSwap (id) {
     }
     const fresh = await capture(+$('#fps').value, false, $('#cursor').checked)
     if (overlay) {
-      // o canvas segue no sender; o que muda é o que ele desenha no fundo
+      // o canvas segue no sender; o que muda é o que ele desenha no fundo —
+      // e o tamanho, que o resize do sv/syncComposeSize resolve
       overlay.sv.srcObject = fresh
       await overlay.sv.play().catch(() => {})
-      const set = fresh.getVideoTracks()[0].getSettings()
-      overlay.canvas.width = set.width ?? overlay.canvas.width
-      overlay.canvas.height = set.height ?? overlay.canvas.height
+      syncComposeSize()
     } else {
       await sender.replaceTrack(fresh.getVideoTracks()[0])
     }
