@@ -1,26 +1,88 @@
 diff --git i/internal/webrtc/sessions/session/session.go w/internal/webrtc/sessions/session/session.go
-index 057cd66..21afd3a 100644
+index 057cd66..ba50eed 100644
 --- i/internal/webrtc/sessions/session/session.go
 +++ w/internal/webrtc/sessions/session/session.go
-@@ -62,7 +62,20 @@ func (s *Session) AddHost(peerConnection *webrtc.PeerConnection) (err error) {
+@@ -3,6 +3,7 @@ package session
+ import (
+ 	"fmt"
+ 	"log/slog"
++	"time"
+ 
+ 	"github.com/glimesh/broadcast-box/internal/server/authorization"
+ 	"github.com/glimesh/broadcast-box/internal/webrtc/codecs"
+@@ -12,6 +13,28 @@ import (
+ 	"github.com/pion/webrtc/v4"
+ )
+ 
++// hostIsSending: algum pacote de mídia nos últimos segundos = publicador de
++// verdade no ar (não é fantasma de crash). O Bitrate não serve: a janela de
++// 1s congela com o último valor depois que o host morre.
++func hostIsSending(host *whip.WHIPSession) bool {
++	const healthyWithin = 10 * time.Second
++	cutoff := time.Now().Add(-healthyWithin)
++
++	host.TracksLock.RLock()
++	defer host.TracksLock.RUnlock()
++	for _, t := range host.VideoTracks {
++		if v, ok := t.LastReceived.Load().(time.Time); ok && v.After(cutoff) {
++			return true
++		}
++	}
++	for _, t := range host.AudioTracks {
++		if v, ok := t.LastReceived.Load().(time.Time); ok && v.After(cutoff) {
++			return true
++		}
++	}
++	return false
++}
++
+ func (s *Session) UpdateStreamStatus(profile authorization.PublicProfile) {
+ 	s.StatusLock.Lock()
+ 
+@@ -62,7 +85,25 @@ func (s *Session) AddHost(peerConnection *webrtc.PeerConnection) (err error) {
  		}
  
  		if host.PeerConnection.ConnectionState() != webrtc.PeerConnectionStateClosed {
 -			return fmt.Errorf("session already has a host")
 +			// FockyTV (host takeover): um novo publicador na mesma chave assume
-+			// o lugar do antigo — cobre nick repetido (duas pessoas no ar) e
-+			// reconexão após crash sem DELETE (antes: 400 até o timeout do ICE).
++			// o lugar do antigo SOMENTE se o antigo é fantasma — crash sem
++			// DELETE, sem mídia chegando há segundos. Host saudável é
++			// reservado (nick em uso, #10): publicação concorrente na chave
++			// recebe 400 e o cliente orienta a trocar nick.
 +			// O close dispara notifyClosed assíncrono: neutralizar o callback
 +			// ANTES, senão o handleHostClosed tardio RemoveHost() e derruba o
 +			// host que acabou de entrar.
++			if hostIsSending(host) {
++				return fmt.Errorf("session already has a host (active)")
++			}
 +			host.SetOnClosed(func() {})
 +			if !s.Host.CompareAndSwap(host, nil) {
 +				continue
 +			}
 +			host.RemovePeerConnection()
 +			host.RemoveTracks()
-+			slog.Info("Session.AddHost: previous host replaced by new publisher", "streamKey", s.StreamKey)
++			slog.Info("Session.AddHost: stale host replaced by new publisher", "streamKey", s.StreamKey)
 +			break
  		}
  
  		if s.Host.CompareAndSwap(host, nil) {
+diff --git i/internal/webrtc/sessions/whip/writers.go w/internal/webrtc/sessions/whip/writers.go
+index ae1ed1e..63285c4 100644
+--- i/internal/webrtc/sessions/whip/writers.go
++++ w/internal/webrtc/sessions/whip/writers.go
+@@ -45,6 +45,7 @@ func (w *WHIPSession) audioWriter(remoteTrack *webrtc.TrackRemote, streamKey str
+ 		}
+ 
+ 		track.PacketsReceived.Add(1)
++		track.LastReceived.Store(time.Now())
+ 
+ 		err = rtpPkt.Unmarshal(rtpBuf[:rtpRead])
+ 		if err != nil {
+@@ -146,6 +147,7 @@ func (w *WHIPSession) videoWriter(remoteTrack *webrtc.TrackRemote, streamKey str
+ 		if isKeyframe {
+ 			track.LastKeyFrame.Store(time.Now())
+ 		}
++		track.LastReceived.Store(time.Now())
+ 
+ 		now := time.Now()
+ 		if elapsed := now.Sub(bitrateWindowStart); elapsed >= time.Second {

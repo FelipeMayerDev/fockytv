@@ -1452,7 +1452,7 @@ const setNick = v => {
   $('#me-avatar').textContent = v.slice(0, 1)
 }
 
-$('#nick-ok').onclick = () => {
+$('#nick-ok').onclick = async () => {
   const v = $('#nick').value.trim()
   // vira stream key e vai num header HTTP: sem espaço nem barra
   if (!/^[\w.-]{1,32}$/.test(v)) {
@@ -1463,6 +1463,18 @@ $('#nick-ok').onclick = () => {
   if (FIXED_KEYS.includes(v)) {
     $('#nick-err').textContent = `"${v}" é reservado pra live fixa do servidor.`
     return
+  }
+  // nick de quem está no ar agora não pode: colidiria na MESMA stream key
+  // (#10) e a publicação seria recusada. Fantasma do próprio crash se
+  // resolve sozinho — sem mídia o servidor libera a chave em segundos.
+  if (v !== nick) {
+    const busy = (await status().catch(() => []))
+      .some(st => st.streamKey === v)
+    if (busy) {
+      $('#nick-err').textContent =
+        `"${v}" está no ar agora — escolha outro nick.`
+      return
+    }
   }
   setNick(v)
   $('#dlg-nick').close()
@@ -1788,14 +1800,14 @@ async function openShareDialog (isSwap, cam) {
   document.querySelectorAll('#share-src button').forEach(x =>
     x.classList.toggle('on', x.dataset.src === shareSrc))
   const adding = !!cam && !!pc          // câmera entrando por cima da tela
-  // nick já no ar em outra janela/pessoa: publicar assume o lugar dessa
-  // transmissão (takeover do servidor) — quem quer as DUAS ao mesmo tempo
-  // precisa de nicks diferentes. Aviso aqui, antes do clique em Compartilhar.
+  // nick já no ar em outra janela/pessoa: o servidor recusa a publicação
+  // (#10) — nick em uso é stream key ocupada. Fantasma do próprio crash
+  // (sem mídia) é assumido de volta pelo takeover, sem aviso.
   if (!isSwap && !adding && !pc)
     status().catch(() => []).then(live => {
       if (live.some(st => st.streamKey === nick) && $('#dlg-share').open)
         $('#share-err').textContent =
-          `O nick "${nick}" já está no ar. Publicar assume o lugar dessa transmissão; pra ficarem as duas no ar, troque o nick.`
+          `O nick "${nick}" já está no ar. Troque o nick pra transmitir — se for a SUA transmissão travada, ela se libera sozinha em segundos.`
     })
   $('#share-title').textContent = isSwap ? 'Trocar janela'
     : adding ? 'Adicionar WebCam' : cam ? 'Compartilhar WebCam' : 'Compartilhar tela'
@@ -2109,10 +2121,11 @@ $('#share-go').onclick = async () => {
   } catch (e) {
     swapping = false
     stopFilteredAudio()
-    // servidor sem takeover: já existe host na mesma chave (nick repetido é
-    // o caso comum). Cru é incompreensível pro usuário — vira orientação.
+    // servidor: host ativo na mesma chave = nick em uso (#10). Fantasma do
+    // próprio crash é assumido pelo takeover, então este erro só aparece
+    // quando TEM alguém transmitindo com o nick.
     $('#share-err').textContent = /already has a host/.test(e.message)
-      ? `Já existe uma transmissão com o nick "${nick}". Troque o nick (botão do topo) pra ficarem as duas no ar.`
+      ? `Já existe uma transmissão com o nick "${nick}" — troque o nick (botão do topo) pra transmitir.`
       : e.message
     // captura aberta e nada no ar: solta a fonte, senão o indicador de
     // compartilhamento do navegador fica aceso à toa depois do erro
