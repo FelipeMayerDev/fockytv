@@ -2,10 +2,21 @@
 
 ## Deploy e release — SEMPRE por pedido explícito
 
-Só executar deploy no servidor (`ssh focky@192.168.1.129 /opt/docker/fockytv`:
-git pull + restart/rebuild dos containers) e publicar release (bump de versão,
-tag `v*`, AppImage local + workflow Actions do Windows) quando o usuário pedir
-explicitamente. Commits e push na branch corrente não dependem disso.
+Dois ambientes de deploy, só quando o usuário pedir explicitamente:
+
+- **VPS (produção):** `ssh root@192.3.176.195`, repo em `/opt/fockytv`,
+  branch `discordfy` (o deploy segue esse branch, não o `main` — atualizar
+  os dois no push). `server/docker-compose.yml` e `config.json` têm
+  alterações locais no servidor: nunca sobrescrever. Deploy = `git pull` +
+  `docker compose build broadcast-box` (só quando `server/broadcast-box/`
+  mudar) + `docker compose up -d broadcast-box`. Entrada pública direta em
+  `:8180` (tcp+udp), caddy na frente do resto.
+- **LAN:** `ssh focky@192.168.1.129 /opt/docker/fockytv`: git pull +
+  restart/rebuild dos containers.
+
+Publicar release (bump de versão, tag `v*`, AppImage local + workflow
+Actions do Windows) idem, só por pedido. Commits e push na branch corrente
+não dependem disso.
 
 ### Armadilhas conhecidas
 
