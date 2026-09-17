@@ -283,6 +283,10 @@ button.icon { width:36px; padding:0 }
   -webkit-backdrop-filter:blur(var(--glass-blur));
 }
 .dock-pop[hidden] { display:none }
+/* na barra de voz o popover mudou de dono: a sidebar tem 260px e os 280px
+   centralizados em left:50% vazavam pra fora da tela pela esquerda. Aqui ele
+   ancora nas duas bordas e deixa a largura ser o que couber. */
+#voice-status .dock-pop { left:8px; right:8px; width:auto; transform:none }
 .dock-pop .field { margin-bottom:10px }
 .pop-row {
   display:flex; align-items:center; justify-content:space-between; gap:12px;
