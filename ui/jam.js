@@ -41,7 +41,7 @@ export async function initJam ({ serverUrl }) {
   let selfLevel = 0
 
   const ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 })
-  await ctx.audioWorklet.addModule(new URL('./jam-worklet.js?v=6', import.meta.url))
+  await ctx.audioWorklet.addModule(new URL('./jam-worklet.js?v=7', import.meta.url))
 
   const mixNode = new AudioWorkletNode(ctx, 'jam-mix', { outputChannelCount: [2] })
   mixNode.connect(ctx.destination)                    // monitor local
@@ -55,6 +55,17 @@ export async function initJam ({ serverUrl }) {
   // ── envio ───────────────────────────────────────────────────────────────
   let mode = 'music'
   let micStream = null
+  // o source do mic fica guardado: é a ÚNICA alça pra soltar a entrada do tap
+  // na troca de microfone. `tap.disconnect()` desfaz as saídas do tap, nunca
+  // as entradas — usar ele aqui derrubava o tap do mixNode (e com ele o
+  // worklet, que só continua sendo puxado por ter caminho até o destino).
+  let micSrc = null
+  // portão de ruído: fica SEMPRE no grafo (micSrc → gate → tap), ligado ou
+  // não. Mexer em conexão com o mic no ar foi de onde veio o bug do
+  // replaceMic; aqui ligar/desligar é só uma mensagem de config.
+  let gate = null
+  let gateCfg = { on: false, cut: true }
+  let onGate = () => {}
   let tap = null
   let encoder = null
   let outSeq = 0
@@ -96,15 +107,22 @@ export async function initJam ({ serverUrl }) {
       if (e.data.type === 'level') { selfLevel = e.data.v; fireLevels() }
       else feedEncoder(e.data)
     }
-    ctx.createMediaStreamSource(stream).connect(tap)
+    gate = new AudioWorkletNode(ctx, 'jam-gate', { outputChannelCount: [2] })
+    gate.port.onmessage = e => { if (e.data.type === 'gate') onGate(e.data) }
+    gate.port.postMessage({ type: 'config', ...gateCfg })
+    gate.connect(tap)
+    micSrc = ctx.createMediaStreamSource(stream)
+    micSrc.connect(gate)
     tap.connect(mixNode) // silencioso no mix (gain 0): só mantém o worklet vivo
   }
 
   const stopSend = () => {
+    try { micSrc?.disconnect() } catch {}
+    try { gate?.disconnect() } catch {}
     try { tap?.disconnect() } catch {}
     try { encoder?.close() } catch {}
     micStream?.getTracks().forEach(t => t.stop())
-    tap = null; encoder = null; micStream = null
+    micSrc = null; gate = null; tap = null; encoder = null; micStream = null
   }
 
   // ── recepção ────────────────────────────────────────────────────────────
@@ -331,7 +349,11 @@ export async function initJam ({ serverUrl }) {
         : navigator.mediaDevices.getUserMedia({
             audio: {
               echoCancellation: false, noiseSuppression: false, autoGainControl: false,
-              channelCount: 2, sampleRate: 48000,
+              // mono na conversa: o APM do Chromium (AEC/NS/AGC) roda no
+              // caminho mono de captura — pedir estéreo junto faz o
+              // processamento ser ignorado, e a supressão de ruído não
+              // engatava nunca no join. O jam-tap faz o up-mix pra estéreo.
+              channelCount: mode === 'voice' ? 1 : 2, sampleRate: 48000,
               ...(audio ?? {}),
               ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
             },
@@ -367,12 +389,28 @@ export async function initJam ({ serverUrl }) {
     // áudio alternativo (helper do Electron: MediaStreamTrackGenerator): troca
     // a fonte do encoder sem renegociar nada
     async replaceMic (stream) {
-      if (tap) { try { tap.disconnect() } catch {} }
+      // solta a fonte ANTIGA (entrada do tap). O tap continua ligado no
+      // mixNode: é esse caminho até o destino que mantém o worklet sendo
+      // puxado a cada render quantum — sem ele o encoder para de receber
+      // frames e o mic morre em silêncio.
+      try { micSrc?.disconnect() } catch {}
+      micSrc = null
       micStream?.getTracks().forEach(t => { if (t !== stream.getAudioTracks()[0]) t.stop() })
       micStream = stream
       if (!encoder) return startSend(stream)
-      ctx.createMediaStreamSource(stream).connect(tap)
+      micSrc = ctx.createMediaStreamSource(stream)
+      micSrc.connect(gate ?? tap)
     },
+
+    // portão de ruído: aplica na hora, sem tocar no mic nem no encoder.
+    // O objeto vira o estado corrente — um startSend posterior (troca de mic,
+    // rejoin) reconfigura o nó novo com ele.
+    setGate (cfg) {
+      gateCfg = { ...gateCfg, ...cfg }
+      gate?.port.postMessage({ type: 'config', ...gateCfg })
+    },
+    getGate () { return { ...gateCfg } },
+    onGate (cb) { onGate = cb || (() => {}) },
 
     sendChat (text) {
       if (ws?.readyState === WebSocket.OPEN)

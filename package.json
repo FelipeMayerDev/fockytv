@@ -5,7 +5,7 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
-    "test": "node ui/test/talk-indicator.mjs"
+    "test": "node ui/test/talk-indicator.mjs && node ui/test/noise-gate.mjs"
   },
   "devDependencies": {
     "electron": "^44.2.0",

@@ -390,8 +390,24 @@
         <span class="switch"><input type="checkbox" id="dock-ns"><span></span></span></label>
       <label class="pop-row"><span>Ganho automático</span>
         <span class="switch"><input type="checkbox" id="dock-agc"><span></span></span></label>
-      <p class="desc">Nos canais de voz os filtros já começam ligados (modo conversa).
+      <label class="pop-row"><span>Portão de ruído</span>
+        <span class="switch"><input type="checkbox" id="dock-gate"><span></span></span></label>
+      <!-- o medidor é o que torna o threshold ajustável: a barra é o nível da
+           banda de voz agora, o traço é onde o portão abre. Fique em silêncio,
+           suba até a barra parar de cruzar o traço. -->
+      <div class="gate-tune" id="gate-tune" hidden>
+        <div class="gate-meter" id="gate-meter"><i id="gate-bar"></i><b id="gate-thr"></b></div>
+        <label class="gate-knob">Abre acima de <output id="gate-thr-val">−45 dB</output>
+          <input type="range" id="dock-gate-thr" min="-70" max="-15" step="1" value="-45"></label>
+        <label class="gate-knob">Ignora transiente até <output id="gate-cf-val">12 ms</output>
+          <input type="range" id="dock-gate-cf" min="0" max="40" step="2" value="12"></label>
+      </div>
+      <label class="pop-row"><span>Corte de graves/agudos</span>
+        <span class="switch"><input type="checkbox" id="dock-cut"><span></span></span></label>
+      <p class="desc" id="mic-pop-desc">Nos canais de voz os filtros já começam ligados (modo conversa).
         Pra instrumento use o Estúdio — entrada crua, sem processamento.</p>
+      <p class="desc" id="mic-pop-desc-raw" hidden>Estúdio: entrada crua por padrão.
+        Estes ajustes valem só aqui — os canais de voz têm os seus.</p>
     </div>
     <button class="dock-btn" id="share-cam" title="Compartilhar WebCam" aria-label="Compartilhar WebCam">
       <svg viewBox="0 0 24 24"><path d="m22 8-6 4 6 4V8Z"/>
@@ -3643,16 +3659,36 @@ setTimeout(() => { jamFor('voice').catch(() => {}); jamFor('music').catch(() => 
 // O padrão segue voz crua (música, AEC/NS/AGC fora); ligar os toggles vira
 // "modo conversa". Muda na hora: recaptura o mic e troca a fonte do encoder
 // sem renegociar nada (jam.replaceMic).
+// preferência POR MODO, igual ao dispositivo (jamDevKey): a chave global
+// antiga era escrita pelo popover do dock (conversa) e valia pros dois — um
+// clique lá ligava NS/AGC no Estúdio e acabava com a entrada crua de
+// instrumento, que é a razão de o Estúdio existir. O legado só migra pra voz.
+const jamMicKey = (k, mode) => 'jam-' + k + '-' + (mode === 'music' ? 'music' : 'voice')
 const jamMicPrefs = {
-  get (k) { return localStorage.getItem('jam-' + k) === '1' },
-  set (k, v) { localStorage.setItem('jam-' + k, v ? '1' : '0') },
+  get (k, mode) { return jamMicPref(k, mode) },
+  set (k, v, mode) { localStorage.setItem(jamMicKey(k, mode), v ? '1' : '0') },
 }
 // sem preferência salva, o modo decide: conversa liga os filtros de voz,
 // música deixa a entrada crua
 const jamMicPref = (k, mode) => {
-  const raw = localStorage.getItem('jam-' + k)
+  const raw = localStorage.getItem(jamMicKey(k, mode)) ??
+    (mode === 'voice' ? localStorage.getItem('jam-' + k) : null)
   return raw !== null ? raw === '1' : mode === 'voice'
 }
+// o portão tem números, não só switches — mesmo esquema de chave por modo
+const jamNumPref = (k, mode, def) => {
+  const raw = localStorage.getItem(jamMicKey(k, mode))
+  return raw === null ? def : +raw
+}
+// Padrões: a conversa liga portão e cortes; o Estúdio nunca — o portão comeria
+// o sustain do instrumento e o corte em 8k, o brilho do prato. `jamMicPref`
+// já devolve false por padrão em 'music', então não há caso especial aqui.
+const jamGateCfg = (mode = jamMode) => ({
+  on: jamMicPref('gate', mode),
+  cut: jamMicPref('cut', mode),
+  openDb: jamNumPref('gatethr', mode, -45),
+  confirmMs: jamNumPref('gatecf', mode, 12),
+})
 const jamMicOpts = (mode = jamMode) => ({
   echoCancellation: jamMicPref('aec', mode),
   noiseSuppression: jamMicPref('ns', mode),
@@ -3668,17 +3704,61 @@ const jamMicDevice = (mode = jamMode) => {
     localStorage.getItem('jam-device') || undefined
 }
 
+// o dock fica visível dentro do Estúdio também: pintar sempre com os padrões
+// de conversa mostrava os três ligados enquanto a captura estava crua — o
+// switch dizia uma coisa e o mic fazia outra. Pinta o modo que está valendo.
+const jamPopMode = () => (jamJoined ? jamMode : (jamPendingMode ?? 'voice'))
+
 function micPopPaint () {
-  // o popover é dos canais de voz: mostra os padrões do modo conversa
-  $('#dock-aec').checked = jamMicPref('aec', 'voice')
-  $('#dock-ns').checked = jamMicPref('ns', 'voice')
-  $('#dock-agc').checked = jamMicPref('agc', 'voice')
+  const mode = jamPopMode()
+  $('#dock-aec').checked = jamMicPref('aec', mode)
+  $('#dock-ns').checked = jamMicPref('ns', mode)
+  $('#dock-agc').checked = jamMicPref('agc', mode)
+  const g = jamGateCfg(mode)
+  $('#dock-gate').checked = g.on
+  $('#dock-cut').checked = g.cut
+  $('#gate-tune').hidden = !g.on
+  $('#dock-gate-thr').value = g.openDb
+  $('#dock-gate-cf').value = g.confirmMs
+  gateKnobPaint()
+  // no Estúdio o aviso do rodapé (que fala do modo conversa) não se aplica
+  $('#mic-pop-desc').hidden = mode === 'music'
+  $('#mic-pop-desc-raw').hidden = mode !== 'music'
+}
+
+// medidor: -70dB a 0dB na largura da barra
+const gateDbPct = db => Math.max(0, Math.min(1, (db + 70) / 70)) * 100
+
+function gateKnobPaint () {
+  const thr = +$('#dock-gate-thr').value
+  $('#gate-thr-val').textContent = `${thr} dB`.replace('-', '−')
+  $('#gate-cf-val').textContent = `${$('#dock-gate-cf').value} ms`
+  $('#gate-thr').style.left = gateDbPct(thr) + '%'
+}
+
+// o worklet manda nível e estado ~8x/s; só desenha com o popover aberto
+function gateMeter ({ db, open }) {
+  if ($('#mic-pop').hidden) return
+  $('#gate-bar').style.width = gateDbPct(db) + '%'
+  $('#gate-meter').classList.toggle('open', open)
+}
+
+function applyGateSettings () {
+  jam?.setGate(jamGateCfg(jamPopMode()))
 }
 
 async function applyMicSettings () {
   if (!jamJoined || !jam) return   // desconectado: vale no próximo join
   try {
-    if (jamNativeOn) jamNativeStop()   // captura nativa não lê esses toggles
+    // captura nativa não lê esses toggles: sair dela é a única forma de
+    // aplicar os filtros. O switch precisa refletir isso — marcado, o próximo
+    // join voltava pra nativa e descartava as preferências em silêncio.
+    if (jamNativeOn) {
+      jamNativeStop()
+      $('#jam-native').checked = false
+      $('#jam-dev').disabled = false   // o change programático não dispara
+      toast('Filtros de voz ligados: captura nativa desativada.', null, 'info')
+    }
     const dev = jamMicDevice()
     const ms = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: jamMode === 'voice' ? 1 : 2, sampleRate: 48000,
@@ -3693,14 +3773,34 @@ $('#dock-mic-cfg').onclick = e => {
   e.stopPropagation()
   const pop = $('#mic-pop')
   pop.hidden = !pop.hidden
-  if (!pop.hidden) { micPopPaint(); jamListMics($('#dock-dev'), 'voice') }
+  if (!pop.hidden) { micPopPaint(); jamListMics($('#dock-dev'), jamPopMode()) }
 }
 $('#mic-pop').onclick = e => e.stopPropagation()   // clique dentro não fecha
 document.addEventListener('click', e => { $('#mic-pop').hidden = true })
+// AEC/NS/AGC são constraints do getUserMedia: mudar exige recapturar o mic.
 for (const [id, key] of [['#dock-aec', 'aec'], ['#dock-ns', 'ns'], ['#dock-agc', 'agc']])
-  $(id).onchange = e => { jamMicPrefs.set(key, e.target.checked); applyMicSettings() }
+  $(id).onchange = e => { jamMicPrefs.set(key, e.target.checked, jamPopMode()); applyMicSettings() }
+// o portão é nosso, roda no worklet: aplica na hora, sem recapturar nada
+for (const [id, key] of [['#dock-gate', 'gate'], ['#dock-cut', 'cut']])
+  $(id).onchange = e => {
+    jamMicPrefs.set(key, e.target.checked, jamPopMode())
+    if (key === 'gate') $('#gate-tune').hidden = !e.target.checked
+    applyGateSettings()
+  }
+for (const [id, key] of [['#dock-gate-thr', 'gatethr'], ['#dock-gate-cf', 'gatecf']])
+  $(id).oninput = e => {
+    localStorage.setItem(jamMicKey(key, jamPopMode()), e.target.value)
+    gateKnobPaint()
+    applyGateSettings()
+  }
 $('#dock-dev').addEventListener('change', () => {
-  localStorage.setItem(jamDevKey('voice'), $('#dock-dev').value)
+  const mode = jamPopMode()
+  localStorage.setItem(jamDevKey(mode), $('#dock-dev').value)
+  // no Estúdio quem manda no próximo join é o select do painel (jamMicDevice
+  // lê #jam-dev antes do localStorage): sem espelhar, a escolha feita pelo
+  // dock valia agora e era desfeita na reentrada.
+  if (mode === 'music' && [...$('#jam-dev').options].some(o => o.value === $('#dock-dev').value))
+    $('#jam-dev').value = $('#dock-dev').value
   applyMicSettings()
 })
 
@@ -4139,6 +4239,10 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
     voiceUI()
     renderVoice()
     jam = await jamFor(mode)
+    // config do portão ANTES do join: é o join que cria o nó, e ele nasce
+    // já configurado (sem piscar o primeiro segundo com o padrão)
+    jam.setGate(jamGateCfg(mode))
+    jam.onGate(gateMeter)
     // captura nativa quando disponível e o filtro de stream não estiver usando
     // o helper; falhando, cai pro getUserMedia sem processamento de voz.
     // Nativa só no estúdio: modo voz depende dos filtros do navegador.
