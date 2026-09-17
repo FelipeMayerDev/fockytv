@@ -182,16 +182,42 @@ const newGate = (cfg = {}) => {
   ok(pausa.length > 0, 'hold cobre a pausa entre sílabas sem refechar')
 }
 
-// ── 5. desligado é passa-reto de verdade (Estúdio) ──────────────────────
+// ── 5. tudo desligado é passa-reto de verdade (Estúdio) ─────────────────
 {
   const g = new JamGate()
-  g.port.onmessage({ data: { type: 'config', on: false } })
+  g.port.onmessage({ data: { type: 'config', on: false, cut: false } })
   const sig = snap()
   const out = through(g, sig)
   const n = Math.floor(sig.length / FRAME) * FRAME
   let igual = true
   for (let i = 0; i < n; i++) if (out[i] !== sig[i]) { igual = false; break }
-  ok(igual, 'portão desligado não toca no sinal (nem filtro, nem atraso)')
+  ok(igual, 'tudo desligado não toca no sinal (nem filtro, nem atraso)')
+}
+
+// o corte tem que valer SOZINHO: no switch único ("Limpar microfone") o
+// usuário pode querer os filtros sem portão nenhum, e antes o `cut` era
+// ignorado quando `on` era false — um controle que não fazia nada
+{
+  const g = new JamGate()
+  g.port.onmessage({ data: { type: 'config', on: false, cut: true } })
+  const fala = speech(300)
+  const out = through(g, fala)
+  const n = Math.floor(fala.length / FRAME) * FRAME
+  let igual = true
+  for (let i = 0; i < n; i++) if (out[i] !== fala[i]) { igual = false; break }
+  ok(!igual, 'corte sem portão filtra o sinal')
+  ok(rms(out) > rms(fala.subarray(0, n)) * 0.7,
+    'corte sem portão não atenua nem corta a fala (sem gating)')
+}
+
+// e o grave some de verdade: 40Hz está abaixo do corte de 90Hz
+{
+  const g = new JamGate()
+  g.port.onmessage({ data: { type: 'config', on: false, cut: true } })
+  const n = ms(300)
+  const grave = Float32Array.from({ length: n }, (_, i) => 0.3 * Math.sin(2 * Math.PI * 40 * i / SR))
+  const out = through(g, grave)
+  ok(rms(out.subarray(ms(100))) < rms(grave) * 0.3, 'corte de graves derruba um 40Hz')
 }
 
 // ── 6. threshold é obedecido ────────────────────────────────────────────

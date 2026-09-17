@@ -125,14 +125,20 @@ class JamGate extends AudioWorkletProcessor {
     const n = out[0].length
     const nch = out.length
 
-    if (!this.on) {
+    if (!this.on && !this.cut) {
       // passa-reto: nem filtro nem atraso. O nó fica no grafo de qualquer
       // jeito pra não ter cirurgia de conexão em cima de um mic vivo.
       for (let c = 0; c < nch; c++) out[c].set(inp[Math.min(c, inp.length - 1)].subarray(0, n))
       return true
     }
 
-    const delaySamples = Math.min(this.confirmMs * sampleRate / 1000 | 0, DELAY_CAP - FRAME - 1)
+    // o corte vale sozinho: com o portão desligado o sinal ainda passa pelos
+    // filtros, só não é atrasado nem atenuado. Antes o `cut` era ignorado sem
+    // o portão, e num switch único isso seria um controle que não faz nada.
+    const gating = this.on
+    const delaySamples = gating
+      ? Math.min(this.confirmMs * sampleRate / 1000 | 0, DELAY_CAP - FRAME - 1)
+      : 0
     const confirmNeed = this.confirmMs * sampleRate / 1000 | 0
     const holdSamples = this.holdMs * sampleRate / 1000 | 0
     const envDecay = this.coef(30)
@@ -177,7 +183,7 @@ class JamGate extends AudioWorkletProcessor {
       }
 
       // 4. ganho suave até o alvo e saída atrasada do lookahead
-      const target = this.open ? 1 : 0
+      const target = gating ? (this.open ? 1 : 0) : 1
       const k = target > this.gain ? atk : rel
       this.gain = target + (this.gain - target) * k
       const r = (this.w - delaySamples + DELAY_CAP) % DELAY_CAP

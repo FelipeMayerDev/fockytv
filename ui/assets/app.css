@@ -156,6 +156,11 @@ label { font-size:13px; font-weight:500; color:hsl(var(--muted-foreground)) }
 .vs-txt .muted { font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
 .vs-acts { display:flex; gap:2px }
 .vs-acts .vs-leave:hover { background:hsl(var(--destructive) / .15); color:hsl(var(--destructive)) }
+/* mic da navbar: mesmo semáforo que a bola do dock tinha (verde falando,
+   vermelho mutado) */
+.vs-acts .vs-mic:hover { background:hsl(var(--muted)) }
+.vs-acts .vs-mic.talking { background:hsl(var(--success) / .18); color:hsl(var(--success)) }
+.vs-acts .vs-mic.muted { background:hsl(var(--destructive) / .15); color:hsl(var(--destructive)) }
 
 /* latência da voz: sparkline na barra; hover abre painel com o gráfico
    grande e os detalhes (mín/médio/máx, jitter, buffer, peers) */

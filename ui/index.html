@@ -17,7 +17,7 @@
      e CSS velho (componente novo aparece sem estilo até a cache expirar).
      Suba o número junto com qualquer mudança em assets/. -->
 <link rel="stylesheet" href="assets/theme.css?v=1">
-<link rel="stylesheet" href="assets/app.css?v=2">
+<link rel="stylesheet" href="assets/app.css?v=3">
 
 <!-- gif do "du bist gut genug": cobre a tela enquanto toca a abertura -->
 <div id="intro-gif"></div>
@@ -97,6 +97,9 @@
         <span id="vs-ms">—</span>
       </div>
       <div class="vs-acts">
+        <!-- silenciar/reativar o mic: fica aqui, do lado do desconectar, e não
+             no dock flutuante em cima da live -->
+        <button class="ghost icon vs-mic" id="vs-mic" title="Silenciar microfone" aria-label="Silenciar microfone"></button>
         <button class="ghost icon vs-leave" id="vs-leave" title="Desconectar da voz" aria-label="Desconectar da voz">
         <svg viewBox="0 0 24 24"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="22" y1="2" x2="16" y2="8"/></svg>
         </button>
@@ -379,8 +382,12 @@
     <button class="dock-btn" id="dock-mic" title="Entrar no canal de voz">
       <svg viewBox="0 0 24 24" class="ico-mic-off"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/><path d="m3 3 18 18" opacity=".9"/></svg>
     </button>
+    <!-- mic + seta: conectado o #dock-mic some (o controle foi pra navbar) e
+         uma seta sozinha aqui não diria de que é a configuração -->
     <button class="dock-btn dock-btn-sm" id="dock-mic-cfg" title="Configurar microfone" aria-label="Configurar microfone">
-      <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+      <svg viewBox="0 0 24 24"><rect x="6" y="2" width="6" height="11" rx="3"/>
+        <path d="M2.5 9.5v1a6.5 6.5 0 0 0 13 0v-1"/><path d="M9 17v4"/>
+        <path d="m16 17 2.5 2.5L21 17"/></svg>
     </button>
     <!-- configuração do microfone: dispositivo + processamento de voz -->
     <div class="dock-pop glass" id="mic-pop" hidden>
@@ -388,10 +395,11 @@
         <label for="dock-dev">Microfone</label>
         <select id="dock-dev"></select>
       </div>
-      <label class="pop-row"><span>Cancelar eco</span>
-        <span class="switch"><input type="checkbox" id="dock-aec"><span></span></span></label>
-      <label class="pop-row"><span>Supressão de ruído</span>
-        <span class="switch"><input type="checkbox" id="dock-ns"><span></span></span></label>
+      <!-- eco + supressão + corte de graves/agudos num controle só: são três
+           faces do mesmo "limpar o microfone", e ninguém liga uma sem a outra -->
+      <label class="pop-row"><span>Limpar microfone</span>
+        <span class="switch"><input type="checkbox" id="dock-clean"><span></span></span></label>
+      <p class="desc" style="margin:0 0 4px">Cancelamento de eco, supressão de ruído e corte de graves/agudos.</p>
       <label class="pop-row"><span>Ganho automático</span>
         <span class="switch"><input type="checkbox" id="dock-agc"><span></span></span></label>
       <label class="pop-row"><span>Portão de ruído</span>
@@ -406,8 +414,6 @@
         <label class="gate-knob">Ignora transiente até <output id="gate-cf-val">12 ms</output>
           <input type="range" id="dock-gate-cf" min="0" max="40" step="2" value="12"></label>
       </div>
-      <label class="pop-row"><span>Corte de graves/agudos</span>
-        <span class="switch"><input type="checkbox" id="dock-cut"><span></span></span></label>
       <p class="desc" id="mic-pop-desc">Nos canais de voz os filtros já começam ligados (modo conversa).
         Pra instrumento use o Estúdio — entrada crua, sem processamento.</p>
       <p class="desc" id="mic-pop-desc-raw" hidden>Estúdio: entrada crua por padrão.
@@ -1619,6 +1625,20 @@ function chatRender (m, append = true) {
   }
 }
 
+// Ping de aplicação em todo WS nosso. Os três (jam, presença, chat) ficam
+// mudos entre eventos, e o Cloudflare que está na frente do domínio derruba
+// WebSocket ocioso em ~100s. Chat e presença reconectavam sozinhos, então o
+// sintoma era só um soluço; no WS da sala não havia reconexão, e a pessoa
+// sumia da listagem continuando a ser ouvida (o áudio é P2P).
+// O servidor já respondia pong desde sempre — ninguém mandava ping.
+const wsKeepalive = ws => {
+  const t = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping', t: Date.now() }))
+    else clearInterval(t)
+  }, 25000)
+  ws.addEventListener('close', () => clearInterval(t))
+}
+
 const chatUrl = room =>
   cfg.serverUrl.replace(/^http/, 'ws') + '/api/fixed/ws/chat?nick=' +
   encodeURIComponent(nick) + '&room=' + encodeURIComponent(room)
@@ -1629,7 +1649,7 @@ function chatConnect () {
   let opened = false
   const ws = new WebSocket(chatUrl(room))
   chat.ws = ws
-  ws.onopen = () => { opened = true }
+  ws.onopen = () => { opened = true; wsKeepalive(ws) }
   ws.onmessage = e => {
     if (chat.room !== room) return            // já trocou de stream
     let m
@@ -3398,7 +3418,7 @@ const jamFor = async mode => {
   // max-age de 4h no domínio, mais o cache do navegador) e sem subir o
   // número o index.html novo carrega o motor velho — foi o que deixou
   // "jam.setGate is not a function" barrar a entrada no canal de voz.
-  const j = await import('./jam.js?v=15').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+  const j = await import('./jam.js?v=16').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
   j.onChat(m => {
     if (m.type === 'yt') return jamYtEvent(m)
     jamChatLog.push(m); jamChatRender()
@@ -3499,7 +3519,7 @@ function presenceConnect () {
   let opened = false
   const ws = new WebSocket(cfg.serverUrl.replace(/^http/, 'ws') + '/api/fixed/ws/presence')
   presenceWs = ws
-  ws.onopen = () => { opened = true }
+  ws.onopen = () => { opened = true; wsKeepalive(ws) }
   ws.onmessage = e => {
     let m
     try { m = JSON.parse(e.data) } catch { return }
@@ -3540,17 +3560,27 @@ function voiceUI () {
   $('#vs-room').textContent = connecting ? jamPending : (jamRoom ?? '')
   document.querySelector('.vs-dot')
     ?.classList.toggle('connecting', connecting)
-  const b = $('#dock-mic')
-  b.classList.toggle('off', !jamJoined)
-  if (!jamJoined) {
-    b.title = connecting ? 'Conectando…' : 'Entrar no canal de voz'
-    b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>'
-    return
-  }
+  // MICROFONE, não alto-falante. O HTML estático já trazia o ícone certo; era
+  // este innerHTML que o trocava por um cone de som em todos os estados, num
+  // botão cujo title é "Silenciar microfone".
+  const svg = inner => `<svg viewBox="0 0 24 24">${inner}</svg>`
+  const MIC = '<rect x="9" y="2" width="6" height="12" rx="3"/>'
+    + '<path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/>'
+  const micOn = svg(MIC)
+  const micOff = svg(MIC + '<path d="m3 3 18 18" opacity=".9"/>')
+
+  // o dock flutuante fica só com o ATALHO DE ENTRAR: conectado, o controle do
+  // microfone mora na navbar, ao lado do desconectar, e não por cima da live
+  const d = $('#dock-mic')
+  d.hidden = jamJoined
+  d.classList.toggle('off', !jamJoined)
+  d.title = connecting ? 'Conectando…' : 'Entrar no canal de voz'
+  d.innerHTML = micOff
+
+  const b = $('#vs-mic')
   b.title = dockMuted ? 'Reativar microfone' : 'Silenciar microfone'
-  b.innerHTML = dockMuted
-    ? '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/></svg>'
-    : '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>'
+  b.setAttribute('aria-label', b.title)
+  b.innerHTML = dockMuted ? micOff : micOn
   // bola do mic: cinza sem fala, verde falando, vermelho mutado
   b.classList.toggle('muted', dockMuted)
   // e a minha bola na listagem do canal segue o mesmo semáforo
@@ -3561,8 +3591,9 @@ function voiceUI () {
   if (jamJoined) { if (!vsTimer) vsStart() } else vsStop()
 }
 
-$('#dock-mic').onclick = () => {
-  if (!jamJoined) return jamToggleJoin(VOICE_MAIN, 'voice').catch(e => toast(e.message))
+$('#dock-mic').onclick = () => jamToggleJoin(VOICE_MAIN, 'voice').catch(e => toast(e.message))
+$('#vs-mic').onclick = () => {
+  if (!jamJoined) return
   dockMuted = !dockMuted
   jam.setMicGain(dockMuted ? 0 : (+localStorage.getItem('jam-micgain') || 1))
   voiceUI()
@@ -3719,12 +3750,11 @@ const jamPopMode = () => (jamJoined ? jamMode : (jamPendingMode ?? 'voice'))
 
 function micPopPaint () {
   const mode = jamPopMode()
-  $('#dock-aec').checked = jamMicPref('aec', mode)
-  $('#dock-ns').checked = jamMicPref('ns', mode)
+  // 'ns' é a chave representativa do switch único (o trio é gravado junto)
+  $('#dock-clean').checked = jamMicPref('ns', mode)
   $('#dock-agc').checked = jamMicPref('agc', mode)
   const g = jamGateCfg(mode)
   $('#dock-gate').checked = g.on
-  $('#dock-cut').checked = g.cut
   $('#gate-tune').hidden = !g.on
   $('#dock-gate-thr').value = g.openDb
   $('#dock-gate-cf').value = g.confirmMs
@@ -3785,16 +3815,25 @@ $('#dock-mic-cfg').onclick = e => {
 }
 $('#mic-pop').onclick = e => e.stopPropagation()   // clique dentro não fecha
 document.addEventListener('click', e => { $('#mic-pop').hidden = true })
-// AEC/NS/AGC são constraints do getUserMedia: mudar exige recapturar o mic.
-for (const [id, key] of [['#dock-aec', 'aec'], ['#dock-ns', 'ns'], ['#dock-agc', 'agc']])
-  $(id).onchange = e => { jamMicPrefs.set(key, e.target.checked, jamPopMode()); applyMicSettings() }
+// "Limpar microfone" é um switch pra três coisas: eco e supressão são
+// constraints do getUserMedia (exigem recapturar o mic) e o corte roda no
+// nosso worklet (aplica na hora). As chaves continuam separadas por baixo —
+// é só a UI que virou uma.
+$('#dock-clean').onchange = e => {
+  const mode = jamPopMode()
+  for (const k of ['aec', 'ns', 'cut']) jamMicPrefs.set(k, e.target.checked, mode)
+  applyGateSettings()
+  applyMicSettings()
+}
+$('#dock-agc').onchange = e => {
+  jamMicPrefs.set('agc', e.target.checked, jamPopMode()); applyMicSettings()
+}
 // o portão é nosso, roda no worklet: aplica na hora, sem recapturar nada
-for (const [id, key] of [['#dock-gate', 'gate'], ['#dock-cut', 'cut']])
-  $(id).onchange = e => {
-    jamMicPrefs.set(key, e.target.checked, jamPopMode())
-    if (key === 'gate') $('#gate-tune').hidden = !e.target.checked
-    applyGateSettings()
-  }
+$('#dock-gate').onchange = e => {
+  jamMicPrefs.set('gate', e.target.checked, jamPopMode())
+  $('#gate-tune').hidden = !e.target.checked
+  applyGateSettings()
+}
 for (const [id, key] of [['#dock-gate-thr', 'gatethr'], ['#dock-gate-cf', 'gatecf']])
   $(id).oninput = e => {
     localStorage.setItem(jamMicKey(key, jamPopMode()), e.target.value)
@@ -4200,8 +4239,8 @@ function jamLevels ({ self, peers }) {
     if (level(id) > TALK_ON) jamLoudAt.set(id, Date.now())
     row.classList.toggle('talking', jamTalking(id))
   }
-  // e no dock: meu mic falando acende a bola em verde
-  $('#dock-mic').classList.toggle('talking',
+  // e na navbar: meu mic falando acende o botão em verde
+  $('#vs-mic').classList.toggle('talking',
     jamJoined && !dockMuted && jamTalking(nick))
   $('#jam-selfmeter').style.width = Math.min(100, (self ?? 0) * 160) + '%'
 }

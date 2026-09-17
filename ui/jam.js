@@ -41,7 +41,7 @@ export async function initJam ({ serverUrl }) {
   let selfLevel = 0
 
   const ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 })
-  await ctx.audioWorklet.addModule(new URL('./jam-worklet.js?v=7', import.meta.url))
+  await ctx.audioWorklet.addModule(new URL('./jam-worklet.js?v=8', import.meta.url))
 
   const mixNode = new AudioWorkletNode(ctx, 'jam-mix', { outputChannelCount: [2] })
   mixNode.connect(ctx.destination)                    // monitor local
@@ -268,7 +268,16 @@ export async function initJam ({ serverUrl }) {
   }
 
   const onSignal = async msg => {
-    if (msg.type === 'peers') { for (const p of msg.peers) await connectTo(p); return }
+    if (msg.type === 'pong') return   // keepalive: só serve pra manter o WS vivo
+    if (msg.type === 'peers') {
+      // lista autoritativa do servidor. Numa RECONEXÃO ela também corrige o
+      // que perdemos enquanto o WS esteve fora: quem saiu nesse intervalo não
+      // vem aqui e o peer-left correspondente nunca chegou.
+      const vivos = new Set(msg.peers)
+      for (const [nick, p] of peers) if (!vivos.has(nick)) { p.close(); peers.delete(nick) }
+      for (const p of msg.peers) await connectTo(p)
+      return
+    }
     if (msg.type === 'peer-joined') {
       expectPeer(msg.nick)
       return onChat({ type: 'chat', from: 'sistema', text: `${msg.nick} entrou na sala` })
@@ -283,6 +292,7 @@ export async function initJam ({ serverUrl }) {
     if (msg.type === 'evicted') {
       // outro cliente assumiu o nick: desconecta em silêncio
       room = null
+      wsStopKeepalive()
       for (const p of peers.values()) p.close()
       peers.clear()
       stopSend()
@@ -324,6 +334,60 @@ export async function initJam ({ serverUrl }) {
     })),
   })
 
+  // ── sobrevivência do WebSocket de sinalização ───────────────────────────
+  // O WS fica MUDO depois que a sinalização acaba: offer/answer/ICE são as
+  // únicas mensagens, e a mídia é P2P. Com Cloudflare na frente do domínio,
+  // um WebSocket ocioso é encerrado em ~100s — e o servidor, ao ver o close,
+  // tira o nick do jamRooms e manda member-left pra todo mundo. Resultado:
+  // a pessoa some da listagem enquanto continua sendo ouvida, porque o áudio
+  // não passa por ali. Era exatamente o "usuários somem do canal".
+  //
+  // Duas defesas: ping de aplicação (o servidor já respondia pong, ninguém
+  // mandava) e reconexão com backoff enquanto ainda estivermos numa sala.
+  const WS_PING_MS = 25_000
+  let wsPing = null
+  let wsRetry = null
+  let wsBackoff = 1000
+
+  const wsStopKeepalive = () => {
+    clearInterval(wsPing); wsPing = null
+    clearTimeout(wsRetry); wsRetry = null
+  }
+
+  const wireWs = sock => {
+    sock.onmessage = e => { try { onSignal(JSON.parse(e.data)) } catch {} }
+    sock.onclose = () => {
+      clearInterval(wsPing); wsPing = null
+      if (!room) return            // saída normal: nada a refazer
+      emit()
+      if (wsRetry) return
+      wsRetry = setTimeout(() => { wsRetry = null; wsReconnect() }, wsBackoff)
+      wsBackoff = Math.min(wsBackoff * 2, 10_000)
+    }
+    sock.onopen = () => {
+      wsBackoff = 1000
+      clearInterval(wsPing)
+      wsPing = setInterval(() => {
+        if (sock.readyState === WebSocket.OPEN)
+          sock.send(JSON.stringify({ type: 'ping', t: Date.now() }))
+      }, WS_PING_MS)
+    }
+  }
+
+  const wsUrlFor = () =>
+    `${wsUrl}/api/fixed/ws/jam?room=${encodeURIComponent(room)}&nick=${encodeURIComponent(me)}&type=${mode}`
+
+  // reconexão: o servidor nos readiciona ao jamRooms e reenvia a lista de
+  // peers. connectTo ignora quem já tem pc, então as conexões P2P vivas —
+  // que nunca caíram — seguem intactas; só a presença é restaurada.
+  const wsReconnect = () => {
+    if (!room) return
+    try { ws?.close() } catch {}
+    ws = new WebSocket(wsUrlFor())
+    wireWs(ws)
+    ws.onerror = () => {}   // o onclose cuida do retry
+  }
+
   // ── API pública ─────────────────────────────────────────────────────────
   return {
     async join (_room, _nick, _onState, { micStream: extMic = null, deviceId = null, audio = null, mode: _mode = 'music' } = {}) {
@@ -335,14 +399,14 @@ export async function initJam ({ serverUrl }) {
       // primeiro join e a UI separa Estúdio (music) de canal de conversa
       // (voice) pelo tipo, não por convenção de nome.
       let micErr = null
+      wsStopKeepalive()
+      wsBackoff = 1000
       const wsOpen = new Promise((res, rej) => {
-        ws = new WebSocket(`${wsUrl}/api/fixed/ws/jam?room=${encodeURIComponent(room)}&nick=${encodeURIComponent(me)}&type=${mode}`)
-        ws.onmessage = e => {
-          try { onSignal(JSON.parse(e.data)) } catch {}
-        }
-        ws.onopen = res
+        ws = new WebSocket(wsUrlFor())
+        wireWs(ws)
+        const opened = ws.onopen
+        ws.onopen = e => { opened(e); res(e) }   // keepalive + resolve do join
         ws.onerror = () => rej(micErr ?? new Error('sinalização indisponível'))
-        ws.onclose = () => { if (room) emit() }
       })
       const micReady = (extMic
         ? Promise.resolve(extMic)
@@ -366,6 +430,11 @@ export async function initJam ({ serverUrl }) {
         micStream = await micReady
         await wsOpen
       } catch (e) {
+        // sem zerar `room` aqui, o onclose do WS entenderia a falha de join
+        // como queda e entraria em loop de reconexão pra uma sala que nunca
+        // chegou a existir
+        room = null
+        wsStopKeepalive()
         try { ws?.close() } catch {}
         ws = null
         micStream?.getTracks().forEach(t => t.stop())
@@ -428,6 +497,7 @@ export async function initJam ({ serverUrl }) {
 
     async leave () {
       room = null
+      wsStopKeepalive()
       try { ws?.close() } catch {}
       ws = null
       for (const p of peers.values()) p.close()
