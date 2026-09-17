@@ -3394,7 +3394,11 @@ const jams = {}          // uma instância por modo: não reconfigurar encoder a
 const jamFor = async mode => {
   const key = MODES.has(mode) ? mode : 'music'
   if (jams[key]) return jams[key]
-  const j = await import('./jam.js?v=14').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+  // ?v= SOBE TODA VEZ que jam.js muda: o módulo é cacheado (Cloudflare com
+  // max-age de 4h no domínio, mais o cache do navegador) e sem subir o
+  // número o index.html novo carrega o motor velho — foi o que deixou
+  // "jam.setGate is not a function" barrar a entrada no canal de voz.
+  const j = await import('./jam.js?v=15').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
   j.onChat(m => {
     if (m.type === 'yt') return jamYtEvent(m)
     jamChatLog.push(m); jamChatRender()
@@ -3748,7 +3752,7 @@ function gateMeter ({ db, open }) {
 }
 
 function applyGateSettings () {
-  jam?.setGate(jamGateCfg(jamPopMode()))
+  jam?.setGate?.(jamGateCfg(jamPopMode()))   // motor defasado: sem portão, sem erro
 }
 
 async function applyMicSettings () {
@@ -4244,9 +4248,13 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
     renderVoice()
     jam = await jamFor(mode)
     // config do portão ANTES do join: é o join que cria o nó, e ele nasce
-    // já configurado (sem piscar o primeiro segundo com o padrão)
-    jam.setGate(jamGateCfg(mode))
-    jam.onGate(gateMeter)
+    // já configurado (sem piscar o primeiro segundo com o padrão).
+    // Chamada opcional de propósito: index.html e jam.js são cacheados
+    // separadamente, então um dia eles VÃO estar defasados no navegador de
+    // alguém. Perder o portão é aceitável; não conseguir entrar no canal de
+    // voz por causa dele não é.
+    jam.setGate?.(jamGateCfg(mode))
+    jam.onGate?.(gateMeter)
     // captura nativa quando disponível e o filtro de stream não estiver usando
     // o helper; falhando, cai pro getUserMedia sem processamento de voz.
     // Nativa só no estúdio: modo voz depende dos filtros do navegador.
