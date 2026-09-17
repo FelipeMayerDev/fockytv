@@ -131,6 +131,24 @@ label { font-size:13px; font-weight:500; color:hsl(var(--muted-foreground)) }
 .vmem.talking span:not(.vdot) { color:hsl(var(--foreground)) }
 .vmem.muted .vdot { background:hsl(var(--destructive)); animation:none }
 @media (prefers-reduced-motion:reduce) { .vmem.talking .vdot { animation:none } }
+/* controles de áudio por participante: escondidos até o hover, pra lista não
+   virar um painel. Quem está mutado mantém o controle visível — sem isso não
+   há como descobrir por que aquela pessoa não sai no som. */
+.vm-acts { margin-left:auto; display:none; align-items:center; gap:4px; flex:none }
+.vmem:hover .vm-acts, .vmem:focus-within .vm-acts, .vmem.silenced .vm-acts { display:flex }
+.vmem.silenced span:not(.vdot):not(.vm-live) { opacity:.55 }
+.vm-acts input[type=range] { width:52px; height:4px; padding:0; border:0;
+  appearance:none; background:hsl(var(--border)); border-radius:var(--radius-pill) }
+.vm-acts input[type=range]::-webkit-slider-thumb { appearance:none; width:10px; height:10px;
+  border-radius:var(--radius-pill); background:hsl(var(--primary)); cursor:pointer }
+.vm-mute { display:flex; padding:2px; border:0; background:none; cursor:pointer;
+  color:hsl(var(--muted-foreground)); border-radius:var(--radius) }
+.vm-mute svg { width:14px; height:14px }
+.vm-mute:hover { color:hsl(var(--foreground)); background:hsl(var(--muted)) }
+.vm-mute.on { color:hsl(var(--destructive)) }
+/* com os controles à direita, o LIVE perde o margin-left:auto pro .vm-acts */
+.vmem:hover .vm-live, .vmem.silenced .vm-live { margin-left:0 }
+
 .vm-live {
   margin-left:auto; background:hsl(var(--destructive)); color:#fff;
   font-size:9px; font-weight:700; letter-spacing:.05em; padding:1px 5px; border-radius:4px;
@@ -143,24 +161,28 @@ label { font-size:13px; font-weight:500; color:hsl(var(--muted-foreground)) }
 /* status de voz no rodapé da sidebar */
 #voice-status {
   position:relative;
-  flex:none; display:flex; align-items:center; gap:8px; padding:10px 12px;
+  flex:none; display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px 12px;
   border-top:1px solid var(--glass-border); background:hsl(var(--background) / .35);
 }
 .vs-info { flex:1; display:flex; align-items:center; gap:10px; min-width:0 }
+/* a bolinha carrega o estado no title: alvo de 9px é pouco pra mira do mouse,
+   então o box-shadow de fora vira área clicável com um padding transparente */
 .vs-dot { width:9px; height:9px; border-radius:50%; flex:none; background:hsl(var(--success));
-  box-shadow:0 0 8px hsl(var(--success) / .6) }
+  box-shadow:0 0 8px hsl(var(--success) / .6);
+  cursor:help; outline-offset:4px }
 .vs-dot.connecting { background:hsl(var(--warning)); box-shadow:0 0 8px hsl(var(--warning) / .6);
   animation:pulse 1s infinite }
 .vs-txt { display:flex; flex-direction:column; line-height:1.25; min-width:0 }
 .vs-txt b { font-size:12.5px }
 .vs-txt .muted { font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
-.vs-acts { display:flex; gap:2px }
+/* quatro controles não cabem ao lado do sparkline, e encolher botão não é
+   opção: a fila inteira quebra pra segunda linha e se espalha nela */
+.vs-acts { flex:1 0 100%; display:flex; gap:4px; justify-content:space-between }
 .vs-acts .vs-leave:hover { background:hsl(var(--destructive) / .15); color:hsl(var(--destructive)) }
-/* mic da navbar: mesmo semáforo que a bola do dock tinha (verde falando,
-   vermelho mutado) */
-.vs-acts .vs-mic:hover { background:hsl(var(--muted)) }
-.vs-acts .vs-mic.talking { background:hsl(var(--success) / .18); color:hsl(var(--success)) }
-.vs-acts .vs-mic.muted { background:hsl(var(--destructive) / .15); color:hsl(var(--destructive)) }
+.vs-acts button:hover { background:hsl(var(--muted)) }
+/* mic e mudo-geral acendem em vermelho quando estão cortando som */
+.vs-acts .vs-mic.muted,
+.vs-acts .vs-deaf.muted { background:hsl(var(--destructive) / .15); color:hsl(var(--destructive)) }
 
 /* latência da voz: sparkline na barra; hover abre painel com o gráfico
    grande e os detalhes (mín/médio/máx, jitter, buffer, peers) */

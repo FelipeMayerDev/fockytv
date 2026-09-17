@@ -17,7 +17,7 @@
      e CSS velho (componente novo aparece sem estilo até a cache expirar).
      Suba o número junto com qualquer mudança em assets/. -->
 <link rel="stylesheet" href="assets/theme.css?v=1">
-<link rel="stylesheet" href="assets/app.css?v=3">
+<link rel="stylesheet" href="assets/app.css?v=4">
 
 <!-- gif do "du bist gut genug": cobre a tela enquanto toca a abertura -->
 <div id="intro-gif"></div>
@@ -86,9 +86,12 @@
 
     <!-- status de voz: só existe conectado; espelha o que o dock faz -->
     <div id="voice-status" hidden>
+      <!-- o estado ("Voz conectada"/"Conectando…") saiu do texto: a barra não
+           tem largura pra ele e a bolinha já diz a mesma coisa em cor. Agora
+           vive no title da bolinha, que ganhou área de hover pra isso. -->
       <div class="vs-info">
-        <span class="vs-dot"></span>
-        <div class="vs-txt"><b id="vs-label">Voz conectada</b><span id="vs-room" class="muted">Sala</span></div>
+        <span class="vs-dot" id="vs-dot" tabindex="0" title="Voz conectada"></span>
+        <div class="vs-txt"><span id="vs-room" class="muted">Sala</span></div>
       </div>
       <!-- latência da conexão: gráfico na barra; hover abre o painel com o
            gráfico grande e os detalhes -->
@@ -96,13 +99,51 @@
         <canvas id="vs-spark" width="56" height="20"></canvas>
         <span id="vs-ms">—</span>
       </div>
+      <!-- segunda linha: os controles não cabem ao lado do sparkline sem
+           encolher botão, então quebram pra cá (flex-basis:100%) -->
       <div class="vs-acts">
         <!-- silenciar/reativar o mic: fica aqui, do lado do desconectar, e não
              no dock flutuante em cima da live -->
         <button class="ghost icon vs-mic" id="vs-mic" title="Silenciar microfone" aria-label="Silenciar microfone"></button>
+        <button class="ghost icon vs-cfg" id="vs-mic-cfg" title="Configurar microfone" aria-label="Configurar microfone">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.04.04a2 2 0 1 1-2.83 2.83l-.04-.04a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.04.04a2 2 0 1 1-2.83-2.83l.04-.04a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.04-.04a2 2 0 1 1 2.83-2.83l.04.04a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.04-.04a2 2 0 1 1 2.83 2.83l-.04.04a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+        <!-- mutar todo mundo de uma vez: silencia a saída dos outros, não a
+             minha entrada (pro mic é o botão acima) -->
+        <button class="ghost icon vs-deaf" id="vs-deaf" title="Mutar todos" aria-label="Mutar todos"></button>
         <button class="ghost icon vs-leave" id="vs-leave" title="Desconectar da voz" aria-label="Desconectar da voz">
         <svg viewBox="0 0 24 24"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="22" y1="2" x2="16" y2="8"/></svg>
         </button>
+      </div>
+      <!-- configuração do microfone: dispositivo + processamento de voz -->
+      <div class="dock-pop glass" id="mic-pop" hidden>
+        <div class="field">
+          <label for="dock-dev">Microfone</label>
+          <select id="dock-dev"></select>
+        </div>
+        <!-- eco + supressão + corte de graves/agudos num controle só: são três
+             faces do mesmo "limpar o microfone", e ninguém liga uma sem a outra -->
+        <label class="pop-row"><span>Limpar microfone</span>
+          <span class="switch"><input type="checkbox" id="dock-clean"><span></span></span></label>
+        <p class="desc" style="margin:0 0 4px">Cancelamento de eco, supressão de ruído e corte de graves/agudos.</p>
+        <label class="pop-row"><span>Ganho automático</span>
+          <span class="switch"><input type="checkbox" id="dock-agc"><span></span></span></label>
+        <label class="pop-row"><span>Portão de ruído</span>
+          <span class="switch"><input type="checkbox" id="dock-gate"><span></span></span></label>
+        <!-- o medidor é o que torna o threshold ajustável: a barra é o nível da
+             banda de voz agora, o traço é onde o portão abre. Fique em silêncio,
+             suba até a barra parar de cruzar o traço. -->
+        <div class="gate-tune" id="gate-tune" hidden>
+          <div class="gate-meter" id="gate-meter"><i id="gate-bar"></i><b id="gate-thr"></b></div>
+          <label class="gate-knob">Abre acima de <output id="gate-thr-val">−45 dB</output>
+            <input type="range" id="dock-gate-thr" min="-70" max="-15" step="1" value="-45"></label>
+          <label class="gate-knob">Ignora transiente até <output id="gate-cf-val">12 ms</output>
+            <input type="range" id="dock-gate-cf" min="0" max="40" step="2" value="12"></label>
+        </div>
+        <p class="desc" id="mic-pop-desc">Nos canais de voz os filtros já começam ligados (modo conversa).
+          Pra instrumento use o Estúdio — entrada crua, sem processamento.</p>
+        <p class="desc" id="mic-pop-desc-raw" hidden>Estúdio: entrada crua por padrão.
+          Estes ajustes valem só aqui — os canais de voz têm os seus.</p>
       </div>
       <div class="vs-pop glass" id="vs-pop" hidden>
         <canvas id="vs-chart" width="236" height="72"></canvas>
@@ -382,43 +423,6 @@
     <button class="dock-btn" id="dock-mic" title="Entrar no canal de voz">
       <svg viewBox="0 0 24 24" class="ico-mic-off"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/><path d="m3 3 18 18" opacity=".9"/></svg>
     </button>
-    <!-- mic + seta: conectado o #dock-mic some (o controle foi pra navbar) e
-         uma seta sozinha aqui não diria de que é a configuração -->
-    <button class="dock-btn dock-btn-sm" id="dock-mic-cfg" title="Configurar microfone" aria-label="Configurar microfone">
-      <svg viewBox="0 0 24 24"><rect x="6" y="2" width="6" height="11" rx="3"/>
-        <path d="M2.5 9.5v1a6.5 6.5 0 0 0 13 0v-1"/><path d="M9 17v4"/>
-        <path d="m16 17 2.5 2.5L21 17"/></svg>
-    </button>
-    <!-- configuração do microfone: dispositivo + processamento de voz -->
-    <div class="dock-pop glass" id="mic-pop" hidden>
-      <div class="field">
-        <label for="dock-dev">Microfone</label>
-        <select id="dock-dev"></select>
-      </div>
-      <!-- eco + supressão + corte de graves/agudos num controle só: são três
-           faces do mesmo "limpar o microfone", e ninguém liga uma sem a outra -->
-      <label class="pop-row"><span>Limpar microfone</span>
-        <span class="switch"><input type="checkbox" id="dock-clean"><span></span></span></label>
-      <p class="desc" style="margin:0 0 4px">Cancelamento de eco, supressão de ruído e corte de graves/agudos.</p>
-      <label class="pop-row"><span>Ganho automático</span>
-        <span class="switch"><input type="checkbox" id="dock-agc"><span></span></span></label>
-      <label class="pop-row"><span>Portão de ruído</span>
-        <span class="switch"><input type="checkbox" id="dock-gate"><span></span></span></label>
-      <!-- o medidor é o que torna o threshold ajustável: a barra é o nível da
-           banda de voz agora, o traço é onde o portão abre. Fique em silêncio,
-           suba até a barra parar de cruzar o traço. -->
-      <div class="gate-tune" id="gate-tune" hidden>
-        <div class="gate-meter" id="gate-meter"><i id="gate-bar"></i><b id="gate-thr"></b></div>
-        <label class="gate-knob">Abre acima de <output id="gate-thr-val">−45 dB</output>
-          <input type="range" id="dock-gate-thr" min="-70" max="-15" step="1" value="-45"></label>
-        <label class="gate-knob">Ignora transiente até <output id="gate-cf-val">12 ms</output>
-          <input type="range" id="dock-gate-cf" min="0" max="40" step="2" value="12"></label>
-      </div>
-      <p class="desc" id="mic-pop-desc">Nos canais de voz os filtros já começam ligados (modo conversa).
-        Pra instrumento use o Estúdio — entrada crua, sem processamento.</p>
-      <p class="desc" id="mic-pop-desc-raw" hidden>Estúdio: entrada crua por padrão.
-        Estes ajustes valem só aqui — os canais de voz têm os seus.</p>
-    </div>
     <button class="dock-btn" id="share-cam" title="Compartilhar WebCam" aria-label="Compartilhar WebCam">
       <svg viewBox="0 0 24 24"><path d="m22 8-6 4 6 4V8Z"/>
         <rect x="2" y="6" width="14" height="12" rx="2"/></svg>
@@ -3418,7 +3422,7 @@ const jamFor = async mode => {
   // max-age de 4h no domínio, mais o cache do navegador) e sem subir o
   // número o index.html novo carrega o motor velho — foi o que deixou
   // "jam.setGate is not a function" barrar a entrada no canal de voz.
-  const j = await import('./jam.js?v=16').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+  const j = await import('./jam.js?v=17').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
   j.onChat(m => {
     if (m.type === 'yt') return jamYtEvent(m)
     jamChatLog.push(m); jamChatRender()
@@ -3443,6 +3447,16 @@ const ESTUDIO_ROOM = 'sala'
 const roomKind = r => r.kind ?? (r.room === ESTUDIO_ROOM ? 'music' : 'voice')
 
 // sidebar: canais de voz com membros; LIVE vermelho em quem está no ar
+const ICO_SPK = '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/>'
+  + '<path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>'
+const ICO_SPK_OFF = '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/>'
+  + '<path d="m22 9-6 6"/><path d="m16 9 6 6"/></svg>'
+const HEADPHONES = '<path d="M3 14v-3a9 9 0 0 1 18 0v3"/>'
+  + '<path d="M21 16a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2z"/>'
+  + '<path d="M3 16a2 2 0 0 0 2 2h1v-6H5a2 2 0 0 0-2 2z"/>'
+const ICO_DEAF_ON = `<svg viewBox="0 0 24 24">${HEADPHONES}</svg>`
+const ICO_DEAF_OFF = `<svg viewBox="0 0 24 24">${HEADPHONES}<path d="m3 3 18 18" opacity=".9"/></svg>`
+
 function renderVoice () {
   const box = $('#voice-chans')
   const liveKeys = new Set([...tiles.keys()])
@@ -3495,14 +3509,48 @@ function renderVoice () {
         (m === nick && jamJoined && dockMuted ? ' muted' : '') +
         (jamTalking(m) ? ' talking' : '')
       row.dataset.peer = m
+      if (m !== nick && (allMuted || peerMuted.has(m))) row.classList.add('silenced')
       row.innerHTML = '<span class="vdot"></span>'
       row.append(Object.assign(document.createElement('span'), { textContent: m }))
       if (liveKeys.has(m))
         row.insertAdjacentHTML('beforeend', '<span class="vm-live">LIVE</span>')
+      // controles de áudio dos OUTROS (no meu canal): volume e mudo. Aparecem
+      // no hover pra não poluir a lista, e ficam visíveis quando a pessoa está
+      // silenciada — senão não há como descobrir por que ela sumiu do som.
+      if (m !== nick && jamJoined && jamRoom === room) {
+        const acts = document.createElement('span')
+        acts.className = 'vm-acts'
+        const vol = Object.assign(document.createElement('input'), {
+          type: 'range', min: '0', max: '2', step: '0.05',
+          value: String(peerVol.get(m) ?? 1),
+          title: `Volume de ${m}`,
+        })
+        vol.oninput = () => {
+          peerVol.set(m, +vol.value); peerVolSave()
+          jam?.setGain?.(m, peerGain(m))
+        }
+        vol.onclick = e => e.stopPropagation()
+        const mute = document.createElement('button')
+        mute.className = 'vm-mute' + (peerMuted.has(m) ? ' on' : '')
+        mute.title = peerMuted.has(m) ? `Reativar ${m}` : `Mutar ${m}`
+        mute.innerHTML = peerMuted.has(m) ? ICO_SPK_OFF : ICO_SPK
+        mute.onclick = e => {
+          e.stopPropagation()
+          peerMuted.has(m) ? peerMuted.delete(m) : peerMuted.add(m)
+          peerVolSave()
+          jam?.setGain?.(m, peerGain(m))
+          renderVoice()
+        }
+        acts.append(vol, mute)
+        row.append(acts)
+      }
       wrap.append(row)
     }
     return wrap
   }))
+  // a lista mudou: quem entrou agora precisa nascer respeitando o mudo geral
+  // e o mudo individual (o ring do jam-mix nasce com ganho 1)
+  applyPeerAudio()
 }
 
 // presença das salas em tempo real: /api/fixed/ws/presence entrega o snapshot
@@ -3511,6 +3559,34 @@ function renderVoice () {
 // o poll de /api/fixed/jam vira fallback pra quando ele está caído.
 let presenceWs = null
 let presenceTimer = null
+
+// ── áudio dos outros: volume e mudo por pessoa, e o mudo geral ───────────
+// O ganho vive no jam-mix (worklet), por peer. Aqui fica só a intenção do
+// usuário, que precisa ser reaplicada sempre que a lista muda: quem entra
+// depois do "mutar todos" tem que entrar mudo, e quem reconecta recria o
+// ring no worklet com ganho 1.
+// parse defensivo: isto roda no topo do módulo, e um localStorage corrompido
+// (ou bloqueado, em aba anônima) derrubaria o script inteiro antes da UI subir
+const lsJson = (k, def) => {
+  try { return JSON.parse(localStorage.getItem(k)) ?? def } catch { return def }
+}
+const peerVol = new Map(Object.entries(lsJson('jam-peer-vol', {})))
+const peerMuted = new Set(lsJson('jam-peer-muted', []))
+let allMuted = localStorage.getItem('jam-deaf') === '1'
+
+const peerVolSave = () => {
+  localStorage.setItem('jam-peer-vol', JSON.stringify(Object.fromEntries(peerVol)))
+  localStorage.setItem('jam-peer-muted', JSON.stringify([...peerMuted]))
+  localStorage.setItem('jam-deaf', allMuted ? '1' : '0')
+}
+const peerGain = id => (allMuted || peerMuted.has(id)) ? 0 : (peerVol.get(id) ?? 1)
+
+// reaplica em todo mundo da sala atual
+function applyPeerAudio () {
+  if (!jam || !jamJoined) return
+  const room = voiceState.find(r => r.room === jamRoom)
+  for (const m of room?.members ?? []) if (m !== nick) jam.setGain?.(m, peerGain(m))
+}
 
 const presenceLive = () => presenceWs?.readyState === WebSocket.OPEN
 
@@ -3556,10 +3632,12 @@ function presenceConnect () {
 function voiceUI () {
   const connecting = !!jamPending && !jamJoined
   $('#voice-status').hidden = !(jamJoined || connecting)
-  $('#vs-label').textContent = connecting ? 'Conectando…' : 'Voz conectada'
   $('#vs-room').textContent = connecting ? jamPending : (jamRoom ?? '')
-  document.querySelector('.vs-dot')
-    ?.classList.toggle('connecting', connecting)
+  // o estado virou tooltip da bolinha (o texto saiu pra liberar a barra)
+  const dot = $('#vs-dot')
+  dot.classList.toggle('connecting', connecting)
+  dot.title = connecting ? 'Conectando…' : 'Voz conectada'
+  dot.setAttribute('aria-label', dot.title)
   // MICROFONE, não alto-falante. O HTML estático já trazia o ícone certo; era
   // este innerHTML que o trocava por um cone de som em todos os estados, num
   // botão cujo title é "Silenciar microfone".
@@ -3598,6 +3676,23 @@ $('#vs-mic').onclick = () => {
   jam.setMicGain(dockMuted ? 0 : (+localStorage.getItem('jam-micgain') || 1))
   voiceUI()
 }
+// mudo geral: zera o ganho de todo mundo no jam-mix. O mudo individual
+// continua guardado por baixo — desligar o geral devolve cada um ao que era.
+$('#vs-deaf').onclick = () => {
+  allMuted = !allMuted
+  peerVolSave()
+  applyPeerAudio()
+  deafUI()
+  renderVoice()
+}
+function deafUI () {
+  const b = $('#vs-deaf')
+  b.innerHTML = allMuted ? ICO_DEAF_OFF : ICO_DEAF_ON
+  b.title = allMuted ? 'Reativar o som de todos' : 'Mutar todos'
+  b.setAttribute('aria-label', b.title)
+  b.classList.toggle('muted', allMuted)
+}
+deafUI()
 $('#vs-leave').onclick = () => jamToggleJoin()
 
 // ── latência da voz: sparkline na barra + painel de detalhes no hover ────
@@ -3798,16 +3893,29 @@ async function applyMicSettings () {
       toast('Filtros de voz ligados: captura nativa desativada.', null, 'info')
     }
     const dev = jamMicDevice()
+    // solta a fonte antes de pedir a nova: com a antiga aberta o Chromium
+    // reaproveita a mesma captura e ignora as constraints novas — a config
+    // só valia depois de sair e voltar da sala
+    jam.releaseMic?.()
     const ms = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: jamMode === 'voice' ? 1 : 2, sampleRate: 48000,
                ...jamMicOpts(jamMode),
                ...(dev ? { deviceId: { exact: dev } } : {}) },
     })
     await jam.replaceMic(ms)
-  } catch (e) { toast('Microfone não trocou: ' + e.message) }
+  } catch (e) {
+    // a fonte já foi solta acima: falhar aqui deixaria a pessoa muda sem
+    // perceber. Tenta voltar pro microfone padrão antes de desistir.
+    try {
+      const fallback = await navigator.mediaDevices.getUserMedia({ audio: true })
+      await jam.replaceMic(fallback)
+      toast('Configuração não aplicou (' + e.message + '); voltei pro microfone padrão.',
+        null, 'warning')
+    } catch { toast('Microfone não trocou: ' + e.message) }
+  }
 }
 
-$('#dock-mic-cfg').onclick = e => {
+$('#vs-mic-cfg').onclick = e => {
   e.stopPropagation()
   const pop = $('#mic-pop')
   pop.hidden = !pop.hidden
@@ -4239,9 +4347,8 @@ function jamLevels ({ self, peers }) {
     if (level(id) > TALK_ON) jamLoudAt.set(id, Date.now())
     row.classList.toggle('talking', jamTalking(id))
   }
-  // e na navbar: meu mic falando acende o botão em verde
-  $('#vs-mic').classList.toggle('talking',
-    jamJoined && !dockMuted && jamTalking(nick))
+  // o botão de mutar NÃO pisca com a própria voz: ele é um controle, e
+  // piscar ali é ruído visual constante. Quem mostra quem fala é a listagem.
   $('#jam-selfmeter').style.width = Math.min(100, (self ?? 0) * 160) + '%'
 }
 
@@ -4304,6 +4411,7 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
     }
     await jam.join(room, nick, st => {
       jamRender()
+      applyPeerAudio()   // peer novo: o ring nasce com ganho 1 no worklet
       // queda de WS/expulsão: o motor sai da sala por conta própria —
       // espelha na UI (status, dock, gráfico) sem esperar clique nenhum
       if (!jam.joined && jamJoined) {

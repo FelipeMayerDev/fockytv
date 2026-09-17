@@ -471,6 +471,20 @@ export async function initJam ({ serverUrl }) {
       micSrc.connect(gate ?? tap)
     },
 
+    // Solta o dispositivo ANTES de pedir outro. Sem isto, o getUserMedia
+    // seguinte cai na MESMA fonte de captura que ainda está aberta, e o
+    // Chromium devolve a track com o processamento já negociado — as
+    // constraints novas (AEC/NS/AGC) são silenciosamente ignoradas. Era por
+    // isso que mudar a configuração só valia depois de sair e voltar da sala:
+    // sair parava a track, e só aí o pedido seguinte abria fonte nova.
+    // O grafo (gate, tap, encoder) fica de pé; só a fonte é solta.
+    releaseMic () {
+      try { micSrc?.disconnect() } catch {}
+      micSrc = null
+      micStream?.getTracks().forEach(t => t.stop())
+      micStream = null
+    },
+
     // portão de ruído: aplica na hora, sem tocar no mic nem no encoder.
     // O objeto vira o estado corrente — um startSend posterior (troca de mic,
     // rejoin) reconfigura o nó novo com ele.
