@@ -136,7 +136,10 @@ label { font-size:13px; font-weight:500; color:hsl(var(--muted-foreground)) }
    há como descobrir por que aquela pessoa não sai no som. */
 .vm-acts { margin-left:auto; display:none; align-items:center; gap:4px; flex:none }
 .vmem:hover .vm-acts, .vmem:focus-within .vm-acts, .vmem.silenced .vm-acts { display:flex }
-.vmem.silenced span:not(.vdot):not(.vm-live) { opacity:.55 }
+/* silenciado por mim é ESTADO, não ausência: vermelho, igual ao meu próprio
+   mudo. Esmaecer dizia "irrelevante", que é outra coisa. */
+.vmem.silenced span:not(.vdot):not(.vm-live) { color:hsl(var(--destructive)) }
+.vmem.silenced .vdot { background:hsl(var(--destructive)); animation:none }
 .vm-acts input[type=range] { width:52px; height:4px; padding:0; border:0;
   appearance:none; background:hsl(var(--border)); border-radius:var(--radius-pill) }
 .vm-acts input[type=range]::-webkit-slider-thumb { appearance:none; width:10px; height:10px;
@@ -169,12 +172,25 @@ label { font-size:13px; font-weight:500; color:hsl(var(--muted-foreground)) }
    então o box-shadow de fora vira área clicável com um padding transparente */
 .vs-dot { width:9px; height:9px; border-radius:50%; flex:none; background:hsl(var(--success));
   box-shadow:0 0 8px hsl(var(--success) / .6);
-  cursor:help; outline-offset:4px }
+  position:relative; cursor:help; outline-offset:4px }
+/* tooltip próprio em vez do title do navegador, que só aparece depois de
+   ~1s e não dá pra apressar. Este é instantâneo. */
+.vs-dot::after {
+  content:attr(data-tip); position:absolute; bottom:calc(100% + 8px); left:0;
+  padding:4px 8px; border-radius:var(--radius); white-space:nowrap;
+  font-size:11.5px; font-weight:500; line-height:1;
+  background:hsl(var(--card)); color:hsl(var(--card-foreground));
+  border:1px solid hsl(var(--border)); box-shadow:var(--glass-shadow);
+  opacity:0; pointer-events:none; z-index:10;
+}
+.vs-dot:hover::after, .vs-dot:focus-visible::after { opacity:1 }
 .vs-dot.connecting { background:hsl(var(--warning)); box-shadow:0 0 8px hsl(var(--warning) / .6);
   animation:pulse 1s infinite }
-.vs-txt { display:flex; flex-direction:column; line-height:1.25; min-width:0 }
-.vs-txt b { font-size:12.5px }
-.vs-txt .muted { font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+/* o nome da sala é a única informação textual que sobrou na barra: ocupa o
+   vão entre a bolinha de status e a latência, centralizado nele */
+.vs-txt { flex:1; min-width:0; text-align:center }
+.vs-txt .muted { font-size:13px; font-weight:500; color:hsl(var(--foreground));
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block }
 /* quatro controles não cabem ao lado do sparkline, e encolher botão não é
    opção: a fila inteira quebra pra segunda linha e se espalha nela */
 .vs-acts { flex:1 0 100%; display:flex; gap:4px; justify-content:space-between }

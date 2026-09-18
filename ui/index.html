@@ -17,7 +17,7 @@
      e CSS velho (componente novo aparece sem estilo até a cache expirar).
      Suba o número junto com qualquer mudança em assets/. -->
 <link rel="stylesheet" href="assets/theme.css?v=1">
-<link rel="stylesheet" href="assets/app.css?v=5">
+<link rel="stylesheet" href="assets/app.css?v=6">
 
 <!-- gif do "du bist gut genug": cobre a tela enquanto toca a abertura -->
 <div id="intro-gif"></div>
@@ -90,7 +90,7 @@
            tem largura pra ele e a bolinha já diz a mesma coisa em cor. Agora
            vive no title da bolinha, que ganhou área de hover pra isso. -->
       <div class="vs-info">
-        <span class="vs-dot" id="vs-dot" tabindex="0" title="Voz conectada"></span>
+        <span class="vs-dot" id="vs-dot" tabindex="0" role="status" data-tip="Voz conectada"></span>
         <div class="vs-txt"><span id="vs-room" class="muted">Sala</span></div>
       </div>
       <!-- latência da conexão: gráfico na barra; hover abre o painel com o
@@ -102,17 +102,13 @@
       <!-- segunda linha: os controles não cabem ao lado do sparkline sem
            encolher botão, então quebram pra cá (flex-basis:100%) -->
       <div class="vs-acts">
-        <!-- silenciar/reativar o mic: fica aqui, do lado do desconectar, e não
-             no dock flutuante em cima da live -->
         <button class="ghost icon vs-mic" id="vs-mic" title="Silenciar microfone" aria-label="Silenciar microfone"></button>
-        <button class="ghost icon vs-cfg" id="vs-mic-cfg" title="Configurar microfone" aria-label="Configurar microfone">
-          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.04.04a2 2 0 1 1-2.83 2.83l-.04-.04a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.04.04a2 2 0 1 1-2.83-2.83l.04-.04a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.04-.04a2 2 0 1 1 2.83-2.83l.04.04a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.04-.04a2 2 0 1 1 2.83 2.83l-.04.04a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        </button>
-        <!-- mutar todo mundo de uma vez: silencia a saída dos outros, não a
-             minha entrada (pro mic é o botão acima) -->
-        <button class="ghost icon vs-deaf" id="vs-deaf" title="Mutar todos" aria-label="Mutar todos"></button>
         <button class="ghost icon vs-leave" id="vs-leave" title="Desconectar da voz" aria-label="Desconectar da voz">
         <svg viewBox="0 0 24 24"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="22" y1="2" x2="16" y2="8"/></svg>
+        </button>
+        <button class="ghost icon vs-deaf" id="vs-deaf" title="Mutar todos" aria-label="Mutar todos"></button>
+        <button class="ghost icon vs-cfg" id="vs-mic-cfg" title="Configurar microfone" aria-label="Configurar microfone">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.04.04a2 2 0 1 1-2.83 2.83l-.04-.04a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.04.04a2 2 0 1 1-2.83-2.83l.04-.04a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.04-.04a2 2 0 1 1 2.83-2.83l.04.04a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.04-.04a2 2 0 1 1 2.83 2.83l-.04.04a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
       </div>
       <!-- configuração do microfone: dispositivo + processamento de voz -->
@@ -420,9 +416,6 @@
 
   <!-- dock de chamada: vidro flutuante; voz + publicar + encerrar -->
   <div id="call-dock" class="glass">
-    <button class="dock-btn" id="dock-mic" title="Entrar no canal de voz">
-      <svg viewBox="0 0 24 24" class="ico-mic-off"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/><path d="m3 3 18 18" opacity=".9"/></svg>
-    </button>
     <button class="dock-btn" id="share-cam" title="Compartilhar WebCam" aria-label="Compartilhar WebCam">
       <svg viewBox="0 0 24 24"><path d="m22 8-6 4 6 4V8Z"/>
         <rect x="2" y="6" width="14" height="12" rx="2"/></svg>
@@ -3493,12 +3486,21 @@ function renderVoice () {
     else if (members.length)
       b.append(Object.assign(document.createElement('span'),
         { className: 'vcount', textContent: String(members.length) }))
-    b.title = jamJoined && jamRoom === room ? 'Sair do canal de voz'
+    b.title = jamJoined && jamRoom === room ? `Você está em "${room}"`
       : jamPending === room ? 'Conectando…'
+      : jamJoined ? `Trocar para "${room}"`
       : `Entrar no canal de voz "${room}"`
+    // o nome da sala NÃO desconecta: sair é só no botão da barra de voz.
+    // Clicar na sala em que já estou não faz nada; clicar em outra troca.
     b.onclick = () => {
-      if (jamJoined) jamToggleJoin()          // conectado: o clique desconecta
-      else jamToggleJoin(room, 'voice').catch(e => toast(e.message))
+      if (jamJoined && jamRoom === room) return
+      if (jamJoined) {
+        jamToggleJoin()                                   // sai da atual…
+          .then(() => jamToggleJoin(room, 'voice'))        // …e entra na nova
+          .catch(e => toast(e.message))
+        return
+      }
+      jamToggleJoin(room, 'voice').catch(e => toast(e.message))
     }
     wrap.append(b)
     for (const m of members) {
@@ -3636,8 +3638,11 @@ function voiceUI () {
   // o estado virou tooltip da bolinha (o texto saiu pra liberar a barra)
   const dot = $('#vs-dot')
   dot.classList.toggle('connecting', connecting)
-  dot.title = connecting ? 'Conectando…' : 'Voz conectada'
-  dot.setAttribute('aria-label', dot.title)
+  // data-tip alimenta o tooltip de CSS (instantâneo); o title do navegador
+  // ficaria ~1s atrás dele e apareceria duplicado
+  const estado = connecting ? 'Conectando…' : 'Voz conectada'
+  dot.dataset.tip = estado
+  dot.setAttribute('aria-label', estado)
   // MICROFONE, não alto-falante. O HTML estático já trazia o ícone certo; era
   // este innerHTML que o trocava por um cone de som em todos os estados, num
   // botão cujo title é "Silenciar microfone".
@@ -3646,14 +3651,6 @@ function voiceUI () {
     + '<path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/>'
   const micOn = svg(MIC)
   const micOff = svg(MIC + '<path d="m3 3 18 18" opacity=".9"/>')
-
-  // o dock flutuante fica só com o ATALHO DE ENTRAR: conectado, o controle do
-  // microfone mora na navbar, ao lado do desconectar, e não por cima da live
-  const d = $('#dock-mic')
-  d.hidden = jamJoined
-  d.classList.toggle('off', !jamJoined)
-  d.title = connecting ? 'Conectando…' : 'Entrar no canal de voz'
-  d.innerHTML = micOff
 
   const b = $('#vs-mic')
   b.title = dockMuted ? 'Reativar microfone' : 'Silenciar microfone'
@@ -3669,7 +3666,6 @@ function voiceUI () {
   if (jamJoined) { if (!vsTimer) vsStart() } else vsStop()
 }
 
-$('#dock-mic').onclick = () => jamToggleJoin(VOICE_MAIN, 'voice').catch(e => toast(e.message))
 $('#vs-mic').onclick = () => {
   if (!jamJoined) return
   dockMuted = !dockMuted
