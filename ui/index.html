@@ -3668,7 +3668,10 @@ function voiceUI () {
   const micOff = svg(MIC + '<path d="m3 3 18 18" opacity=".9"/>')
 
   const b = $('#vs-mic')
-  b.title = dockMuted ? 'Reativar microfone' : 'Silenciar microfone'
+  // com o áudio desativado o clique aqui reativa os dois — o título tem que
+  // dizer isso, senão promete só o microfone e faz mais
+  b.title = allMuted ? 'Reativar áudio e microfone'
+    : dockMuted ? 'Reativar microfone' : 'Silenciar microfone'
   b.setAttribute('aria-label', b.title)
   b.innerHTML = dockMuted ? micOff : micOn
   // bola do mic: cinza sem fala, verde falando, vermelho mutado
@@ -3681,27 +3684,46 @@ function voiceUI () {
   if (jamJoined) { if (!vsTimer) vsStart() } else vsStop()
 }
 
-$('#vs-mic').onclick = () => {
-  if (!jamJoined) return
-  dockMuted = !dockMuted
+// o mudo do microfone num lugar só: ganho local, aviso pra sala e pintura
+function applyMicMute () {
+  if (!jam) return
   jam.setMicGain(dockMuted ? 0 : (+localStorage.getItem('jam-micgain') || 1))
   jam.setMuted?.(dockMuted)   // a sala inteira vê quem está mutado
   voiceUI()
   renderVoice()
 }
-// mudo geral: zera o ganho de todo mundo no jam-mix. O mudo individual
-// continua guardado por baixo — desligar o geral devolve cada um ao que era.
-$('#vs-deaf').onclick = () => {
-  allMuted = !allMuted
+
+$('#vs-mic').onclick = () => {
+  if (!jamJoined) return
+  // com o áudio desativado o mic fica preso em mudo: clicar aqui é pedir pra
+  // voltar a participar, então reativa o áudio junto (igual ao Discord)
+  if (allMuted) return setDeaf(false)
+  dockMuted = !dockMuted
+  applyMicMute()
+}
+
+// Desativar áudio: não ouço ninguém E ninguém me ouve. Zerar só a entrada
+// dos outros deixava você falando pra uma sala que você não escuta — que é
+// justamente o contrário do que o botão promete.
+// Ao reativar, o microfone volta pro estado em que estava antes: quem já
+// tinha se mutado continua mutado.
+let micWasMuted = false
+function setDeaf (v) {
+  if (v === allMuted) return
+  allMuted = v
+  if (v) { micWasMuted = dockMuted; dockMuted = true }
+  else dockMuted = micWasMuted
   peerVolSave()
   applyPeerAudio()
+  applyMicMute()
   deafUI()
-  renderVoice()
 }
+$('#vs-deaf').onclick = () => setDeaf(!allMuted)
+
 function deafUI () {
   const b = $('#vs-deaf')
   b.innerHTML = allMuted ? ICO_DEAF_OFF : ICO_DEAF_ON
-  b.title = allMuted ? 'Reativar o som de todos' : 'Mutar todos'
+  b.title = allMuted ? 'Reativar áudio' : 'Desativar áudio (não ouço nem sou ouvido)'
   b.setAttribute('aria-label', b.title)
   b.classList.toggle('muted', allMuted)
 }
@@ -4438,12 +4460,16 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
     },
       ms ? { micStream: ms }
          : { deviceId: jamMicDevice(mode), audio: jamMicOpts(mode), mode })
-    jam.setMicGain(dockMuted ? 0 : (+localStorage.getItem('jam-micgain') || 1))
     jamJoined = true
     jamRoom = room
     jamMode = mode
     jamPending = null
     jamPendingMode = null
+    // o "áudio desativado" persiste entre sessões: entrar numa sala com ele
+    // ligado tem que entrar mudo também, senão você fala sem ouvir
+    if (allMuted) dockMuted = true
+    applyMicMute()
+    deafUI()
     // reentrada: marcação de saída antiga não pode me esconder da sala
     // em que acabei de entrar (o member-joined do WS confirmaria do mesmo jeito)
     jamLeft.delete(room)
