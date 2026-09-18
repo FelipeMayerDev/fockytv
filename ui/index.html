@@ -510,27 +510,6 @@
 
   <div class="row" style="margin:12px 0 0">
     <div>
-      <label style="color:hsl(var(--foreground))">Overlay de viewers na transmissão</label>
-      <p class="desc" style="margin:2px 0 0">queima os nomes de quem assiste no canto do vídeo</p>
-    </div>
-    <label class="switch"><input type="checkbox" id="cfg-overlay" data-set="overlay" checked><span></span></label>
-  </div>
-
-  <div class="row" style="margin:12px 0 0">
-    <div>
-      <label style="color:hsl(var(--foreground))">Canto do overlay</label>
-      <p class="desc" style="margin:2px 0 0">onde os nomes aparecem sobre o vídeo</p>
-    </div>
-    <select id="cfg-overlay-pos" data-set-val="overlayPos">
-      <option value="bl" selected>Inferior esquerdo</option>
-      <option value="br">Inferior direito</option>
-      <option value="tl">Superior esquerdo</option>
-      <option value="tr">Superior direito</option>
-    </select>
-  </div>
-
-  <div class="row" style="margin:12px 0 0">
-    <div>
       <label style="color:hsl(var(--foreground))">Rich Presence no Discord</label>
       <p class="desc" style="margin:2px 0 0">mostra no Discord o que você assiste ou transmite</p>
     </div>
@@ -1312,29 +1291,6 @@ async function startCompose () {
   // canvas segue — sem renegociar nada, o encoder re-codifica no novo tamanho
   sv.addEventListener('resize', syncComposeSize)
 
-  // quem está assistindo, queimado no canto (toggle "overlay" das configurações)
-  const drawViewers = () => {
-    const names = [...(presence.viewers.get(nick) ?? [])]
-    if (!names.length) return
-    const label = '👀 ' + names.slice(0, 3).join(', ') + (names.length > 3 ? ` +${names.length - 3}` : '')
-    const fs = Math.round(canvas.height / 30)
-    ctx.font = `600 ${fs}px system-ui, sans-serif`
-    // canto escolhido nas configurações; lido a cada quadro, então trocar
-    // durante a transmissão vale na hora
-    const pos = setVal('overlayPos') ?? 'bl'
-    const pad = Math.round(canvas.height * 0.02)
-    const bw = ctx.measureText(label).width + fs, bh = fs * 2.3
-    const bx = pos[1] === 'r' ? canvas.width - pad - bw : pad
-    const by = pos[0] === 't' ? pad : canvas.height - pad - bh
-    ctx.fillStyle = 'rgba(0,0,0,.55)'
-    ctx.beginPath()
-    ctx.roundRect(bx, by, bw, bh, fs)
-    ctx.fill()
-    ctx.fillStyle = '#fff'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(label, bx + fs / 2, by + bh / 2)
-  }
-
   const draw = () => {
     ctx.drawImage(sv, 0, 0, canvas.width, canvas.height)
     const cv = overlay?.cv
@@ -1352,7 +1308,6 @@ async function startCompose () {
         ctx.restore()
       }
     }
-    if (setOn('overlay')) drawViewers()
   }
 
   const out = canvas.captureStream(fps)
@@ -1462,8 +1417,9 @@ function dropCam () {
   stage(false)
   // o microfone ia junto da câmera: o áudio volta a ser só o da tela
   if (pc && stream) audioSender?.replaceTrack(stream.getAudioTracks()[0] ?? null).catch(() => {})
-  // sem câmera a composição só se justifica pelo overlay de viewers
-  if (!setOn('overlay') || camOnly) stopCompose()
+  // a composição existia por dois motivos: câmera e overlay de viewers. Sem o
+  // overlay, saiu a câmera, saiu o canvas — volta pro track cru da tela.
+  stopCompose()
 }
 
 function stage (on) {
@@ -1603,13 +1559,6 @@ document.querySelectorAll('#dlg-cfg [data-set]').forEach(el =>
 document.querySelectorAll('#dlg-cfg [data-set-val]').forEach(el =>
   el.onchange = e => localStorage.setItem('set:' + e.target.dataset.setVal, e.target.value))
 
-// overlay ligado/desligado no meio da transmissão: entra e sai na hora (sem
-// câmera no ar, desligar também dispensa o canvas e volta pro track cru)
-$('#cfg-overlay').addEventListener('change', e => {
-  if (!pc || camOnly) return
-  if (e.target.checked) startCompose().catch(() => {})
-  else if (!cam) stopCompose()
-})
 $('#cfg-close').onclick = () => $('#dlg-cfg').close()
 
 // ── chat por transmissão: uma sala por stream, aberta junto do player ────
@@ -2198,9 +2147,6 @@ $('#share-go').onclick = async () => {
       }
       pc = await publish(nick, stream, fps, $('#codec').value)
       camOnly = !!cam         // só a câmera no ar: não há tela pra sobrepor
-      // overlay de viewers não precisa de câmera: compartilhou a tela com o
-      // toggle ligado, o canvas entra no lugar do track cru
-      if (!cam && setOn('overlay')) startCompose().catch(() => {})
       setLive(true)
       sfx.live()
       // fonte de áudio visível pro host: filtro que falhou em silêncio é a
@@ -2396,7 +2342,7 @@ function buildTile (st, kind = null) {
   el.className = 'stream'
   el.innerHTML =
     `<video autoplay playsinline muted></video><div class="skeleton"></div>
-     <span class="badge${isYt ? ' ytt' : ''}">${isYt ? 'YT' : 'LIVE'}</span>
+     ${isYt ? '<span class="badge ytt">YT</span>' : ''}
      <span class="badge time" data-start="${st.streamStart ?? ''}"></span>
      <div class="s-ov">
        <div style="min-width:0">
@@ -2414,7 +2360,10 @@ function buildTile (st, kind = null) {
            <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/>
              <rect x="12" y="12" width="8" height="6" rx="1"/></svg>
          </button>
-         <button class="s-focus" title="Focar" aria-label="Focar transmissão">
+         <!-- este ícone (os quatro cantos) é o MESMO do "Tela cheia" do player
+              de canais fixos: quem clica aqui espera tela cheia, não "focar".
+              Focar continua existindo — é o clique no corpo do tile. -->
+         <button class="s-focus" title="Tela cheia" aria-label="Tela cheia">
            <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/>
              <path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
          </button>
@@ -2425,21 +2374,39 @@ function buildTile (st, kind = null) {
     isYt ? (kind.title || key) : key + (key === nick ? ' (você)' : '')
 
   const video = el.querySelector('video')
-  const t = { el, video, pc: null, loading: false, vol: 1, on: false }
+  // som LIGADO por padrão: quem abre uma live quer ouvi-la. O <video> nasce
+  // com o atributo muted mesmo assim, porque autoplay com som é barrado por
+  // política do navegador e o vídeo nem começaria — o som entra logo depois,
+  // quando já está tocando (ver abaixo).
+  const t = { el, video, pc: null, loading: false, vol: 1, on: true }
   const applyVol = () => {
     video.volume = t.vol
     video.muted = !t.on || t.vol === 0
   }
-  applyVol()
 
   // skeleton sai quando o primeiro quadro chega
   video.addEventListener('playing', () =>
     el.querySelector('.skeleton')?.remove(), { once: true })
 
-  el.onclick = () => toggleFocus(key)
-  el.ondblclick = () => (document.fullscreenElement
+  // tocando: tira o mudo. Se o navegador reagir pausando (política de
+  // autoplay sem gesto do usuário), volta pro mudo e religa — vídeo mudo é
+  // muito melhor que vídeo nenhum, e o botão de som fica mostrando off.
+  video.addEventListener('playing', () => {
+    if (!t.on || !video.muted) return
+    applyVol()
+    if (!video.paused) return paintVol()
+    t.on = false
+    applyVol()
+    paintVol()
+    video.play().catch(() => {})
+  }, { once: true })
+
+  const toggleFs = () => (document.fullscreenElement
     ? document.exitFullscreen()
-    : el.requestFullscreen()).catch(() => {})
+    : el.requestFullscreen()).catch(e => toast(e.message))
+
+  el.onclick = () => toggleFocus(key)
+  el.ondblclick = toggleFs   // duplo clique continua valendo
 
   const paintVol = () => el.querySelector('.s-vol').innerHTML = t.on && t.vol > 0
     ? '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>'
@@ -2470,7 +2437,7 @@ function buildTile (st, kind = null) {
     camMirrored = !camMirrored
     applyCamMirror()
   }
-  el.querySelector('.s-focus').onclick = () => toggleFocus(key)
+  el.querySelector('.s-focus').onclick = toggleFs
   paintVol()
   return t
 }
@@ -2583,9 +2550,16 @@ async function refresh () {
     // o tipo pode chegar depois do tile (o host registra o kind logo após
     // publicar): pinta tag e título no próprio poll
     const yt = kind?.kind === 'yt-video'
-    const badge = t.el.querySelector('.badge')
-    badge.classList.toggle('ytt', yt)
-    badge.textContent = yt ? 'YT' : 'LIVE'
+    // O selo de tipo só existe pra YouTube: "LIVE" saiu de dentro do vídeo
+    // (tudo o que está na grade já é live, ele não informava nada e atrapalhava).
+    // Seletor por .ytt e não por .badge: o selo de TEMPO também é .badge, e um
+    // querySelector('.badge') genérico passaria a escrever nele.
+    let tag = t.el.querySelector('.badge.ytt')
+    if (yt && !tag) {
+      tag = Object.assign(document.createElement('span'),
+        { className: 'badge ytt', textContent: 'YT' })
+      t.el.querySelector('.badge.time').before(tag)
+    } else if (!yt) tag?.remove()
     if (yt) t.el.querySelector('.s-title').textContent = kind.title || key
     t.el.querySelector('.s-sub').textContent =
       (yt ? `por ${key} · ` : '') +
