@@ -70,6 +70,7 @@ export async function initJam ({ serverUrl }) {
   // vai pendurado no ping do DataChannel, de graça e sem tocar no servidor
   let myMuted = false
   let onPeerMute = () => {}
+  let onPeerEvent = () => {}   // ('join'|'leave', nick) — quem chega e quem sai
   let tap = null
   let encoder = null
   let outSeq = 0
@@ -290,13 +291,21 @@ export async function initJam ({ serverUrl }) {
       return
     }
     if (msg.type === 'peer-joined') {
+      // O servidor reanuncia peer-joined quando o WS DAQUELA pessoa reconecta,
+      // mesmo com o P2P dela nunca tendo caído. Sem esta guarda, cada
+      // reconexão virava um "entrou na sala" no chat e um som de entrada.
+      const novo = !peers.has(msg.nick)
       expectPeer(msg.nick)
+      if (!novo) return
+      onPeerEvent('join', msg.nick)
       return onChat({ type: 'chat', from: 'sistema', text: `${msg.nick} entrou na sala` })
     }
     if (msg.type === 'peer-left') {
       const p = peers.get(msg.nick)
-      if (p) { p.close(); peers.delete(msg.nick) }
+      if (!p) return              // já não estava aqui: nada a anunciar
+      p.close(); peers.delete(msg.nick)
       emit()
+      onPeerEvent('leave', msg.nick)
       return onChat({ type: 'chat', from: 'sistema', text: `${msg.nick} saiu da sala` })
     }
     if (msg.type === 'chat' || msg.type === 'yt') return onChat(msg)
@@ -528,6 +537,7 @@ export async function initJam ({ serverUrl }) {
           try { p.dc.send(JSON.stringify({ type: 'mute', muted: myMuted })) } catch {}
     },
     onPeerMute (cb) { onPeerMute = cb || (() => {}) },
+    onPeerEvent (cb) { onPeerEvent = cb || (() => {}) },
     onLevels (cb) { onLevels = cb },
     setGain (id, v) { mixNode.port.postMessage({ type: 'gain', id, v }) },
     setTargetMs (ms) { mixNode.port.postMessage({ type: 'target', ms }) },

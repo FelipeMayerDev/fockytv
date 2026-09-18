@@ -903,10 +903,39 @@ const beep = (...freqs) => {
     o.start(t); o.stop(t + 0.13)
   })
 }
+// Tons da sala de voz. Separados do `beep` de propósito: estes tocam o tempo
+// todo (cada entrada, cada saída, cada clique no mic) e no volume/duração dos
+// avisos de live virariam incômodo em minutos.
+const blip = (freqs, { vol = 0.055, dur = 0.09, gap = 0.07 } = {}) => {
+  ac.resume()
+  freqs.forEach((f, i) => {
+    const t = ac.currentTime + i * gap
+    const o = ac.createOscillator(), g = ac.createGain()
+    o.type = 'sine'            // sem harmônicos: não compete com a conversa
+    o.frequency.value = f
+    g.gain.setValueAtTime(0, t)
+    g.gain.linearRampToValueAtTime(vol, t + 0.008)   // ataque curto, sem clique
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur)
+    o.connect(g).connect(ac.destination)
+    o.start(t); o.stop(t + dur + 0.01)
+  })
+}
+
 const sfx = {
   live:  () => beep(660, 990),   // sobe: entrou no ar
   watch: () => beep(880),
   end:   () => beep(660, 440),   // desce: acabou
+  // ── sala de voz ──
+  // Entrada e saída são os únicos que a sala inteira ouve; o resto é do
+  // próprio usuário. Cada par usa um DESENHO diferente (intervalo largo,
+  // intervalo curto, arpejo de três), não só direção — só subir e descer
+  // ficaria indistinguível entre as três coisas.
+  join:   () => blip([587, 880]),                              // quinta subindo
+  leave:  () => blip([880, 587]),                              // quinta descendo
+  mute:   () => blip([520, 392], { dur: 0.07, gap: 0.05 }),    // seco, curto
+  unmute: () => blip([392, 520], { dur: 0.07, gap: 0.05 }),
+  deaf:   () => blip([440, 330, 247], { dur: 0.08, gap: 0.06 }),  // arpejo desce
+  undeaf: () => blip([247, 330, 440], { dur: 0.08, gap: 0.06 }),
 }
 
 // ── estado da UI ─────────────────────────────────────────────────────────
@@ -3415,7 +3444,7 @@ const jamFor = async mode => {
   // max-age de 4h no domínio, mais o cache do navegador) e sem subir o
   // número o index.html novo carrega o motor velho — foi o que deixou
   // "jam.setGate is not a function" barrar a entrada no canal de voz.
-  const j = await import('./jam.js?v=18').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+  const j = await import('./jam.js?v=19').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
   j.onChat(m => {
     if (m.type === 'yt') return jamYtEvent(m)
     jamChatLog.push(m); jamChatRender()
@@ -3425,6 +3454,11 @@ const jamFor = async mode => {
   j.onPeerMute?.((id, muted) => {
     muted ? peerSelfMuted.add(id) : peerSelfMuted.delete(id)
     renderVoice()
+  })
+  // o som de entrar/sair é o único que a sala inteira ouve
+  j.onPeerEvent?.((kind, id) => {
+    peerSelfMuted.delete(id)          // saiu: o mudo dele não sobra pra próxima
+    kind === 'join' ? sfx.join() : sfx.leave()
   })
   jams[key] = j
   return j
@@ -3699,6 +3733,7 @@ $('#vs-mic').onclick = () => {
   // voltar a participar, então reativa o áudio junto (igual ao Discord)
   if (allMuted) return setDeaf(false)
   dockMuted = !dockMuted
+  ;(dockMuted ? sfx.mute : sfx.unmute)()
   applyMicMute()
 }
 
@@ -3713,6 +3748,7 @@ function setDeaf (v) {
   allMuted = v
   if (v) { micWasMuted = dockMuted; dockMuted = true }
   else dockMuted = micWasMuted
+  ;(v ? sfx.deaf : sfx.undeaf)()
   peerVolSave()
   applyPeerAudio()
   applyMicMute()
@@ -4400,6 +4436,7 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
       // A sala marcada é a de verdade (jamRoom) — o parâmetro traz o
       // default do Estúdio quando o clique vem da sidebar/dock sem args
       const left = jamRoom
+      sfx.leave()          // eu saindo: igual ao que a sala ouve quando saio
       jamJoined = false
       jamRoom = null
       dockMuted = false
@@ -4470,6 +4507,7 @@ async function jamToggleJoin (room = ESTUDIO_ROOM, mode = 'music') {
     if (allMuted) dockMuted = true
     applyMicMute()
     deafUI()
+    sfx.join()
     // reentrada: marcação de saída antiga não pode me esconder da sala
     // em que acabei de entrar (o member-joined do WS confirmaria do mesmo jeito)
     jamLeft.delete(room)
