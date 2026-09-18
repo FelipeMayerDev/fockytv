@@ -129,7 +129,9 @@ label { font-size:13px; font-weight:500; color:hsl(var(--muted-foreground)) }
 }
 .vmem.talking .vdot { background:hsl(var(--success)); animation:talk-ring 1.1s ease-out infinite }
 .vmem.talking span:not(.vdot) { color:hsl(var(--foreground)) }
+/* a pessoa se mutou: vermelho pra sala inteira ver, não só a bolinha */
 .vmem.muted .vdot { background:hsl(var(--destructive)); animation:none }
+.vmem.muted span:not(.vdot):not(.vm-live) { color:hsl(var(--destructive)) }
 @media (prefers-reduced-motion:reduce) { .vmem.talking .vdot { animation:none } }
 /* controles de áudio por participante: escondidos até o hover, pra lista não
    virar um painel. Quem está mutado mantém o controle visível — sem isso não

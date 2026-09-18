@@ -17,7 +17,7 @@
      e CSS velho (componente novo aparece sem estilo até a cache expirar).
      Suba o número junto com qualquer mudança em assets/. -->
 <link rel="stylesheet" href="assets/theme.css?v=1">
-<link rel="stylesheet" href="assets/app.css?v=6">
+<link rel="stylesheet" href="assets/app.css?v=7">
 
 <!-- gif do "du bist gut genug": cobre a tela enquanto toca a abertura -->
 <div id="intro-gif"></div>
@@ -3415,12 +3415,17 @@ const jamFor = async mode => {
   // max-age de 4h no domínio, mais o cache do navegador) e sem subir o
   // número o index.html novo carrega o motor velho — foi o que deixou
   // "jam.setGate is not a function" barrar a entrada no canal de voz.
-  const j = await import('./jam.js?v=17').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+  const j = await import('./jam.js?v=18').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
   j.onChat(m => {
     if (m.type === 'yt') return jamYtEvent(m)
     jamChatLog.push(m); jamChatRender()
   })
   j.onLevels(jamLevels)
+  // alguém se mutou (ou voltou): a listagem precisa mostrar pra todo mundo
+  j.onPeerMute?.((id, muted) => {
+    muted ? peerSelfMuted.add(id) : peerSelfMuted.delete(id)
+    renderVoice()
+  })
   jams[key] = j
   return j
 }
@@ -3507,9 +3512,16 @@ function renderVoice () {
       const row = document.createElement('div')
       // talking vem do mapa de histerese (jamLevels), não do último evento:
       // re-render do poll/presença não pode apagar a luz de quem fala (#3)
+      // 'muted' = a PESSOA se mutou (o meu mudo pelo dockMuted, o dos outros
+      // pelo que chega no DataChannel). Diferente de 'silenced', que é eu ter
+      // calado ela só pra mim — os dois pintam de vermelho, mas um todo mundo
+      // vê e o outro é só meu.
+      const selfMuted = m === nick
+        ? (jamJoined && dockMuted)
+        : peerSelfMuted.has(m)
       row.className = 'vmem' + (m === nick ? ' on' : '') +
-        (m === nick && jamJoined && dockMuted ? ' muted' : '') +
-        (jamTalking(m) ? ' talking' : '')
+        (selfMuted ? ' muted' : '') +
+        (jamTalking(m) && !selfMuted ? ' talking' : '')
       row.dataset.peer = m
       if (m !== nick && (allMuted || peerMuted.has(m))) row.classList.add('silenced')
       row.innerHTML = '<span class="vdot"></span>'
@@ -3572,6 +3584,9 @@ let presenceTimer = null
 const lsJson = (k, def) => {
   try { return JSON.parse(localStorage.getItem(k)) ?? def } catch { return def }
 }
+// quem se mutou por conta própria, visto pelo DataChannel. Não persiste: é
+// estado vivo do outro lado, e o ping de 2s reconstrói em quem entra depois.
+const peerSelfMuted = new Set()
 const peerVol = new Map(Object.entries(lsJson('jam-peer-vol', {})))
 const peerMuted = new Set(lsJson('jam-peer-muted', []))
 let allMuted = localStorage.getItem('jam-deaf') === '1'
@@ -3670,7 +3685,9 @@ $('#vs-mic').onclick = () => {
   if (!jamJoined) return
   dockMuted = !dockMuted
   jam.setMicGain(dockMuted ? 0 : (+localStorage.getItem('jam-micgain') || 1))
+  jam.setMuted?.(dockMuted)   // a sala inteira vê quem está mutado
   voiceUI()
+  renderVoice()
 }
 // mudo geral: zera o ganho de todo mundo no jam-mix. O mudo individual
 // continua guardado por baixo — desligar o geral devolve cada um ao que era.

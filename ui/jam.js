@@ -66,6 +66,10 @@ export async function initJam ({ serverUrl }) {
   let gate = null
   let gateCfg = { on: false, cut: true }
   let onGate = () => {}
+  // meu mudo é local (ganho 0 no tap), mas os outros precisam VER: o estado
+  // vai pendurado no ping do DataChannel, de graça e sem tocar no servidor
+  let myMuted = false
+  let onPeerMute = () => {}
   let tap = null
   let encoder = null
   let outSeq = 0
@@ -225,6 +229,13 @@ export async function initJam ({ serverUrl }) {
       const msg = JSON.parse(e.data)
       if (msg.type === 'pong') peer.rtt = Math.round(performance.now() - msg.t)
       else if (msg.type === 'ping') peer.dc.send(JSON.stringify({ type: 'pong', t: msg.t }))
+      // o mudo do outro viaja junto do ping (ver setMuted): o canal é
+      // unreliable, então o valor repetido a cada 2s é o que conserta um
+      // pacote perdido — e também é como um peer novo descobre o estado
+      if (msg.muted !== undefined && peer.muted !== msg.muted) {
+        peer.muted = msg.muted
+        onPeerMute(peer.id, msg.muted)
+      }
     }
   }
 
@@ -449,7 +460,8 @@ export async function initJam ({ serverUrl }) {
       if (!this._ping) this._ping = setInterval(() => {
         const t = performance.now()
         for (const p of peers.values())
-          if (p.dc?.readyState === 'open') p.dc.send(JSON.stringify({ type: 'ping', t }))
+          if (p.dc?.readyState === 'open')
+            p.dc.send(JSON.stringify({ type: 'ping', t, muted: myMuted }))
       }, 2000)
       emit()
       return this
@@ -505,12 +517,24 @@ export async function initJam ({ serverUrl }) {
     },
     onChat (cb) { onChat = cb },
     setMicGain (v) { tap?.port.postMessage({ type: 'gain', v }) },
+
+    // avisa a sala que eu me mutei. Manda na hora (resposta imediata pra quem
+    // está olhando) e o ping de 2s repete — num canal sem retransmissão, é a
+    // repetição que garante que chegou.
+    setMuted (v) {
+      myMuted = !!v
+      for (const p of peers.values())
+        if (p.dc?.readyState === 'open')
+          try { p.dc.send(JSON.stringify({ type: 'mute', muted: myMuted })) } catch {}
+    },
+    onPeerMute (cb) { onPeerMute = cb || (() => {}) },
     onLevels (cb) { onLevels = cb },
     setGain (id, v) { mixNode.port.postMessage({ type: 'gain', id, v }) },
     setTargetMs (ms) { mixNode.port.postMessage({ type: 'target', ms }) },
 
     async leave () {
       room = null
+      myMuted = false   // a UI zera o dockMuted na saída; aqui acompanha
       wsStopKeepalive()
       try { ws?.close() } catch {}
       ws = null
