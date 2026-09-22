@@ -1088,6 +1088,17 @@ document.querySelectorAll('#tabs .tab').forEach(b => {
   }
 })
 
+// logo do rail: clicar volta pra home. No solo, desfoca (barato); fora da
+// home, abre a grade Ao vivo. Já na home em grade não faz nada — reconstruir
+// os tiles daria um blip nas lives que já estão abertas.
+$('#brand').onclick = e => {
+  e.preventDefault()
+  const grid = $('#grid-live')
+  if (grid.classList.contains('solo')) toggleFocus(focusKey)
+  else if (grid.style.display === 'none' || clipMode)
+    document.querySelector('#tabs .tab[data-tab="live"]')?.click()
+}
+
 function showPlayer (key) {
   $('#player-wrap').classList.toggle('on', !!key)
   $('#grid-live').style.display = key ? 'none' : ''
