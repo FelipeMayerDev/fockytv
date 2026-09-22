@@ -529,6 +529,42 @@ button svg.off { display:none }
 #grid-live[data-n="3"] > .stream:last-child:nth-child(odd) {
   grid-column:1/-1; width:min(100%, calc(50% - 7px)); justify-self:center }
 .stream .skeleton { border-radius:0 }
+
+/* ── modo foco: chrome fora, live na tela ──────────────────────────────
+   O botão vive no rail (embaixo do logo). Aqui o shell inteiro desmonta —
+   rail, sidebar, barra de contexto, docks — e a grade herda a janela:
+   uma live = full-bleed; várias = mosaico com colunas escolhidas em JS
+   (bestCols) pro aspecto da janela. Sair: Esc ou o botão fantasma
+   (#focus-exit), que só acende quando o mouse se mexe.                    */
+body.focus-mode .rail,
+body.focus-mode .sidebar,
+body.focus-mode .ctx-bar,
+body.focus-mode #music-dock,
+body.focus-mode #mini-bar,
+body.focus-mode #call-dock { display:none }
+body.focus-mode #grid-live { padding:0; overflow:hidden; align-content:stretch }
+body.focus-mode #grid-live .stream { aspect-ratio:auto; height:100% }
+/* tela única (solo ou live sozinha): sem moldura nenhuma, só vídeo */
+body.focus-mode #grid-live.solo .stream,
+body.focus-mode #grid-live[data-n="1"] .stream {
+  border-radius:0; border-color:transparent }
+/* HUD dos tiles também é chrome: overlay e selos somem no foco */
+body.focus-mode .stream .s-ov,
+body.focus-mode .stream .badge { display:none }
+/* botão fantasma de sair: fixo no canto superior esquerdo, vidro sobre o
+   vídeo, opacity cuida do fade (display:none em [hidden] mata a transição) */
+#focus-exit {
+  position:fixed; top:12px; left:12px; z-index:70;
+  width:36px; height:36px; padding:0;
+  display:inline-flex; align-items:center; justify-content:center;
+  border:1px solid var(--glass-border); border-radius:var(--radius-pill);
+  color:hsl(var(--foreground));
+  opacity:0; transition:opacity .25s; pointer-events:none;
+}
+#focus-exit.show { opacity:1; pointer-events:auto }
+#focus-exit:hover { background:hsl(var(--muted)) }
+#focus-exit[hidden] { display:none }
+
 .vid { cursor:pointer }
 .vid .thumb {
   position:relative; aspect-ratio:16/9; border-radius:var(--radius-card); overflow:hidden;
