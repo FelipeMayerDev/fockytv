@@ -6,9 +6,9 @@ Dois ambientes de deploy, só quando o usuário pedir explicitamente:
 
 - **VPS (produção):** `ssh root@192.3.176.195`, repo em `/opt/fockytv`,
   branch `main` (o deploy segue esse branch + as alterações locais do
-  servidor; a `discordfy` antiga já está toda mergeada na `main`).
-  `server/docker-compose.yml` e `config.json` têm
-  alterações locais no servidor: nunca sobrescrever. Deploy = `git pull` +
+  servidor; a antiga `discordfy` foi mergeada e deletada do remote).
+  `server/docker-compose.yml` tem
+  alteração local no servidor: nunca sobrescrever. Deploy = `git pull` +
   `docker compose build broadcast-box` (só quando `server/broadcast-box/`
   mudar) + `docker compose up -d broadcast-box`. Entrada pública direta em
   `:8180` (tcp+udp), caddy na frente do resto.
