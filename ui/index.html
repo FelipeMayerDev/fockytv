@@ -2338,8 +2338,23 @@ function openJam () {
 // Os tiles persistem entre polls: o refresh cria/destrói sessões conforme a
 // listagem muda, em vez de regerar cards. Áudio vem mutado — vários streams
 // com som aberto ao mesmo tempo é cacofonia; o usuário liga o que quiser.
+
+// parse defensivo de localStorage: roda no topo do módulo, e um storage
+// corrompido (ou bloqueado, em aba anônima) derrubaria o script inteiro
+// antes da UI subir
+const lsJson = (k, def) => {
+  try { return JSON.parse(localStorage.getItem(k)) ?? def } catch { return def }
+}
+
 const tiles = new Map()   // streamKey -> { el, video, pc, loading, vol, on }
 let focusKey = null       // tile em destaque (modo foco), ou null
+
+// volume/mudo que quem assiste escolheu pra cada transmissão. O tile é
+// reconstruído quando a pessoa para de compartilhar e volta — sem isso, o
+// som renasceria no máximo a cada reentrada.
+const streamVol = new Map(Object.entries(lsJson('stream-vol', {})))
+const streamVolSave = () =>
+  localStorage.setItem('stream-vol', JSON.stringify(Object.fromEntries(streamVol)))
 
 function releaseTiles () {
   for (const [, t] of tiles) {
@@ -2476,10 +2491,16 @@ function buildTile (st, kind = null) {
   // com o atributo muted mesmo assim, porque autoplay com som é barrado por
   // política do navegador e o vídeo nem começaria — o som entra logo depois,
   // quando já está tocando (ver abaixo).
-  const t = { el, video, pc: null, loading: false, vol: 1, on: true }
+  const t = { el, video, pc: null, loading: false,
+    ...{ vol: 1, on: true, ...streamVol.get(key) } }
+  el.querySelector('.s-volr').value = t.vol
   const applyVol = () => {
     video.volume = t.vol
     video.muted = !t.on || t.vol === 0
+  }
+  const saveVol = () => {
+    streamVol.set(key, { vol: t.vol, on: t.on })
+    streamVolSave()
   }
 
   // skeleton sai quando o primeiro quadro chega
@@ -2510,8 +2531,12 @@ function buildTile (st, kind = null) {
     ? '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>'
     : '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/></svg>'
   el.querySelector('.s-acts').onclick = e => e.stopPropagation()
-  el.querySelector('.s-volr').oninput = e => { t.vol = +e.target.value; applyVol(); paintVol() }
-  el.querySelector('.s-vol').onclick = () => { t.on = !t.on; applyVol(); paintVol() }
+  el.querySelector('.s-volr').oninput = e => {
+    t.vol = +e.target.value; applyVol(); paintVol(); saveVol()
+  }
+  el.querySelector('.s-vol').onclick = () => {
+    t.on = !t.on; applyVol(); paintVol(); saveVol()
+  }
   el.querySelector('.s-pip').onclick = () => {
     // o PiP é do elemento de vídeo do tile: segue tocando solto na tela
     if (document.pictureInPictureElement === video) document.exitPictureInPicture().catch(() => {})
@@ -3686,11 +3711,6 @@ let presenceTimer = null
 // usuário, que precisa ser reaplicada sempre que a lista muda: quem entra
 // depois do "mutar todos" tem que entrar mudo, e quem reconecta recria o
 // ring no worklet com ganho 1.
-// parse defensivo: isto roda no topo do módulo, e um localStorage corrompido
-// (ou bloqueado, em aba anônima) derrubaria o script inteiro antes da UI subir
-const lsJson = (k, def) => {
-  try { return JSON.parse(localStorage.getItem(k)) ?? def } catch { return def }
-}
 // quem se mutou por conta própria, visto pelo DataChannel. Não persiste: é
 // estado vivo do outro lado, e o ping de 2s reconstrói em quem entra depois.
 const peerSelfMuted = new Set()
