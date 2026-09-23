@@ -20,6 +20,14 @@ cargo build --release
 echo "── AppDir base"
 mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/lib/gstreamer-1.0" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 cp target/release/fockytv-share "$APPDIR/usr/bin/"
+# config embutido (padrão de fábrica): o da raiz do repo, mesmo do app
+# Electron; um config.json AO LADO do AppImage (ou FOCKYTV_CONFIG) ainda tem
+# prioridade sobre ele
+if [ -f ../config.json ]; then
+    cp ../config.json "$APPDIR/usr/bin/config.json"
+elif [ -f config.json ]; then
+    cp config.json "$APPDIR/usr/bin/config.json"
+fi
 cp ../build/icon.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/fockytv-share.png"
 cp ../build/icon.png "$APPDIR/.DirIcon"
 cp ../build/icon.png "$APPDIR/fockytv-share.png"

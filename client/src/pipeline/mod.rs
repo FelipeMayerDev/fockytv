@@ -2,13 +2,13 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 
 
-/// Sessão ao vivo: segura o pipeline e o fd do portal (o pipewiresrc usa o
-/// fd por número; se ele fechar, a captura morre).
+/// Pipeline ao vivo. O fd do portal fica com a sessão no main (ela o
+/// mantém aberto e o reutiliza nas reconexões do whipsink).
 pub struct Live {
     pub pipeline: gst::Pipeline,
+    /// captura pw nativa (Linux; None = fonte de teste/videotestsrc)
     #[cfg(target_os = "linux")]
-    #[allow(dead_code)] // viva apenas para manter o fd aberto
-    pub fd: Option<std::os::fd::OwnedFd>,
+    pub video: Option<crate::video_pw::PwVideo>,
 }
 
 #[cfg(target_os = "linux")]

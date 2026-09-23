@@ -5,6 +5,8 @@ mod control;
 mod picker;
 mod pipeline;
 mod tray;
+#[cfg(target_os = "linux")]
+mod video_pw;
 
 use gstreamer as gst;
 use gstreamer::prelude::*;
@@ -16,11 +18,31 @@ enum Cmd {
     Quit,
     ChooseAudio(u32),
     RefreshStatus,
+    /// erro no pipeline (whipsink bateu 400 de host fantasma etc.) → tenta
+    /// reconstruir a transmissão com a MESMA fonte (sem reabrir o portal)
+    PipelineFailed,
+}
+
+/// Fonte escolhida: guardada pra reconstruir o pipeline sem novo picker.
+#[cfg(target_os = "linux")]
+struct Source {
+    fd: std::os::fd::OwnedFd,
+    node: u32,
+    size: Option<(i32, i32)>,
+    mode: audio::AudioMode,
+}
+
+#[cfg(target_os = "windows")]
+struct Source {
+    pick: picker::windows::Pick,
+    target: audio::AudioTarget,
 }
 
 struct Session {
     live: pipeline::Live,
     audio: audio::Running,
+    source: Source,
+    retries: u32,
 }
 
 #[tokio::main]
@@ -81,10 +103,17 @@ async fn main() {
                 }
             }
             Cmd::Stop => stop_session(&mut session, &tray).await,
+            Cmd::PipelineFailed => {
+                session = restart_or_giveup(session, &cfg, &tray, &tx).await;
+            }
             Cmd::ChooseAudio(pid) => {
-                if let Some(s) = &session {
+                if let Some(s) = &mut session {
                     eprintln!("[fockytv] som exclusivo: pid {pid}");
                     s.audio.set_mode(audio::AudioMode::OnlyPid(pid));
+                    #[cfg(target_os = "linux")]
+                    {
+                        s.source.mode = audio::AudioMode::OnlyPid(pid);
+                    }
                     tray.set_disambig(vec![]);
                     let _ = tx.send(Cmd::RefreshStatus);
                 }
@@ -99,6 +128,74 @@ async fn main() {
             Cmd::Quit => {
                 stop_session(&mut session, &tray).await;
                 break;
+            }
+        }
+    }
+}
+
+/// Derruba pipeline+áudio e devolve a fonte pra um restart.
+async fn teardown(mut s: Session) -> Source {
+    #[cfg(target_os = "linux")]
+    let pw_video = s.live.video.take();
+    let pipe = s.live.pipeline.clone();
+    let _ = pipe.send_event(gst::event::Eos::new());
+    let drained = tokio::task::spawn_blocking(move || {
+        if let Some(bus) = pipe.bus() {
+            let _ = bus.timed_pop_filtered(
+                gst::ClockTime::from_seconds(2),
+                &[gst::MessageType::Eos, gst::MessageType::Error],
+            );
+        }
+        let _ = pipe.set_state(gst::State::Null);
+    });
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(4), drained).await;
+    s.audio.stop().await;
+    #[cfg(target_os = "linux")]
+    if let Some(v) = pw_video {
+        v.stop(); // depois do pipeline: o pw descarta pushes no appsrc morto
+    }
+    s.source
+}
+
+/// O whipsink morreu no meio (400 de host fantasma é o caso comum: o
+/// host-takeover do servidor só assume depois de 10s sem RTP). Reconstrói o
+/// pipeline com a mesma fonte em vez de derrubar o compartilhamento.
+async fn restart_or_giveup(
+    session: Option<Session>,
+    cfg: &config::Config,
+    tray: &tray::TrayHandle,
+    tx: &mpsc::UnboundedSender<Cmd>,
+) -> Option<Session> {
+    let mut retries = session.as_ref().map(|s| s.retries).unwrap_or(0);
+    let source = teardown(session?).await;
+    loop {
+        retries += 1;
+        if retries > 5 {
+            eprintln!("[fockytv] pipeline caiu {retries}× — desistindo");
+            tray.set(tray::State::Idle);
+            return None;
+        }
+        eprintln!("[fockytv] reconectando ({retries}/5) em 3s…");
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        #[cfg(target_os = "linux")]
+        let built = pipeline::build(&source.fd, source.node, source.size, source.mode, cfg);
+        #[cfg(target_os = "windows")]
+        let built = pipeline::build(&source.pick, source.target, cfg);
+        match built {
+            Ok((live, audio)) => {
+                watch_bus(&live, tx.clone());
+                tray.set(tray::State::Live {
+                    status: status_text(&live),
+                });
+                return Some(Session {
+                    live,
+                    audio,
+                    source,
+                    retries,
+                });
+            }
+            Err(e) => {
+                eprintln!("[fockytv] restart falhou: {e}");
             }
         }
     }
@@ -120,9 +217,9 @@ async fn start_share(
     tray.set_disambig(vec![]);
 
     #[cfg(target_os = "linux")]
-    let (live, running, cands) = start_linux(cfg, tray).await?;
+    let (live, running, source, cands) = start_linux(cfg, tray).await?;
     #[cfg(target_os = "windows")]
-    let (live, running, cands) = start_windows(cfg, tray).await?;
+    let (live, running, source, cands) = start_windows(cfg, tray).await?;
 
     // erros do pipeline derrubam a sessão sozinhos (bus → Stop)
     watch_bus(&live, tx.clone());
@@ -142,6 +239,8 @@ async fn start_share(
     Some(Session {
         live,
         audio: running,
+        source,
+        retries: 0,
     })
 }
 
@@ -150,7 +249,12 @@ async fn start_share(
 async fn start_linux(
     cfg: &config::Config,
     tray: &tray::TrayHandle,
-) -> Option<(pipeline::Live, audio::Running, Vec<picker::Candidate>)> {
+) -> Option<(
+    pipeline::Live,
+    audio::Running,
+    Source,
+    Vec<picker::Candidate>,
+)> {
     let pick = match picker::pick().await {
         Ok(p) => p,
         Err(e) => {
@@ -220,8 +324,14 @@ async fn start_linux(
         }
     }
 
-    match pipeline::build(pick.fd, pick.node, pick.size, mode, cfg) {
-        Ok((live, running)) => Some((live, running, cands)),
+    let source = Source {
+        fd: pick.fd,
+        node: pick.node,
+        size: pick.size,
+        mode,
+    };
+    match pipeline::build(&source.fd, source.node, source.size, source.mode, cfg) {
+        Ok((live, running)) => Some((live, running, source, cands)),
         Err(e) => {
             eprintln!("[fockytv] pipeline: {e}");
             tray.set(tray::State::Idle);
@@ -236,7 +346,12 @@ async fn start_linux(
 async fn start_windows(
     cfg: &config::Config,
     tray: &tray::TrayHandle,
-) -> Option<(pipeline::Live, audio::Running, Vec<picker::Candidate>)> {
+) -> Option<(
+    pipeline::Live,
+    audio::Running,
+    Source,
+    Vec<picker::Candidate>,
+)> {
     let pick = match tokio::task::spawn_blocking(picker::windows::pick).await {
         Ok(Ok(p)) => p,
         Ok(Err(e)) => {
@@ -266,8 +381,9 @@ async fn start_windows(
     } else {
         audio::AudioTarget::AllExceptDiscord
     };
-    match pipeline::build(&pick, target, cfg) {
-        Ok((live, running)) => Some((live, running, vec![])),
+    let source = Source { pick, target };
+    match pipeline::build(&source.pick, source.target, cfg) {
+        Ok((live, running)) => Some((live, running, source, vec![])),
         Err(e) => {
             eprintln!("[fockytv] pipeline: {e}");
             tray.set(tray::State::Idle);
@@ -290,11 +406,11 @@ fn watch_bus(live: &pipeline::Live, tx: mpsc::UnboundedSender<Cmd>) {
                         e.src().map(|s| s.to_string()).unwrap_or_default(),
                         e.debug().unwrap_or_default()
                     );
-                    let _ = tx.send(Cmd::Stop);
+                    let _ = tx.send(Cmd::PipelineFailed);
                     return;
                 }
                 gst::MessageView::Eos(_) => {
-                    let _ = tx.send(Cmd::Stop);
+                    let _ = tx.send(Cmd::PipelineFailed);
                     return;
                 }
                 _ => {}
@@ -304,20 +420,8 @@ fn watch_bus(live: &pipeline::Live, tx: mpsc::UnboundedSender<Cmd>) {
 }
 
 async fn stop_session(session: &mut Option<Session>, tray: &tray::TrayHandle) {
-    if let Some(s) = session.take() {
-        let pipe = s.live.pipeline.clone();
-        let _ = pipe.send_event(gst::event::Eos::new());
-        // dar tempo do whipsink escoar e mandar o DELETE da sessão WHIP
-        let drained = tokio::task::spawn_blocking(move || {
-            let Some(bus) = pipe.bus() else { return };
-            let _ = bus.timed_pop_filtered(
-                gst::ClockTime::from_seconds(2),
-                &[gst::MessageType::Eos, gst::MessageType::Error],
-            );
-            let _ = pipe.set_state(gst::State::Null);
-        });
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(4), drained).await;
-        s.audio.stop().await;
+    if session.is_some() {
+        let _ = teardown(session.take().unwrap()).await;
         eprintln!("[fockytv] parado");
     }
     tray.set_disambig(vec![]);

@@ -15,7 +15,6 @@ pub struct Pick {
     pub is_window: bool,
     /// Tamanho/posição no espaço lógico do compositor (podem estar ausentes).
     pub size: Option<(i32, i32)>,
-    pub position: Option<(i32, i32)>,
 }
 
 fn token_path() -> PathBuf {
@@ -85,12 +84,15 @@ pub async fn pick() -> Result<Pick, String> {
         .await
         .map_err(|e| format!("open_pipe_wire_remote: {e}"))?;
 
+    // A Session do ashpd manda Close no Drop — se ela morrer, o portal
+    // derruba a stream. Enquanto não guardamos direito, segura ela viva.
+    std::mem::forget(session);
+
     Ok(Pick {
         fd,
         node,
         is_window,
         size: stream.size(),
-        position: stream.position(),
     })
 }
 
@@ -106,7 +108,6 @@ pub struct HyprClient {
     pub class: String,
     pub title: String,
     pub pid: i64,
-    pub at: Vec<i64>,
     pub size: Vec<i64>,
     #[serde(default)]
     pub mapped: bool,
@@ -183,12 +184,11 @@ pub fn match_window(
 mod tests {
     use super::*;
 
-    fn client(class: &str, pid: i64, x: i64, y: i64, w: i64, h: i64) -> HyprClient {
+    fn client(class: &str, pid: i64, _x: i64, _y: i64, w: i64, h: i64) -> HyprClient {
         HyprClient {
             class: class.into(),
             title: format!("{class} window"),
             pid,
-            at: vec![x, y],
             size: vec![w, h],
             mapped: true,
         }

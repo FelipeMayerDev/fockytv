@@ -18,7 +18,7 @@ use crate::config::{bitrate_for, Config};
 /// que passar do fps configurado. O bitrate inicial é estimado pelo tamanho
 /// (lógico) do portal e afinado depois que os caps reais negociarem.
 pub fn build(
-    fd: std::os::fd::OwnedFd,
+    fd: &std::os::fd::OwnedFd,
     node: u32,
     size: Option<(i32, i32)>,
     mode: AudioMode,
@@ -28,21 +28,24 @@ pub fn build(
     let (w, h) = size.unwrap_or((1920, 1080));
     let bitrate = bitrate_for(w.unsigned_abs(), h.unsigned_abs(), cfg.max_bitrate);
     let gop = (cfg.fps * 2).max(30);
-    // FOCKYTV_TEST_VIDEO=1 troca a fonte por videotestsrc (diagnóstico sem portal)
-    let source = if std::env::var("FOCKYTV_TEST_VIDEO").is_ok() {
-        format!("videotestsrc is-live=true pattern=ball")
+    // FOCKYTV_TEST_VIDEO=1 troca a fonte por videotestsrc (diagnóstico sem
+    // portal). No caminho normal a captura é PipeWire nativo (video_pw.rs)
+    // empurrando neste appsrc — o gstpipewiresrc desta versão dead-locka com
+    // encoder na cadeia (pipewire#5459/#4797).
+    let test_video = std::env::var("FOCKYTV_TEST_VIDEO").is_ok();
+    let source = if test_video {
+        "videotestsrc is-live=true pattern=ball".to_string()
     } else {
-        format!("pipewiresrc fd={fd_raw} path={node} keepalive-time=1000")
+        "appsrc name=vid is-live=true do-timestamp=true format=time max-bytes=8388608 block=true".to_string()
     };
 
     let launch = format!(
         r#"
         {source}
         ! queue leaky=downstream max-size-buffers=2 max-size-time=0
-        ! videorate drop-only=true
-        ! capsfilter name=vcaps caps=video/x-raw,framerate={fps}/1
+        ! {rate_chain}
         ! videoconvert
-        ! openh264enc name=venc usage-type=screen complexity=medium bitrate={bitrate} gop-size={gop}
+        ! openh264enc name=venc usage-type=screen rate-control=bitrate scene-change-detection=false complexity=medium bitrate={bitrate} gop-size={gop}
         ! h264parse
         ! rtph264pay pt=96 config-interval=-1
         ! queue leaky=downstream max-size-time=1000000000
@@ -59,7 +62,12 @@ pub fn build(
             auth-token="{key}"
             use-link-headers=true
         "#,
-        fps = cfg.fps,
+        rate_chain = if std::env::var("FOCKYTV_NO_RATE").is_ok() {
+            // diagnóstico: sem videorate/caps — deixa o framerate do stream passar direto
+            "identity silent=true".to_string()
+        } else {
+            format!("videorate drop-only=true ! capsfilter name=vcaps caps=video/x-raw,framerate={}/1", cfg.fps)
+        },
         url = cfg.server_url.trim_end_matches('/'),
         key = cfg.display_name,
         abr = cfg.audio_bitrate,
@@ -96,11 +104,18 @@ pub fn build(
         .map_err(|e| format!("play: {e}"))?;
 
     let running = audio::linux::start(mode, appsrc);
-    Ok((
-        Live {
-            pipeline,
-            fd: Some(fd),
-        },
-        running,
-    ))
+
+    let mut video = None;
+    if !test_video {
+        let vid = pipeline
+            .by_name("vid")
+            .and_then(|e| e.dynamic_cast::<gst_app::AppSrc>().ok())
+            .ok_or("appsrc vid não achado")?;
+        // pw consome o fd: clona pra reconexões futuras manterem a fonte
+        let fd2 = fd
+            .try_clone()
+            .map_err(|e| format!("dup fd: {e}"))?;
+        video = Some(crate::video_pw::start(fd2, node, vid));
+    }
+    Ok((Live { pipeline, video }, running))
 }

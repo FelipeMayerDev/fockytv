@@ -42,7 +42,7 @@ pub fn build(
         ! videorate drop-only=true
         ! capsfilter name=vcaps caps=video/x-raw,framerate={fps}/1
         ! videoconvert
-        ! openh264enc name=venc usage-type=screen complexity=medium bitrate={bitrate} gop-size={gop}
+        ! openh264enc name=venc usage-type=screen rate-control=bitrate scene-change-detection=false complexity=medium bitrate={bitrate} gop-size={gop}
         ! h264parse
         ! rtph264pay pt=96 config-interval=-1
         ! queue leaky=downstream max-size-time=1000000000
