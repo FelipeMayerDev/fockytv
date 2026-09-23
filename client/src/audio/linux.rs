@@ -1,19 +1,13 @@
-use std::collections::HashSet;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use gstreamer as gst;
 use gstreamer_app as gst_app;
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
 
-use super::AudioMode;
-
-pub const RATE: u32 = 48_000;
-const CH: usize = 2;
-const FRAME: usize = CH * 4; // f32 interleaved
+use super::{feeder, AudioMode};
 
 /// Binário cujo áudio NUNCA entra na transmissão (prefixo, sem distinguir
 /// maiúsculas): o Discord (conversa privada) e tudo que for FockyTV (o canal
@@ -91,8 +85,6 @@ fn eligible(p: &HashMap<String, Value>, own_node: &str, mode: &AudioMode) -> boo
 }
 
 /// Captura PCM do sistema (ou de um pid só) e empurra no appsrc do pipeline.
-/// Se o pw-cat morrer no meio, a tarefa vira um gerador de silêncio pra não
-/// sufocar o m-line de áudio do WHIP.
 pub fn start(mode: AudioMode, appsrc: gst_app::AppSrc) -> Running {
     let mode = Arc::new(std::sync::RwLock::new(mode));
     let cancel = Arc::new(tokio::sync::Notify::new());
@@ -106,11 +98,10 @@ pub fn start(mode: AudioMode, appsrc: gst_app::AppSrc) -> Running {
     let child = Arc::new(Mutex::new(spawned.ok()));
     let mut tasks = vec![];
 
-    // áudio em dois estágios: (A) leitor empilha o que o pw-cat cuspir numa
-    // fila; (B) pacer drena num ritmo fixo de TICK ms — fila vazia vira
-    // silêncio (sem link ativo o pw-cat não produz NADA, e o m-line de áudio
-    // do WHIP precisa de fluxo contínuo pro offer sair e a stream nascer).
-    let queue: Arc<Mutex<std::collections::VecDeque<u8>>> = Arc::new(Mutex::new(Default::default()));
+    // pacer comum (fila → appsrc, completando com silêncio)
+    let queue = feeder::spawn(appsrc.clone(), cancel.clone());
+
+    // leitor: stdout do pw-cat → fila
     {
         let child = child.clone();
         let queue = queue.clone();
@@ -145,42 +136,6 @@ pub fn start(mode: AudioMode, appsrc: gst_app::AppSrc) -> Running {
             }
         }));
     }
-    {
-        let queue = queue.clone();
-        let cancel = cancel.clone();
-        let appsrc = appsrc.clone();
-        tasks.push(tokio::spawn(async move {
-            const TICK_MS: u64 = 20;
-            let chunk = RATE as usize * FRAME * TICK_MS as usize / 1000; // 7680 = 20ms
-            loop {
-                let drained: Vec<u8> = {
-                    let mut q = queue.lock().await;
-                    let take = chunk.min(q.len());
-                    q.drain(..take).collect()
-                };
-                // fila vazia ou curta: completa com zeros pra manter o ritmo
-                let mut chunk_buf = drained;
-                if chunk_buf.len() < chunk {
-                    chunk_buf.resize(chunk, 0);
-                }
-                if push(&appsrc, chunk_buf).is_err() {
-                    eprintln!("[fockytv] appsrc rejeitou buffer (flushing) — feed encerra");
-                    return;
-                }
-                // backlog grande demais (app gerou mais do que transmitimos):
-                // descarta o excesso pra não acumular latência
-                let mut q = queue.lock().await;
-                while q.len() > chunk * 10 {
-                    q.drain(..chunk);
-                }
-                drop(q);
-                tokio::select! {
-                    _ = tokio::time::sleep(std::time::Duration::from_millis(TICK_MS)) => {}
-                    _ = cancel.notified() => return,
-                }
-            }
-        }));
-    }
 
     // poll de 1s: descobre o id do nosso nó e liga quem é elegível
     {
@@ -192,9 +147,7 @@ pub fn start(mode: AudioMode, appsrc: gst_app::AppSrc) -> Running {
             let mut own_id: Option<u32> = None;
             let mut linked: HashSet<i64> = HashSet::new();
             loop {
-                if poll_once(&node_name, &prefix, &mut own_id, &mut linked, &mode).await {
-                    return; // cancelado
-                }
+                poll_once(&node_name, &prefix, &mut own_id, &mut linked, &mode).await;
                 tokio::select! {
                     _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
                     _ = cancel.notified() => return,
@@ -228,9 +181,9 @@ fn spawn_pwcat(node: &str) -> std::io::Result<tokio::process::Child> {
             "--format",
             "f32",
             "--rate",
-            &RATE.to_string(),
+            &feeder::RATE.to_string(),
             "--channels",
-            &CH.to_string(),
+            "2",
             "-P",
             &format!("{{ node.autoconnect=false node.name={node} }}"),
             "-",
@@ -241,25 +194,19 @@ fn spawn_pwcat(node: &str) -> std::io::Result<tokio::process::Child> {
         .spawn()
 }
 
-fn push(appsrc: &gst_app::AppSrc, bytes: Vec<u8>) -> Result<(), ()> {
-    let buf = gst::Buffer::from_slice(bytes);
-    appsrc.push_buffer(buf).map(|_| ()).map_err(|_| ())
-}
-
-/// Uma rodada do pw-dump/pw-link. true = cancelado (modo Pending Forever não
-/// existe: quem cancela é o stop()).
+/// Uma rodada do pw-dump/pw-link.
 async fn poll_once(
     node_name: &str,
     prefix: &str,
     own_id: &mut Option<u32>,
     linked: &mut HashSet<i64>,
     mode: &Arc<std::sync::RwLock<AudioMode>>,
-) -> bool {
+) {
     let Ok(out) = tokio::process::Command::new("pw-dump").output().await else {
-        return false;
+        return;
     };
     let Ok(nodes) = serde_json::from_slice::<Vec<PwNode>>(&out.stdout) else {
-        return false;
+        return;
     };
     let nodes: Vec<&PwNode> = nodes
         .iter()
@@ -272,7 +219,7 @@ async fn poll_once(
             (vstr(p, "node.name") == Some(node_name)).then_some(n.id)
         });
         if own_id.is_none() {
-            return false; // nó ainda não registrou
+            return; // nó ainda não registrou
         }
     }
     let own = own_id.unwrap();
@@ -310,7 +257,6 @@ async fn poll_once(
             Err(e) => eprintln!("[fockytv] pw-link não rodou: {e}"),
         }
     }
-    false
 }
 
 #[cfg(test)]

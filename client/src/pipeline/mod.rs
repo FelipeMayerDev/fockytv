@@ -19,6 +19,9 @@ pub use linux::build;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+#[cfg(target_os = "windows")]
+pub use windows::build;
+
 /// Ajusta o bitrate do openh264enc ao vivo quando a resolução real negociada
 /// difere da estimativa (portal devolve tamanho lógico, não pixels).
 pub fn refine_bitrate(live: &Live, manual: u64) -> Option<(u32, u32, u32)> {

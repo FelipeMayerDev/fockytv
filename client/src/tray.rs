@@ -193,28 +193,132 @@ pub use imp::{spawn, TrayHandle};
 #[cfg(not(target_os = "linux"))]
 mod imp {
     use super::{Candidate, Cmd, State};
+    use std::sync::mpsc;
     use std::sync::{Arc, Mutex};
     use tokio::sync::mpsc::UnboundedSender;
 
     pub struct TrayHandle {
         pub state: Arc<Mutex<State>>,
         pub disambig: Arc<Mutex<Vec<Candidate>>>,
+        to_ui: mpsc::Sender<State>,
     }
 
     impl TrayHandle {
         pub fn set(&self, s: State) {
             *self.state.lock().unwrap() = s;
+            let _ = self.to_ui.send(s.clone());
         }
-        pub fn set_disambig(&self, c: Vec<Candidate>) {
-            *self.disambig.lock().unwrap() = c;
+        pub fn set_disambig(&self, _c: Vec<Candidate>) {
+            // Windows conhece o hwnd desde o picker: nunca desambigua
         }
     }
 
-    pub fn spawn(_tx: UnboundedSender<Cmd>) -> TrayHandle {
+    /// Tray (tray-icon + muda) e hotkey global (global-hotkey) numa thread
+    /// própria com pump de mensagens Win32 — os dois crates exigem uma
+    /// message loop na thread que criou os objetos.
+    pub fn spawn(tx: UnboundedSender<Cmd>) -> TrayHandle {
+        let state = Arc::new(Mutex::new(State::Idle));
+        let disambig: Arc<Mutex<Vec<Candidate>>> = Arc::new(Mutex::new(vec![]));
+        let (to_ui, from_main) = mpsc::channel::<State>();
+        std::thread::spawn(move || ui_thread(tx.clone(), from_main));
         TrayHandle {
-            state: Arc::new(Mutex::new(State::Idle)),
-            disambig: Arc::new(Mutex::new(vec![])),
+            state,
+            disambig,
+            to_ui,
         }
+    }
+
+    fn ui_thread(tx: UnboundedSender<Cmd>, from_main: mpsc::Receiver<State>) -> ! {
+        use global_hotkey::hotkey::{Code, HotKey, Modifiers};
+        use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
+        use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
+        use tray_icon::{TrayIcon, TrayIconBuilder};
+
+        let share = MenuItem::with_id("share", "Compartilhar tela", true, None);
+        let stop = MenuItem::with_id("stop", "Parar", false, None);
+        let quit = MenuItem::with_id("quit", "Sair", true, None);
+        let menu = Menu::new();
+        let _ = menu.append_items(&[
+            &share,
+            &stop,
+            &PredefinedMenuItem::separator(),
+            &quit,
+        ]);
+
+        let icon = load_icon();
+        let _tray = TrayIconBuilder::new()
+            .with_menu(Box::new(menu))
+            .with_tooltip("FockyTV Share")
+            .with_icon(icon)
+            .build()
+            .expect("tray");
+
+        // Ctrl+Shift+F12 = toggle (hotkey configurável fica pra depois)
+        let hotkeys = GlobalHotKeyManager::new().expect("hotkey manager");
+        let hk = HotKey::builder()
+            .modifiers(Modifiers::CONTROL | Modifiers::SHIFT)
+            .key(Code::F12)
+            .build();
+        hotkeys.register(hk).expect("hotkey");
+
+        let menu_rx = MenuEvent::receiver();
+        let hotkey_rx = GlobalHotKeyEvent::receiver();
+        let share_id = share.id().clone();
+        let stop_id = stop.id().clone();
+        let quit_id = quit.id().clone();
+
+        let mut msg = windows::Win32::UI::WindowsAndMessaging::MSG::default();
+        loop {
+            // pump win32: tray e hotkey entregam eventos pela fila desta thread
+            unsafe {
+                use windows::Win32::UI::WindowsAndMessaging::*;
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+            while let Ok(ev) = menu_rx.try_recv() {
+                if ev.id == share_id {
+                    let _ = tx.send(Cmd::Share);
+                } else if ev.id == stop_id {
+                    let _ = tx.send(Cmd::Stop);
+                } else if ev.id == quit_id {
+                    let _ = tx.send(Cmd::Quit);
+                }
+            }
+            while let Ok(ev) = hotkey_rx.try_recv() {
+                if ev.state == HotKeyState::Pressed {
+                    let _ = tx.send(Cmd::Share); // toggle
+                }
+            }
+            while let Ok(s) = from_main.try_recv() {
+                match s {
+                    State::Idle => {
+                        let _ = share.set_text("Compartilhar tela");
+                        let _ = share.set_enabled(true);
+                        let _ = stop.set_enabled(false);
+                    }
+                    State::Picking => {
+                        let _ = share.set_enabled(false);
+                        let _ = share.set_text("Escolhendo fonte…");
+                    }
+                    State::Live { status } => {
+                        let _ = share.set_text(format!("Ao vivo — {status}"));
+                        let _ = share.set_enabled(false);
+                        let _ = stop.set_enabled(true);
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
+    }
+
+    fn load_icon() -> tray_icon::Icon {
+        let png = include_bytes!("../../build/icon.png");
+        let img = image::load_from_memory(png).expect("icon.png inválido");
+        let rgba = img.to_rgba8();
+        let (w, h) = rgba.dimensions();
+        tray_icon::Icon::from_rgba(rgba.into_raw(), w, h).expect("icon rgba")
     }
 }
 #[cfg(not(target_os = "linux"))]

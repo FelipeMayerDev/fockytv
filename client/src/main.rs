@@ -1,5 +1,6 @@
 mod audio;
 mod config;
+#[cfg(unix)]
 mod control;
 mod picker;
 mod pipeline;
@@ -29,6 +30,7 @@ async fn main() {
 
     gst::init().expect("GStreamer não inicializa");
 
+    #[cfg(unix)]
     if want_toggle && control::forward().await {
         return; // um daemon já estava rodando e recebeu o pedido
     }
@@ -42,6 +44,7 @@ async fn main() {
     };
 
     let (tx, mut rx) = mpsc::unbounded_channel();
+    #[cfg(unix)]
     control::listen(tx.clone()).await;
     let tray = tray::spawn(tx.clone());
 
@@ -115,6 +118,39 @@ async fn start_share(
 ) -> Option<Session> {
     tray.set(tray::State::Picking);
     tray.set_disambig(vec![]);
+
+    #[cfg(target_os = "linux")]
+    let (live, running, cands) = start_linux(cfg, tray).await?;
+    #[cfg(target_os = "windows")]
+    let (live, running, cands) = start_windows(cfg, tray).await?;
+
+    // erros do pipeline derrubam a sessão sozinhos (bus → Stop)
+    watch_bus(&live, tx.clone());
+
+    tray.set_disambig(cands);
+    tray.set(tray::State::Live {
+        status: status_text(&live),
+    });
+    // caps reais negociam um pouco depois: reler pro status e afinar bitrate
+    {
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            let _ = tx.send(Cmd::RefreshStatus);
+        });
+    }
+    Some(Session {
+        live,
+        audio: running,
+    })
+}
+
+/// Fluxo Linux: portal (monitor|janela) + áudio por pw-cat/pw-link.
+#[cfg(target_os = "linux")]
+async fn start_linux(
+    cfg: &config::Config,
+    tray: &tray::TrayHandle,
+) -> Option<(pipeline::Live, audio::Running, Vec<picker::Candidate>)> {
     let pick = match picker::pick().await {
         Ok(p) => p,
         Err(e) => {
@@ -176,34 +212,60 @@ async fn start_share(
         }
     }
 
-    let (live, running) = match pipeline::build(pick.fd, pick.node, pick.size, mode, cfg) {
-        Ok(v) => v,
+    match pipeline::build(pick.fd, pick.node, pick.size, mode, cfg) {
+        Ok((live, running)) => Some((live, running, cands)),
         Err(e) => {
             eprintln!("[fockytv] pipeline: {e}");
+            tray.set(tray::State::Idle);
+            None
+        }
+    }
+}
+
+/// Fluxo Windows: picker Win32 (HMONITOR/HWND conhecidos na hora — sem
+/// desambiguação) + áudio WASAPI por processo no helper.
+#[cfg(target_os = "windows")]
+async fn start_windows(
+    cfg: &config::Config,
+    tray: &tray::TrayHandle,
+) -> Option<(pipeline::Live, audio::Running, Vec<picker::Candidate>)> {
+    let pick = match tokio::task::spawn_blocking(picker::windows::pick).await {
+        Ok(Ok(p)) => p,
+        Ok(Err(e)) => {
+            eprintln!("[fockytv] seleção falhou: {e}");
+            tray.set(tray::State::Idle);
+            return None;
+        }
+        Err(e) => {
+            eprintln!("[fockytv] picker morreu: {e}");
             tray.set(tray::State::Idle);
             return None;
         }
     };
+    eprintln!(
+        "[fockytv] fonte: {} {}×{}",
+        if pick.monitor != 0 {
+            format!("tela (monitor {})", pick.monitor)
+        } else {
+            format!("janela [{}] {}", pick.process, pick.title)
+        },
+        pick.width,
+        pick.height
+    );
 
-    // erros do pipeline derrubam a sessão sozinhos (bus → Stop)
-    watch_bus(&live, tx.clone());
-
-    tray.set_disambig(cands);
-    tray.set(tray::State::Live {
-        status: status_text(&live),
-    });
-    // caps reais negociam um pouco depois: reler pro status e afinar bitrate
-    {
-        let tx = tx.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-            let _ = tx.send(Cmd::RefreshStatus);
-        });
+    let target = if pick.hwnd != 0 {
+        audio::AudioTarget::WindowHwnd(pick.hwnd)
+    } else {
+        audio::AudioTarget::AllExceptDiscord
+    };
+    match pipeline::build(&pick, target, cfg) {
+        Ok((live, running)) => Some((live, running, vec![])),
+        Err(e) => {
+            eprintln!("[fockytv] pipeline: {e}");
+            tray.set(tray::State::Idle);
+            None
+        }
     }
-    Some(Session {
-        live,
-        audio: running,
-    })
 }
 
 fn watch_bus(live: &pipeline::Live, tx: mpsc::UnboundedSender<Cmd>) {

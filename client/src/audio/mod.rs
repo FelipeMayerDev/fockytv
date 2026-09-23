@@ -9,6 +9,9 @@ pub enum AudioMode {
     OnlyPid(u32),
 }
 
+mod feeder;
+pub use feeder::RATE;
+
 #[cfg(target_os = "linux")]
 pub mod linux;
 
@@ -17,3 +20,6 @@ pub use linux::Running;
 
 #[cfg(target_os = "windows")]
 pub mod windows;
+
+#[cfg(target_os = "windows")]
+pub use windows::{AudioTarget, Running};

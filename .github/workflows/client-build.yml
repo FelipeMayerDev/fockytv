@@ -1,0 +1,91 @@
+name: client windows
+
+# Build de desenvolvimento do mini client de compartilhamento (Rust) para
+# Windows: zip portátil com exe + helper WASAPI + runtime GStreamer MSVC.
+# NÃO é release: roda só por workflow_dispatch. O AppImage do Linux é local
+# (client/package-appimage.sh).
+
+on:
+  workflow_dispatch:
+
+jobs:
+  # mesmo job do release.yml: o helper é .exe compilado com mingw
+  helper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq g++-mingw-w64-x86-64
+      - run: |
+          x86_64-w64-mingw32-g++ -std=c++17 -O2 -static \
+            -o electron/audio-helper/audio-helper.exe electron/audio-helper/capture.cpp \
+            -lole32 -lpsapi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: audio-helper
+          path: electron/audio-helper/audio-helper.exe
+
+  windows:
+    runs-on: windows-latest
+    needs: helper
+    env:
+      GSTVER: "1.28.7"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: audio-helper
+          path: helper/
+
+      - name: GStreamer MSVC runtime
+        shell: pwsh
+        run: |
+          $u = "https://gstreamer.freedesktop.org/data/pkg/windows/$env:GSTVER/msvc/gstreamer-1.0-msvc-x86_64-$env:GSTVER.exe"
+          Invoke-WebRequest $u -Out gst.exe
+          Start-Process -Wait -FilePath gst.exe -ArgumentList "--mode","unattended","--unattendedmodeui","none","--prefix","C:\gstreamer"
+          if (!(Test-Path 'C:\gstreamer\1.0\msvc\bin\gst-inspect-1.0.exe')) { throw 'instalação do gstreamer falhou' }
+
+      - name: pkg-config
+        run: choco install -y pkgconfiglite
+
+      - name: cargo build
+        shell: pwsh
+        env:
+          GSTREAMER_1_0_ROOT_MSVC_X86_64: C:\gstreamer\1.0\msvc\
+          PKG_CONFIG_PATH: C:\gstreamer\1.0\msvc\lib\pkgconfig
+        run: cargo build --release --manifest-path client/Cargo.toml
+
+      - name: whipsink no runtime?
+        shell: pwsh
+        run: |
+          $env:PATH = 'C:\gstreamer\1.0\msvc\bin;' + $env:PATH
+          & C:\gstreamer\1.0\msvc\bin\gst-inspect-1.0.exe whipsink
+          & C:\gstreamer\1.0\msvc\bin\gst-inspect-1.0.exe d3d11screencapturesrc
+          if ($LASTEXITCODE -ne 0) { throw 'captura d3d11 ausente' }
+
+      - name: empacotar zip portátil
+        shell: pwsh
+        run: |
+          $dst = 'FockyTV-Share-win64'
+          New-Item $dst -ItemType Directory -Force | Out-Null
+          Copy-Item client\target\release\fockytv-share.exe $dst
+          Copy-Item helper\audio-helper.exe $dst
+          Copy-Item config.json $dst
+          # runtime: dlls do bin + plugins; pesado mas à prova de dependência faltando
+          Copy-Item C:\gstreamer\1.0\msvc\bin\*.dll $dst
+          New-Item "$dst\gstreamer-1.0" -ItemType Directory -Force | Out-Null
+          Copy-Item C:\gstreamer\1.0\msvc\lib\gstreamer-1.0\*.dll "$dst\gstreamer-1.0"
+          @'
+          @echo off
+          rem FockyTV Share portatil: usa o runtime gstreamer empacotado
+          set PATH=%~dp0;%PATH%
+          set GST_PLUGIN_PATH=%~dp0gstreamer-1.0
+          set GST_PLUGIN_SYSTEM_PATH_1_0=%~dp0gstreamer-1.0
+          start "" "%~dp0fockytv-share.exe" %*
+          '@ | Out-File "$dst\FockyTV-Share.cmd" -Encoding ascii
+          Compress-Archive $dst FockyTV-Share-win64.zip
+          (Get-Item FockyTV-Share-win64.zip).Length / 1MB
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FockyTV-Share-win64
+          path: FockyTV-Share-win64.zip

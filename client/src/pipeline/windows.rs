@@ -1,43 +1,45 @@
-use std::os::fd::AsRawFd;
+use std::os::fd::OwnedFd;
 
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 
 use super::Live;
-use crate::audio::{self, AudioMode};
+use crate::audio::{self, AudioTarget};
 use crate::config::{bitrate_for, Config};
 
-/// Monta e sobe o pipeline completo de publicação:
+/// Pipeline Windows:
 ///
-///   pipewiresrc → 60fps nativo → openh264 → rtph264pay ┐
-///                                                      ├→ whipsink → WHIP
-///   pw-cat → appsrc → opus → rtpopuspay ───────────────┘
+///   d3d11screencapturesrc (monitor OU window-handle via WGC) → openh264 ┐
+///                                                                      ├→ whipsink
+///   audio-helper.exe (WASAPI por processo) → appsrc → opus ───────────┘
 ///
-/// A resolução nunca sobe e nunca re-escala: videorate drop-only derruba o
-/// que passar do fps configurado. O bitrate inicial é estimado pelo tamanho
-/// (lógico) do portal e afinado depois que os caps reais negociarem.
+/// A captura sai em memória D3D11: o d3d11download traz pra RAM antes do
+/// videoconvert. Mesma cadeia de qualidade do Linux: 60fps drop-only,
+/// resolução nativa, bitrate pela resolução.
 pub fn build(
-    fd: std::os::fd::OwnedFd,
-    node: u32,
-    size: Option<(i32, i32)>,
-    mode: AudioMode,
+    pick: &crate::picker::windows::Pick,
+    target: AudioTarget,
     cfg: &Config,
 ) -> Result<(Live, audio::Running), String> {
-    let fd_raw = fd.as_raw_fd();
-    let (w, h) = size.unwrap_or((1920, 1080));
-    let bitrate = bitrate_for(w.unsigned_abs(), h.unsigned_abs(), cfg.max_bitrate);
-    let gop = (cfg.fps * 2).max(30);
-    // FOCKYTV_TEST_VIDEO=1 troca a fonte por videotestsrc (diagnóstico sem portal)
-    let source = if std::env::var("FOCKYTV_TEST_VIDEO").is_ok() {
-        format!("videotestsrc is-live=true pattern=ball")
+    let source = if pick.monitor != 0 {
+        format!(
+            "d3d11screencapturesrc monitor-handle={} show-cursor=true",
+            pick.monitor
+        )
     } else {
-        format!("pipewiresrc fd={fd_raw} path={node} keepalive-time=1000")
+        format!(
+            "d3d11screencapturesrc window-handle={} show-cursor=true",
+            pick.hwnd
+        )
     };
+    let bitrate = bitrate_for(pick.width.unsigned_abs(), pick.height.unsigned_abs(), cfg.max_bitrate);
+    let gop = (cfg.fps * 2).max(30);
 
     let launch = format!(
         r#"
         {source}
+        ! d3d11download
         ! queue leaky=downstream max-size-buffers=2 max-size-time=0
         ! videorate drop-only=true
         ! capsfilter name=vcaps caps=video/x-raw,framerate={fps}/1
@@ -64,10 +66,10 @@ pub fn build(
         key = cfg.display_name,
         abr = cfg.audio_bitrate,
     );
-
     if std::env::var("FOCKYTV_DUMP_LAUNCH").is_ok() {
         eprintln!("[fockytv] launch:\n{launch}");
     }
+
     let pipeline = gst::parse::launch(&launch)
         .map_err(|e| format!("pipeline: {e}"))?
         .dynamic_cast::<gst::Pipeline>()
@@ -86,20 +88,15 @@ pub fn build(
         .field("layout", "interleaved")
         .build());
 
-    // FOCKYTV_DOT=1 + GST_DEBUG_DUMP_DOT_DIR=/tmp → grafo do pipeline em .dot
-    if std::env::var("FOCKYTV_DOT").is_ok() {
-        pipeline.debug_to_dot_file(gst::DebugGraphDetails::all(), "fockytv-share");
-    }
-
     pipeline
         .set_state(gst::State::Playing)
         .map_err(|e| format!("play: {e}"))?;
 
-    let running = audio::linux::start(mode, appsrc);
+    let running = audio::windows::start(target, appsrc);
     Ok((
         Live {
             pipeline,
-            fd: Some(fd),
+            fd: None::<OwnedFd>,
         },
         running,
     ))
