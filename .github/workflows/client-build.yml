@@ -28,7 +28,8 @@ jobs:
     runs-on: windows-latest
     needs: helper
     env:
-      GSTVER: "1.28.7"
+      # caminho do choco (gstreamer package)
+      GST: "C:\\Program Files\\gstreamer\\1.0\\msvc_x86_64"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -42,7 +43,7 @@ jobs:
       - name: gstreamer ok?
         shell: pwsh
         run: |
-          if (!(Test-Path 'C:\gstreamer\1.0\msvc\bin\gst-inspect-1.0.exe')) { throw 'gstreamer não instalado' }
+          if (!(Test-Path "$env:GST\bin\gst-inspect-1.0.exe")) { throw 'gstreamer não instalado' }
 
       - name: pkg-config
         run: choco install -y pkgconfiglite
@@ -50,16 +51,16 @@ jobs:
       - name: cargo build
         shell: pwsh
         env:
-          GSTREAMER_1_0_ROOT_MSVC_X86_64: C:\gstreamer\1.0\msvc\
-          PKG_CONFIG_PATH: C:\gstreamer\1.0\msvc\lib\pkgconfig
+          GSTREAMER_1_0_ROOT_MSVC_X86_64: ${{ env.GST }}\
+          PKG_CONFIG_PATH: ${{ env.GST }}\lib\pkgconfig
         run: cargo build --release --manifest-path client/Cargo.toml
 
       - name: whipsink no runtime?
         shell: pwsh
         run: |
-          $env:PATH = 'C:\gstreamer\1.0\msvc\bin;' + $env:PATH
-          & C:\gstreamer\1.0\msvc\bin\gst-inspect-1.0.exe whipsink
-          & C:\gstreamer\1.0\msvc\bin\gst-inspect-1.0.exe d3d11screencapturesrc
+          $env:PATH = "$env:GST\bin;" + $env:PATH
+          & "$env:GST\bin\gst-inspect-1.0.exe" whipsink
+          & "$env:GST\bin\gst-inspect-1.0.exe" d3d11screencapturesrc
           if ($LASTEXITCODE -ne 0) { throw 'captura d3d11 ausente' }
 
       - name: empacotar zip portátil
@@ -71,9 +72,9 @@ jobs:
           Copy-Item helper\audio-helper.exe $dst
           Copy-Item config.json $dst
           # runtime: dlls do bin + plugins; pesado mas à prova de dependência faltando
-          Copy-Item C:\gstreamer\1.0\msvc\bin\*.dll $dst
+          Copy-Item "$env:GST\bin\*.dll" $dst
           New-Item "$dst\gstreamer-1.0" -ItemType Directory -Force | Out-Null
-          Copy-Item C:\gstreamer\1.0\msvc\lib\gstreamer-1.0\*.dll "$dst\gstreamer-1.0"
+          Copy-Item "$env:GST\lib\gstreamer-1.0\*.dll" "$dst\gstreamer-1.0"
           @'
           @echo off
           rem FockyTV Share portatil: usa o runtime gstreamer empacotado
