@@ -657,6 +657,10 @@ async function bootstrapDiscord () {
     const { inDiscord, initDiscord, discordDisplayName, restoreWebRTC } = await import('./discord.js?v=2')
     discord = inDiscord
     if (!inDiscord) return null
+    // dentro da Activity o chrome não serve pra nada — transmitir é
+    // bloqueado pelo Discord e os canais ficam lá fora: nasce no foco.
+    // Antes do init do SDK: mesmo se ele falhar, estar no iframe basta.
+    setFocusMode(true)
     // tem que rodar antes do loop de codecs: getCapabilities também some
     const how = await restoreWebRTC()
     if (how) console.info('[fockytv/discord] WebRTC via iframe shim:', how)
@@ -2431,6 +2435,13 @@ function setFocusMode (on) {
   $('#focus-btn').setAttribute('aria-pressed', on)
   $('#focus-exit').hidden = !on
   if (on) focusExitPaint()
+  // a URL espelha o modo (replaceState: sem item novo no histórico) — o
+  // link fica compartilhável e o reload mantém o estado. Os demais query
+  // params (frame_id e cia. dentro do Discord) seguem intactos.
+  const u = new URL(location.href)
+  if (on) u.searchParams.set('focus', '1')
+  else u.searchParams.delete('focus')
+  history.replaceState(null, '', u)
   layoutFocusGrid()
 }
 
@@ -2446,6 +2457,10 @@ addEventListener('pointermove', () => {
   if (document.body.classList.contains('focus-mode')) focusExitPaint()
 })
 addEventListener('resize', layoutFocusGrid)
+
+// ?focus na URL carrega a página já no modo foco — o link pra colar no
+// Discord (ou abrir direto maximizado). Botão e Esc continuam valendo.
+if (new URLSearchParams(location.search).has('focus')) setFocusMode(true)
 
 
 function buildTile (st, kind = null) {
