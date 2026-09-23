@@ -24,7 +24,7 @@ pub enum AudioTarget {
 pub const RATE: u32 = feeder::RATE;
 
 /// mesma lista do app Electron (prefixo de nome do executável)
-const NEVER: &str = "Discord,FockyTV,fockytv-share";
+const NEVER: &str = "Discord,FockyTV,fockytv-share,electron";
 
 pub struct Running {
     cancel: Arc<tokio::sync::Notify>,
@@ -163,4 +163,3 @@ async fn sleep_or_cancel(cancel: &Arc<tokio::sync::Notify>, secs: u64) {
         _ = cancel.notified() => {}
     }
 }
-

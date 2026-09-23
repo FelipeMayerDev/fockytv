@@ -9,8 +9,8 @@ nativa, sem re-escala.
 
 - Inicie o app: aparece o ícone no tray (clique no ícone = mesmo botão de
   compartilhar).
-- **Compartilhar/Parar**: item de menu do tray, clique no ícone, ou o atalho
-  do compositor (abaixo). É um toggle: aperta de novo, para.
+- **Compartilhar/Parar**: item de menu do tray, clique no ícone, ou o atalho.
+  Ao iniciar, escolha 15/30/60 fps e 2/6/12 Mbps; a escolha vale pela sessão.
 - Escolha **Monitor** ou **Janela** no diálogo do portal. A escolha fica
   memorizada (restore token): na próxima vez o diálogo já abre com ela.
 - Áudio:
@@ -22,6 +22,8 @@ nativa, sem re-escala.
   - **Monitor** → todo o áudio do sistema **menos Discord e FockyTV**
     (a conversa é privada e o canal de música local voltaria como eco).
 - Ao vivo, o tray mostra a resolução/fps negociados.
+- **Atalho**: no Linux, “Configurar tecla de atalho…” abre o portal do desktop;
+  no Windows, escolha Ctrl+Shift+F10/F11/F12 no menu do tray.
 
 ### Atalho no Hyprland
 
@@ -51,6 +53,9 @@ Electron:
 `displayName` é a stream key (o nick). `maxBitrate` 0 = automático pela
 resolução (1080p→10M, 1440p→16M, 4K→24M). Env `FOCKYTV_SERVER` /
 `FOCKYTV_NAME` sobrescrevem (útil pra teste na LAN).
+
+O menu de qualidade substitui `fps` e `maxBitrate` apenas durante o
+compartilhamento atual.
 
 ## Build
 

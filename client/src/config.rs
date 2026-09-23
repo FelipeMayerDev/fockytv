@@ -11,6 +11,7 @@ pub struct Config {
     /// 0 = escolher pela resolução da tela
     pub max_bitrate: u64,
     pub audio_bitrate: u32,
+    pub hotkey: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -29,6 +30,8 @@ struct Raw {
     #[serde(default)]
     #[serde(rename = "audioBitrate")]
     audio_bitrate: Option<u32>,
+    #[serde(default)]
+    hotkey: Option<String>,
 }
 
 /// Onde procurar o config.json: variável dedicada, ao lado do AppImage,
@@ -82,6 +85,7 @@ pub fn load() -> Result<Config, String> {
         fps: raw.fps.filter(|f| *f > 0 && *f <= 240).unwrap_or(60),
         max_bitrate: raw.max_bitrate.unwrap_or(0),
         audio_bitrate: raw.audio_bitrate.unwrap_or(192_000),
+        hotkey: load_hotkey().or(raw.hotkey),
     };
     if cfg.server_url.is_empty() {
         return Err(format!(
@@ -101,6 +105,32 @@ pub fn load() -> Result<Config, String> {
             p.display(), cfg.server_url, cfg.display_name, cfg.fps);
     }
     Ok(cfg)
+}
+
+#[cfg(target_os = "windows")]
+pub fn save_hotkey(hotkey: &str) -> Result<(), String> {
+    let path = settings_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("criar {}: {e}", dir.display()))?;
+    }
+    std::fs::write(&path, format!("{{\"hotkey\":{}}}", serde_json::to_string(hotkey).unwrap()))
+        .map_err(|e| format!("salvar {}: {e}", path.display()))
+}
+
+fn load_hotkey() -> Option<String> {
+    serde_json::from_str::<Raw>(&std::fs::read_to_string(settings_path()).ok()?)
+        .ok()?
+        .hotkey
+}
+
+fn settings_path() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    let base = std::env::var_os("APPDATA").map(PathBuf::from);
+    #[cfg(not(target_os = "windows"))]
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".config")));
+    base.unwrap_or_else(|| PathBuf::from(".")).join("fockytv-share/settings.json")
 }
 
 /// Bitrate de vídeo pela quantidade de pixels — 60fps em resolução nativa

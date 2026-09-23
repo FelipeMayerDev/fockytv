@@ -7,6 +7,8 @@ mod pipeline;
 mod tray;
 #[cfg(target_os = "linux")]
 mod video_pw;
+#[cfg(target_os = "linux")]
+mod shortcut;
 
 use gstreamer as gst;
 use gstreamer::prelude::*;
@@ -14,8 +16,10 @@ use tokio::sync::mpsc;
 
 enum Cmd {
     Share,
+    StartShare { fps: u32, bitrate: u64 },
     Stop,
     Quit,
+    ConfigureHotkey,
     ChooseAudio(u32),
     RefreshStatus,
     /// erro no pipeline (whipsink bateu 400 de host fantasma etc.) → tenta
@@ -42,6 +46,7 @@ struct Session {
     live: pipeline::Live,
     audio: audio::Running,
     source: Source,
+    cfg: config::Config,
     retries: u32,
 }
 
@@ -68,7 +73,7 @@ async fn main() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     #[cfg(unix)]
     control::listen(tx.clone()).await;
-    let tray = tray::spawn(tx.clone());
+    let tray = tray::spawn(tx.clone(), cfg.hotkey.clone());
 
     // Ctrl+C / SIGTERM → parar limpo (DELETE do WHIP)
     {
@@ -99,12 +104,23 @@ async fn main() {
                 if session.is_some() {
                     stop_session(&mut session, &tray).await;
                 } else {
-                    session = start_share(&cfg, &tray, &tx).await;
+                    tray.set(tray::State::ChoosingQuality);
                 }
             }
+            Cmd::StartShare { fps, bitrate } if session.is_none() => {
+                let mut share_cfg = cfg.clone();
+                share_cfg.fps = fps;
+                share_cfg.max_bitrate = bitrate;
+                session = start_share(share_cfg, &tray, &tx).await;
+            }
+            Cmd::StartShare { .. } => {}
             Cmd::Stop => stop_session(&mut session, &tray).await,
             Cmd::PipelineFailed => {
-                session = restart_or_giveup(session, &cfg, &tray, &tx).await;
+                session = restart_or_giveup(session, &tray, &tx).await;
+            }
+            Cmd::ConfigureHotkey => {
+                #[cfg(target_os = "linux")]
+                shortcut::configure(tx.clone());
             }
             Cmd::ChooseAudio(pid) => {
                 if let Some(s) = &mut session {
@@ -120,7 +136,7 @@ async fn main() {
             }
             Cmd::RefreshStatus => {
                 if let Some(s) = &session {
-                    let _ = pipeline::refine_bitrate(&s.live, cfg.max_bitrate);
+                    let _ = pipeline::refine_bitrate(&s.live, s.cfg.max_bitrate);
                     let text = status_text(&s.live);
                     tray.set(tray::State::Live { status: text });
                 }
@@ -162,11 +178,11 @@ async fn teardown(mut s: Session) -> Source {
 /// pipeline com a mesma fonte em vez de derrubar o compartilhamento.
 async fn restart_or_giveup(
     session: Option<Session>,
-    cfg: &config::Config,
     tray: &tray::TrayHandle,
     tx: &mpsc::UnboundedSender<Cmd>,
 ) -> Option<Session> {
     let mut retries = session.as_ref().map(|s| s.retries).unwrap_or(0);
+    let cfg = session.as_ref()?.cfg.clone();
     let source = teardown(session?).await;
     loop {
         retries += 1;
@@ -178,9 +194,9 @@ async fn restart_or_giveup(
         eprintln!("[fockytv] reconectando ({retries}/5) em 3s…");
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         #[cfg(target_os = "linux")]
-        let built = pipeline::build(&source.fd, source.node, source.size, source.mode, cfg);
+        let built = pipeline::build(&source.fd, source.node, source.size, source.mode, &cfg);
         #[cfg(target_os = "windows")]
-        let built = pipeline::build(&source.pick, source.target, cfg);
+        let built = pipeline::build(&source.pick, source.target, &cfg);
         match built {
             Ok((live, audio)) => {
                 watch_bus(&live, tx.clone());
@@ -191,6 +207,7 @@ async fn restart_or_giveup(
                     live,
                     audio,
                     source,
+                    cfg,
                     retries,
                 });
             }
@@ -209,7 +226,7 @@ fn status_text(live: &pipeline::Live) -> String {
 }
 
 async fn start_share(
-    cfg: &config::Config,
+    cfg: config::Config,
     tray: &tray::TrayHandle,
     tx: &mpsc::UnboundedSender<Cmd>,
 ) -> Option<Session> {
@@ -217,9 +234,9 @@ async fn start_share(
     tray.set_disambig(vec![]);
 
     #[cfg(target_os = "linux")]
-    let (live, running, source, cands) = start_linux(cfg, tray).await?;
+    let (live, running, source, cands) = start_linux(&cfg, tray).await?;
     #[cfg(target_os = "windows")]
-    let (live, running, source, cands) = start_windows(cfg, tray).await?;
+    let (live, running, source, cands) = start_windows(&cfg, tray).await?;
 
     // erros do pipeline derrubam a sessão sozinhos (bus → Stop)
     watch_bus(&live, tx.clone());
@@ -240,6 +257,7 @@ async fn start_share(
         live,
         audio: running,
         source,
+        cfg,
         retries: 0,
     })
 }

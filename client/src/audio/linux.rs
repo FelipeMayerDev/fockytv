@@ -77,10 +77,17 @@ fn eligible(p: &HashMap<String, Value>, own_node: &str, mode: &AudioMode) -> boo
     match mode {
         AudioMode::Pending => false,
         AudioMode::OnlyPid(pid) => vi64(p, "application.process.pid") == Some(*pid as i64),
-        AudioMode::Exclude => {
-            let bin = vstr(p, "application.process.binary").unwrap_or("").to_lowercase();
-            !AUDIO_NEVER.iter().any(|n| bin.starts_with(n))
-        }
+        AudioMode::Exclude => ![
+            "application.process.binary",
+            "application.name",
+            "node.name",
+        ]
+        .iter()
+        .filter_map(|key| vstr(p, key))
+        .any(|name| {
+            let name = name.to_lowercase();
+            AUDIO_NEVER.iter().any(|blocked| name.starts_with(blocked))
+        }),
     }
 }
 
@@ -276,8 +283,15 @@ mod tests {
         assert!(!eligible(&p, "fockytv-capture", &AudioMode::Exclude));
         p.insert(
             "application.process.binary".into(),
+            Value::String("electron".into()),
+        );
+        p.insert("application.name".into(), Value::String("Discord".into()));
+        assert!(!eligible(&p, "fockytv-capture", &AudioMode::Exclude));
+        p.insert(
+            "application.process.binary".into(),
             Value::String("firefox".into()),
         );
+        p.remove("application.name");
         assert!(eligible(&p, "fockytv-capture", &AudioMode::Exclude));
         p.insert(
             "application.process.binary".into(),
