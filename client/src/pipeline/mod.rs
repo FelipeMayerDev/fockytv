@@ -6,6 +6,7 @@ use gstreamer::prelude::*;
 /// fd por número; se ele fechar, a captura morre).
 pub struct Live {
     pub pipeline: gst::Pipeline,
+    #[cfg(target_os = "linux")]
     #[allow(dead_code)] // viva apenas para manter o fd aberto
     pub fd: Option<std::os::fd::OwnedFd>,
 }

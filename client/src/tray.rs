@@ -205,8 +205,8 @@ mod imp {
 
     impl TrayHandle {
         pub fn set(&self, s: State) {
-            *self.state.lock().unwrap() = s;
-            let _ = self.to_ui.send(s.clone());
+            *self.state.lock().unwrap() = s.clone();
+            let _ = self.to_ui.send(s);
         }
         pub fn set_disambig(&self, _c: Vec<Candidate>) {
             // Windows conhece o hwnd desde o picker: nunca desambigua
@@ -231,8 +231,8 @@ mod imp {
     fn ui_thread(tx: UnboundedSender<Cmd>, from_main: mpsc::Receiver<State>) -> ! {
         use global_hotkey::hotkey::{Code, HotKey, Modifiers};
         use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
-        use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
-        use tray_icon::{TrayIcon, TrayIconBuilder};
+        use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+        use tray_icon::TrayIconBuilder;
 
         let share = MenuItem::with_id("share", "Compartilhar tela", true, None);
         let stop = MenuItem::with_id("stop", "Parar", false, None);
@@ -255,10 +255,7 @@ mod imp {
 
         // Ctrl+Shift+F12 = toggle (hotkey configurável fica pra depois)
         let hotkeys = GlobalHotKeyManager::new().expect("hotkey manager");
-        let hk = HotKey::builder()
-            .modifiers(Modifiers::CONTROL | Modifiers::SHIFT)
-            .key(Code::F12)
-            .build();
+        let hk = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F12);
         hotkeys.register(hk).expect("hotkey");
 
         let menu_rx = MenuEvent::receiver();

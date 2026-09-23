@@ -173,8 +173,16 @@ async fn start_linux(
     let mut mode = audio::AudioMode::Exclude;
     let mut cands: Vec<picker::Candidate> = vec![];
     if pick.is_window {
-        let clients = picker::linux::hypr_clients().await;
-        let mut hits = picker::linux::match_window(&clients, pick.size, pick.position);
+        let (clients, scales) =
+            tokio::join!(picker::linux::hypr_clients(), picker::linux::hypr_scales());
+        let mut hits = picker::linux::match_window(&clients, pick.size, &scales);
+        eprintln!(
+            "[fockytv] match: {} clients, scales {:?}, {} hits (size {:?})",
+            clients.len(),
+            scales,
+            hits.len(),
+            pick.size
+        );
         if hits.len() > 1 {
             // desempata: se só uma das janelas empatadas toca áudio, é ela
             if let Some(pids) = audio_pids().await {

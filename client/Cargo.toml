@@ -11,7 +11,6 @@ path = "src/main.rs"
 [dependencies]
 gstreamer = "0.25"
 gstreamer-app = "0.25"
-ashpd = { version = "0.13", features = ["tokio", "screencast"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "io-util", "net", "sync", "signal"] }
 futures = "0.3"
 serde = { version = "1", features = ["derive"] }
@@ -19,12 +18,14 @@ serde_json = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "0.3", features = ["blocking"] }
+ashpd = { version = "0.13", features = ["tokio", "screencast"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",

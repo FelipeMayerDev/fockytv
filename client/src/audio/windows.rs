@@ -33,7 +33,7 @@ pub struct Running {
 }
 
 impl Running {
-    pub fn set_mode(&self, _m: ()) {} // alvo é fixo no início (hwnd conhecido)
+    pub fn set_mode(&self, _m: super::AudioMode) {} // alvo é fixo: hwnd conhecido no picker
     pub async fn stop(mut self) {
         self.cancel.notify_waiters();
         for t in self.tasks.drain(..) {
@@ -109,7 +109,7 @@ pub fn start(target: AudioTarget, appsrc: gst_app::AppSrc) -> Running {
 
                 // header FPCM: valida e esgota (16 bytes)
                 let mut header = [0u8; 16];
-                if read_exact_or_die(&mut stdout, &mut header).await.is_err() {
+                if stdout.read_exact(&mut header).await.is_err() {
                     eprintln!("[fockytv] helper morreu antes do header (gen {gen})");
                     sleep_or_cancel(&cancel, 3).await;
                     continue;
@@ -164,9 +164,3 @@ async fn sleep_or_cancel(cancel: &Arc<tokio::sync::Notify>, secs: u64) {
     }
 }
 
-async fn read_exact_or_die<S: AsyncReadExt + Unpin>(
-    s: &mut S,
-    buf: &mut [u8],
-) -> std::io::Result<()> {
-    s.read_exact(buf).await
-}

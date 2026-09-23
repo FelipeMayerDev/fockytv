@@ -1,5 +1,3 @@
-use std::os::fd::OwnedFd;
-
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
@@ -94,10 +92,7 @@ pub fn build(
 
     let running = audio::windows::start(target, appsrc);
     Ok((
-        Live {
-            pipeline,
-            fd: None::<OwnedFd>,
-        },
+        Live { pipeline },
         running,
     ))
 }

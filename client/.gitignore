@@ -2,3 +2,4 @@
 build-appdir/
 build/
 FockyTV-Share-*.AppImage
+config.json

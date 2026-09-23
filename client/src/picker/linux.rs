@@ -125,36 +125,58 @@ pub async fn hypr_clients() -> Vec<HyprClient> {
     }
 }
 
-/// Candidatos cuja geometria casa com a do stream (tolerância pequena pra
-/// janela redimensionada entre o snapshot e a leitura).
+/// Escalas dos monitores (o portal entrega o tamanho do stream em pixels
+/// FÍSICOS; o hyprctl lista as janelas em lógico — sem dividir pela escala
+/// o casamento nunca bate em monitor com scale ≠ 1).
+pub async fn hypr_scales() -> Vec<f64> {
+    let out = tokio::process::Command::new("hyprctl")
+        .args(["monitors", "-j"])
+        .output()
+        .await;
+    let mut scales = vec![1.0];
+    if let Ok(o) = out {
+        if let Ok(list) = serde_json::from_slice::<Vec<serde_json::Value>>(&o.stdout) {
+            for m in list {
+                if let Some(s) = m.get("scale").and_then(|s| s.as_f64()) {
+                    if s > 0.0 && !scales.contains(&s) {
+                        scales.push(s);
+                    }
+                }
+            }
+        }
+    }
+    scales
+}
+
+/// Candidatos cuja geometria casa com a do stream. Casa por TAMANHO em cada
+/// escala de monitor — a posição que o portal entrega pra janela não são
+/// coordenadas globais (aqui veio (0,0)) e só atrapalha. Mesmo pid em
+/// várias janelas (abas maximizadas) conta uma vez.
 pub fn match_window(
     clients: &[HyprClient],
     size: Option<(i32, i32)>,
-    position: Option<(i32, i32)>,
+    scales: &[f64],
 ) -> Vec<Candidate> {
     let Some((w, h)) = size else { return vec![] };
     let tol = 4i64;
-    clients
-        .iter()
-        .filter(|c| c.mapped && c.pid > 0 && c.at.len() == 2 && c.size.len() == 2)
-        .filter(|c| {
-            let ok_size = (c.size[0] as i64 - w as i64).abs() <= tol
-                && (c.size[1] as i64 - h as i64).abs() <= tol;
-            let ok_pos = match position {
-                Some((x, y)) => {
-                    (c.at[0] as i64 - x as i64).abs() <= tol
-                        && (c.at[1] as i64 - y as i64).abs() <= tol
-                }
-                None => true,
-            };
-            ok_size && ok_pos
-        })
-        .map(|c| Candidate {
-            pid: c.pid as u32,
-            class: c.class.clone(),
-            title: c.title.clone(),
-        })
-        .collect()
+    let mut out: Vec<Candidate> = vec![];
+    for c in clients {
+        if !c.mapped || c.pid <= 0 || c.size.len() != 2 {
+            continue;
+        }
+        let ok = scales.iter().any(|s| {
+            (c.size[0] as f64 - w as f64 / s).abs() <= tol as f64
+                && (c.size[1] as f64 - h as f64 / s).abs() <= tol as f64
+        });
+        if ok && !out.iter().any(|x| x.pid == c.pid as u32) {
+            out.push(Candidate {
+                pid: c.pid as u32,
+                class: c.class.clone(),
+                title: c.title.clone(),
+            });
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -179,7 +201,7 @@ mod tests {
             client("game", 200, 100, 50, 1280, 720),
             client("unmapped", 0, 0, 0, 1280, 720),
         ];
-        let hit = match_window(&clients, Some((1280, 720)), Some((100, 50)));
+        let hit = match_window(&clients, Some((1280, 720)), &[1.0]);
         assert_eq!(hit.len(), 1);
         assert_eq!(hit[0].pid, 200);
     }
@@ -190,7 +212,21 @@ mod tests {
             client("firefox", 100, 0, 0, 1920, 1080),
             client("outro", 300, 500, 500, 1920, 1080),
         ];
-        let hit = match_window(&clients, Some((1920, 1080)), None);
+        // mesmo tamanho = 2 pids distintos: ambos (desambiguação decide)
+        let hit = match_window(&clients, Some((1920, 1080)), &[1.0]);
         assert_eq!(hit.len(), 2);
+    }
+
+    #[test]
+    fn monitor_com_scale_casa_em_pixels_fisicos() {
+        // portal: 1894×1098 físico; hyprctl: 1184×686 lógico (scale 1.6)
+        // duas janelas do MESMO pid com mesma geometria: 1 candidato
+        let clients = vec![
+            client("brave", 42, 8, 56, 1184, 686),
+            client("brave", 42, 8, 56, 1184, 686),
+        ];
+        let hit = match_window(&clients, Some((1894, 1098)), &[1.0, 1.6]);
+        assert_eq!(hit.len(), 1);
+        assert_eq!(hit[0].pid, 42);
     }
 }
