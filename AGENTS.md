@@ -24,6 +24,10 @@ não dependem disso.
 - Os arquivos de `ui/` são bind-mounts de arquivo único no container
   broadcast-box: depois de um `git pull` que os altere, é preciso
   `docker compose restart broadcast-box` (mount segue o inode antigo).
+- CSS/JS de `ui/assets/` é cacheado 4h pela Cloudflare e pelo navegador
+  (a origem não manda Cache-Control): todo commit que alterar um asset
+  DEVE bumpar o `?v=` do `<link>` correspondente em `ui/index.html`,
+  senão a produção segue servindo o arquivo velho na mesma URL.
 - O fluxo de release assume os 5 assets (AppImage, Setup.exe, blockmap,
   latest-linux.yml, latest.yml); o Windows compila no GitHub Actions
   (`.github/workflows/release.yml`, dispara na tag).
