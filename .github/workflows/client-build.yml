@@ -37,12 +37,11 @@ jobs:
           path: helper/
 
       - name: GStreamer MSVC runtime
+        run: choco install -y gstreamer
+        shell: cmd
+      - name: gstreamer ok?
         shell: pwsh
         run: |
-          # winget usa as flags silenciosas certas do instalador (o direto
-          # travou esperando UI no runner); timeout pra falhar rápido
-          $p = Start-Process -FilePath winget -ArgumentList "install","--id","GStreamer.GStreamer","--exact","--silent","--accept-package-agreements","--accept-source-agreements" -PassThru -NoNewWindow
-          if (-not ($p.WaitForExit(480000))) { $p.Kill(); throw 'winget travou (8min)' }
           if (!(Test-Path 'C:\gstreamer\1.0\msvc\bin\gst-inspect-1.0.exe')) { throw 'gstreamer não instalado' }
 
       - name: pkg-config
