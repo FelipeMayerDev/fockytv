@@ -44,6 +44,16 @@ jobs:
         shell: pwsh
         run: |
           if (!(Test-Path "$env:GST\bin\gst-inspect-1.0.exe")) { throw 'gstreamer não instalado' }
+      - name: GStreamer devel (headers + pkg-config)
+        shell: pwsh
+        run: |
+          # o MSI do choco é só runtime; o devel traz os .pc/headers que os
+          # crates -sys precisam. MSI silencioso via msiexec /qn (o .exe do
+          # instalador oficial travava esperando UI no runner).
+          $v = '1.26.9'
+          curl.exe -sSL -o devel.msi "https://gstreamer.freedesktop.org/data/pkg/windows/$v/msvc/gstreamer-1.0-devel-msvc-x86_64-$v.msi"
+          Start-Process -Wait -FilePath msiexec.exe -ArgumentList '/i','devel.msi','/qn'
+          if (!(Test-Path "$env:GST\lib\pkgconfig\glib-2.0.pc")) { throw 'devel sem pkgconfig' }
 
       - name: pkg-config
         run: choco install -y pkgconfiglite
