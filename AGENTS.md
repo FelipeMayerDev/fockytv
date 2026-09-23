@@ -35,6 +35,17 @@ O tema vive em `ui/assets/theme.css` (tokens) e `ui/assets/app.css`
 `docs/design-system.md`. Cor/raio/tipo novos entram como token, não como
 literal no componente.
 
+## Client de share (client/)
+
+Mini app Rust só de compartilhamento (tray + WHIP, 60fps nativo). Build:
+`cargo build --release`; AppImage: `client/package-appimage.sh` (embute o
+`config.json` da raiz; um config ao lado do AppImage tem prioridade). O
+vídeo NÃO usa gstpipewiresrc: no PipeWire 1.6 ele dead-locka com encoder na
+cadeia (pipewire#5459) — a captura é PipeWire nativo (`src/video_pw.rs`)
+empurrando num appsrc. Diagnóstico: `examples/portal-min.rs` (matriz de
+modos que isolou o bug) e `examples/publish-check.rs` (WHIP ponta a ponta).
+Hotkey no Linux = bind do compositor chamando `fockytv-share --share`.
+
 ## Áudio sem o Discord
 
 - **App (Electron):** automático. Windows = helper WASAPI (`--mix-except`),
