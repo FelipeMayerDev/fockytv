@@ -17,7 +17,7 @@
      e CSS velho (componente novo aparece sem estilo até a cache expirar).
      Suba o número junto com qualquer mudança em assets/. -->
 <link rel="stylesheet" href="assets/theme.css?v=1">
-<link rel="stylesheet" href="assets/app.css?v=7">
+<link rel="stylesheet" href="assets/app.css?v=9">
 
 <!-- gif do "du bist gut genug": cobre a tela enquanto toca a abertura -->
 <div id="intro-gif"></div>
@@ -45,6 +45,15 @@
       <img src="assets/logo.png" alt="FockyTV">
     </a>
     <span class="rail-sep"></span>
+    <!-- modo foco: o chrome inteiro some e a live fica com a tela (Esc volta) -->
+    <button class="ghost icon" id="focus-btn" title="Modo foco — só as lives"
+            aria-label="Modo foco" aria-pressed="false">
+      <svg viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2"/>
+        <path d="M16 4h2a2 2 0 0 1 2 2v2"/>
+        <path d="M4 16v2a2 2 0 0 0 2 2h2"/>
+        <path d="M20 16v2a2 2 0 0 1-2 2h-2"/>
+        <circle cx="12" cy="12" r="2.5"/></svg>
+    </button>
     <div class="rail-bottom">
       <!-- update pronto: só aparece quando o download termina; clicar reinicia -->
       <button class="ghost icon" id="update-btn" hidden
@@ -435,6 +444,16 @@
   </div><!-- /main-col -->
 </div><!-- /shell -->
 
+<!-- sair do modo foco: fantasma no canto, aparece ao mexer o mouse (ou Esc) -->
+<button class="glass" id="focus-exit" hidden title="Sair do modo foco (Esc)"
+        aria-label="Sair do modo foco">
+  <svg viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2"/>
+    <path d="M16 4h2a2 2 0 0 1 2 2v2"/>
+    <path d="M4 16v2a2 2 0 0 0 2 2h2"/>
+    <path d="M20 16v2a2 2 0 0 1-2 2h-2"/>
+    <circle cx="12" cy="12" r="2.5"/></svg>
+</button>
+
 <div id="toast"></div>
 
 <dialog id="dlg-cookies">
@@ -638,6 +657,10 @@ async function bootstrapDiscord () {
     const { inDiscord, initDiscord, discordDisplayName, restoreWebRTC } = await import('./discord.js?v=2')
     discord = inDiscord
     if (!inDiscord) return null
+    // dentro da Activity o chrome não serve pra nada — transmitir é
+    // bloqueado pelo Discord e os canais ficam lá fora: nasce no foco.
+    // Antes do init do SDK: mesmo se ele falhar, estar no iframe basta.
+    setFocusMode(true)
     // tem que rodar antes do loop de codecs: getCapabilities também some
     const how = await restoreWebRTC()
     if (how) console.info('[fockytv/discord] WebRTC via iframe shim:', how)
@@ -1068,6 +1091,17 @@ document.querySelectorAll('#tabs .tab').forEach(b => {
     else if (fixedKey !== t) { clipMode = false; openFixed(t) }
   }
 })
+
+// logo do rail: clicar volta pra home. No solo, desfoca (barato); fora da
+// home, abre a grade Ao vivo. Já na home em grade não faz nada — reconstruir
+// os tiles daria um blip nas lives que já estão abertas.
+$('#brand').onclick = e => {
+  e.preventDefault()
+  const grid = $('#grid-live')
+  if (grid.classList.contains('solo')) toggleFocus(focusKey)
+  else if (grid.style.display === 'none' || clipMode)
+    document.querySelector('#tabs .tab[data-tab="live"]')?.click()
+}
 
 function showPlayer (key) {
   $('#player-wrap').classList.toggle('on', !!key)
@@ -2308,8 +2342,23 @@ function openJam () {
 // Os tiles persistem entre polls: o refresh cria/destrói sessões conforme a
 // listagem muda, em vez de regerar cards. Áudio vem mutado — vários streams
 // com som aberto ao mesmo tempo é cacofonia; o usuário liga o que quiser.
+
+// parse defensivo de localStorage: roda no topo do módulo, e um storage
+// corrompido (ou bloqueado, em aba anônima) derrubaria o script inteiro
+// antes da UI subir
+const lsJson = (k, def) => {
+  try { return JSON.parse(localStorage.getItem(k)) ?? def } catch { return def }
+}
+
 const tiles = new Map()   // streamKey -> { el, video, pc, loading, vol, on }
 let focusKey = null       // tile em destaque (modo foco), ou null
+
+// volume/mudo que quem assiste escolheu pra cada transmissão. O tile é
+// reconstruído quando a pessoa para de compartilhar e volta — sem isso, o
+// som renasceria no máximo a cada reentrada.
+const streamVol = new Map(Object.entries(lsJson('stream-vol', {})))
+const streamVolSave = () =>
+  localStorage.setItem('stream-vol', JSON.stringify(Object.fromEntries(streamVol)))
 
 function releaseTiles () {
   for (const [, t] of tiles) {
@@ -2322,6 +2371,7 @@ function releaseTiles () {
   const grid = $('#grid-live')
   grid.classList.remove('solo')
   delete grid.dataset.n
+  layoutFocusGrid()
 }
 
 function toggleFocus (key) {
@@ -2333,7 +2383,85 @@ function toggleFocus (key) {
     t.el.classList.toggle('focus', k === focusKey)
     t.el.style.order = k === focusKey ? '-1' : ''
   }
+  layoutFocusGrid()
 }
+
+// ── modo foco: o botão do rail esconde o chrome e a grade herda a janela ──
+// Uma live = full-bleed. Várias = mosaico com as colunas que maximizam a
+// área de cada tile (16:9) no aspecto da janela: ultrawide põe duas lado a
+// lado, tela mais quadrada empilha a partir de três. Clicar num tile foca
+// (solo, já existente); Esc ou o botão fantasma devolve o chrome.
+const TILE_AR = 16 / 9
+let focusHideTimer = 0
+
+function bestCols (n, w, h) {
+  // duas lives: lado a lado em tela deitada, empilhada no retrato — a área
+  // bruta empilharia também na quadrada, mas lado a lado é o que se espera
+  if (n === 2) return w >= h ? 2 : 1
+  let best = 1, bestArea = 0
+  for (let c = 1; c <= n; c++) {
+    const th = Math.min(h / Math.ceil(n / c), (w / c) / TILE_AR)
+    const area = th * th * TILE_AR
+    if (area >= bestArea) { bestArea = area; best = c }   // empate: mais colunas
+  }
+  return best
+}
+
+// aplica tira o mosaico: as colunas são inline (têm que vencer o caso
+// especial [data-n="3"] do CSS) e só existem no modo foco multi-view
+function layoutFocusGrid () {
+  const grid = $('#grid-live')
+  const on = document.body.classList.contains('focus-mode') &&
+    !grid.classList.contains('solo') && !grid.style.display && +grid.dataset.n > 1
+  if (!on) {
+    grid.style.gridTemplateColumns = grid.style.gridTemplateRows = ''
+    return
+  }
+  const n = +grid.dataset.n
+  const c = bestCols(n, grid.clientWidth, grid.clientHeight)
+  grid.style.gridTemplateColumns = `repeat(${c}, 1fr)`
+  grid.style.gridTemplateRows = `repeat(${Math.ceil(n / c)}, 1fr)`
+}
+
+function focusExitPaint () {
+  const exit = $('#focus-exit')
+  exit.classList.add('show')
+  clearTimeout(focusHideTimer)
+  focusHideTimer = setTimeout(() => exit.classList.remove('show'), 2200)
+}
+
+function setFocusMode (on) {
+  document.body.classList.toggle('focus-mode', on)
+  $('#focus-btn').setAttribute('aria-pressed', on)
+  $('#focus-exit').hidden = !on
+  if (on) focusExitPaint()
+  // a URL espelha o modo (replaceState: sem item novo no histórico) — o
+  // link fica compartilhável e o reload mantém o estado. Os demais query
+  // params (frame_id e cia. dentro do Discord) seguem intactos.
+  const u = new URL(location.href)
+  if (on) u.searchParams.set('focus', '1')
+  else u.searchParams.delete('focus')
+  history.replaceState(null, '', u)
+  layoutFocusGrid()
+}
+
+$('#focus-btn').onclick = () => setFocusMode(true)
+$('#focus-exit').onclick = () => setFocusMode(false)
+addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || !document.body.classList.contains('focus-mode')) return
+  if (document.querySelector('dialog[open]')) return   // Esc fecha o diálogo primeiro
+  setFocusMode(false)
+})
+// o botão de sair só acende quando há mouse na cena — vídeo limpo no resto
+addEventListener('pointermove', () => {
+  if (document.body.classList.contains('focus-mode')) focusExitPaint()
+})
+addEventListener('resize', layoutFocusGrid)
+
+// ?focus na URL carrega a página já no modo foco — o link pra colar no
+// Discord (ou abrir direto maximizado). Botão e Esc continuam valendo.
+if (new URLSearchParams(location.search).has('focus')) setFocusMode(true)
+
 
 function buildTile (st, kind = null) {
   const key = st.streamKey
@@ -2378,10 +2506,16 @@ function buildTile (st, kind = null) {
   // com o atributo muted mesmo assim, porque autoplay com som é barrado por
   // política do navegador e o vídeo nem começaria — o som entra logo depois,
   // quando já está tocando (ver abaixo).
-  const t = { el, video, pc: null, loading: false, vol: 1, on: true }
+  const t = { el, video, pc: null, loading: false,
+    ...{ vol: 1, on: true, ...streamVol.get(key) } }
+  el.querySelector('.s-volr').value = t.vol
   const applyVol = () => {
     video.volume = t.vol
     video.muted = !t.on || t.vol === 0
+  }
+  const saveVol = () => {
+    streamVol.set(key, { vol: t.vol, on: t.on })
+    streamVolSave()
   }
 
   // skeleton sai quando o primeiro quadro chega
@@ -2412,8 +2546,12 @@ function buildTile (st, kind = null) {
     ? '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>'
     : '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/></svg>'
   el.querySelector('.s-acts').onclick = e => e.stopPropagation()
-  el.querySelector('.s-volr').oninput = e => { t.vol = +e.target.value; applyVol(); paintVol() }
-  el.querySelector('.s-vol').onclick = () => { t.on = !t.on; applyVol(); paintVol() }
+  el.querySelector('.s-volr').oninput = e => {
+    t.vol = +e.target.value; applyVol(); paintVol(); saveVol()
+  }
+  el.querySelector('.s-vol').onclick = () => {
+    t.on = !t.on; applyVol(); paintVol(); saveVol()
+  }
   el.querySelector('.s-pip').onclick = () => {
     // o PiP é do elemento de vídeo do tile: segue tocando solto na tela
     if (document.pictureInPictureElement === video) document.exitPictureInPicture().catch(() => {})
@@ -2578,6 +2716,7 @@ async function refresh () {
     }
   }
   grid.classList.toggle('solo', !!focusKey)
+  layoutFocusGrid()
 }
 
 // duração no canto direito da thumb: conta de segundo em segundo enquanto o
@@ -3587,11 +3726,6 @@ let presenceTimer = null
 // usuário, que precisa ser reaplicada sempre que a lista muda: quem entra
 // depois do "mutar todos" tem que entrar mudo, e quem reconecta recria o
 // ring no worklet com ganho 1.
-// parse defensivo: isto roda no topo do módulo, e um localStorage corrompido
-// (ou bloqueado, em aba anônima) derrubaria o script inteiro antes da UI subir
-const lsJson = (k, def) => {
-  try { return JSON.parse(localStorage.getItem(k)) ?? def } catch { return def }
-}
 // quem se mutou por conta própria, visto pelo DataChannel. Não persiste: é
 // estado vivo do outro lado, e o ping de 2s reconstrói em quem entra depois.
 const peerSelfMuted = new Set()

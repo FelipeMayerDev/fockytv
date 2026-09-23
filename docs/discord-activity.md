@@ -39,7 +39,11 @@ também funciona (disponível só para o time de dev).
   importado (a página carrega sem requisitar o esm.sh).
 - **Dentro do Discord**: o SDK inicializa após `ready()` e o nick é
   pré-preenchido com o username do Discord (charset `a-z 0-9 . _` casa com a
-  validação de nick/stream key do app).
+  validação de nick/stream key do app). A página também nasce direto no
+  modo foco (grade em tela cheia, sem rail/sidebar) — lá o chrome não serve
+  pra nada; Esc devolve, se alguém quiser.
+- O modo foco também pode ser pedido pela URL (`?focus`), dentro ou fora do
+  Discord — o botão e o Esc sincronizam o parâmetro na URL na hora.
 - O `serverUrl` cai no fallback `location.origin` — ou seja, a URL do túnel.
   O WHIP/WHEP atravessa o Cloudflare (WebRTC sobre HTTPS funciona; verificar
   se o proxy do túnel deixa o tráfego passar sem timeout).

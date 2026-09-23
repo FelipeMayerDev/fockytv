@@ -5,9 +5,10 @@
 Dois ambientes de deploy, só quando o usuário pedir explicitamente:
 
 - **VPS (produção):** `ssh root@192.3.176.195`, repo em `/opt/fockytv`,
-  branch `discordfy` (o deploy segue esse branch, não o `main` — atualizar
-  os dois no push). `server/docker-compose.yml` e `config.json` têm
-  alterações locais no servidor: nunca sobrescrever. Deploy = `git pull` +
+  branch `main` (o deploy segue esse branch + as alterações locais do
+  servidor; a antiga `discordfy` foi mergeada e deletada do remote).
+  `server/docker-compose.yml` tem
+  alteração local no servidor: nunca sobrescrever. Deploy = `git pull` +
   `docker compose build broadcast-box` (só quando `server/broadcast-box/`
   mudar) + `docker compose up -d broadcast-box`. Entrada pública direta em
   `:8180` (tcp+udp), caddy na frente do resto.
@@ -23,6 +24,10 @@ não dependem disso.
 - Os arquivos de `ui/` são bind-mounts de arquivo único no container
   broadcast-box: depois de um `git pull` que os altere, é preciso
   `docker compose restart broadcast-box` (mount segue o inode antigo).
+- CSS/JS de `ui/assets/` é cacheado 4h pela Cloudflare e pelo navegador
+  (a origem não manda Cache-Control): todo commit que alterar um asset
+  DEVE bumpar o `?v=` do `<link>` correspondente em `ui/index.html`,
+  senão a produção segue servindo o arquivo velho na mesma URL.
 - O fluxo de release assume os 5 assets (AppImage, Setup.exe, blockmap,
   latest-linux.yml, latest.yml); o Windows compila no GitHub Actions
   (`.github/workflows/release.yml`, dispara na tag).
