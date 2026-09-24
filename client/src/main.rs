@@ -121,11 +121,14 @@ async fn main() {
             {
                 use tokio::signal::unix::{signal, SignalKind};
                 let mut term = signal(SignalKind::terminate()).unwrap();
-                let mut int = signal(SignalKind::interrupt()).unwrap();
                 tokio::select! {
                     _ = term.recv() => {}
-                    _ = int.recv() => {}
+                    _ = tokio::signal::ctrl_c() => {}
                 }
+            }
+            #[cfg(windows)]
+            {
+                let _ = tokio::signal::ctrl_c().await;
             }
             let _ = tx.send(Cmd::Quit);
         });
