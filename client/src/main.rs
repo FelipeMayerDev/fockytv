@@ -4,20 +4,34 @@ mod config;
 mod control;
 mod picker;
 mod pipeline;
+#[cfg(target_os = "linux")]
+mod shortcut;
 mod tray;
 #[cfg(target_os = "linux")]
 mod video_pw;
-#[cfg(target_os = "linux")]
-mod shortcut;
 
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use tokio::sync::mpsc;
 
+#[derive(Clone)]
 enum Cmd {
     Share,
-    StartShare { fps: u32, bitrate: u64 },
+    StartShare {
+        fps: u32,
+        bitrate: u64,
+    },
     Stop,
+    Preview,
+    PreviewClosed,
+    Webcam,
+    PreviewPointer {
+        phase: PointerPhase,
+        x: i32,
+        y: i32,
+    },
+    PreviewKey(PreviewKey),
+    MirrorWebcam,
     Quit,
     ConfigureHotkey,
     ChooseAudio(u32),
@@ -25,6 +39,28 @@ enum Cmd {
     /// erro no pipeline (whipsink bateu 400 de host fantasma etc.) → tenta
     /// reconstruir a transmissão com a MESMA fonte (sem reabrir o portal)
     PipelineFailed,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum PointerPhase {
+    Down,
+    Move,
+    Up,
+}
+
+#[derive(Clone, Copy)]
+enum PreviewKey {
+    Left,
+    Right,
+    Up,
+    Down,
+    Grow,
+    Shrink,
+}
+
+enum CameraDrag {
+    Move { offset_x: i32, offset_y: i32 },
+    Resize { start_x: i32, start_width: i32 },
 }
 
 /// Fonte escolhida: guardada pra reconstruir o pipeline sem novo picker.
@@ -44,10 +80,12 @@ struct Source {
 
 struct Session {
     live: pipeline::Live,
+    preview: Option<pipeline::Preview>,
     audio: audio::Running,
     source: Source,
     cfg: config::Config,
     retries: u32,
+    drag: Option<CameraDrag>,
 }
 
 #[tokio::main]
@@ -115,6 +153,40 @@ async fn main() {
             }
             Cmd::StartShare { .. } => {}
             Cmd::Stop => stop_session(&mut session, &tray).await,
+            Cmd::Preview => {
+                if let Some(s) = &mut session {
+                    if let Some(preview) = s.preview.take() {
+                        preview.close();
+                    }
+                    match pipeline::open_preview(tx.clone()) {
+                        Ok(preview) => s.preview = Some(preview),
+                        Err(e) => eprintln!("[fockytv] {e}"),
+                    }
+                }
+            }
+            Cmd::PreviewClosed => {
+                if let Some(s) = &mut session {
+                    if let Some(preview) = s.preview.take() {
+                        preview.close();
+                    }
+                }
+            }
+            Cmd::Webcam => {
+                if let Some(s) = &mut session {
+                    if let Err(e) = pipeline::enable_camera(&mut s.live) {
+                        eprintln!("[fockytv] {e}");
+                    } else if s.preview.is_none() {
+                        let _ = tx.send(Cmd::Preview);
+                    }
+                }
+            }
+            Cmd::PreviewPointer { phase, x, y } => adjust_camera(&mut session, phase, x, y),
+            Cmd::PreviewKey(key) => adjust_camera_key(&mut session, key),
+            Cmd::MirrorWebcam => {
+                if let Some(s) = &mut session {
+                    pipeline::camera_mirror(&mut s.live);
+                }
+            }
             Cmd::PipelineFailed => {
                 session = restart_or_giveup(session, &tray, &tx).await;
             }
@@ -151,6 +223,9 @@ async fn main() {
 
 /// Derruba pipeline+áudio e devolve a fonte pra um restart.
 async fn teardown(mut s: Session) -> Source {
+    if let Some(preview) = s.preview.take() {
+        preview.close();
+    }
     #[cfg(target_os = "linux")]
     let pw_video = s.live.video.take();
     let pipe = s.live.pipeline.clone();
@@ -205,10 +280,12 @@ async fn restart_or_giveup(
                 });
                 return Some(Session {
                     live,
+                    preview: None,
                     audio,
                     source,
                     cfg,
                     retries,
+                    drag: None,
                 });
             }
             Err(e) => {
@@ -222,6 +299,65 @@ fn status_text(live: &pipeline::Live) -> String {
     match pipeline::current_caps(live) {
         Some((w, h, fps)) => format!("{w}×{h}@{fps}"),
         None => "…".into(),
+    }
+}
+
+/// O preview recebe as coordenadas já no espaço do vídeo pelo GstNavigation.
+/// Arrastar dentro da webcam move; os últimos 24px do canto inferior direito redimensionam.
+fn adjust_camera(session: &mut Option<Session>, phase: PointerPhase, x: i32, y: i32) {
+    let Some(s) = session else { return };
+    match phase {
+        PointerPhase::Down => {
+            let Some((cam_x, cam_y, width, height)) = pipeline::camera_rect(&s.live) else {
+                return;
+            };
+            // Folga de 16px: a caixinha é pequena na tela, mirar exato nela é chato.
+            const MARGIN: i32 = 16;
+            if x < cam_x - MARGIN
+                || y < cam_y - MARGIN
+                || x > cam_x + width + MARGIN
+                || y > cam_y + height + MARGIN
+            {
+                return;
+            }
+            s.drag = Some(if x >= cam_x + width - 24 && y >= cam_y + height - 24 {
+                CameraDrag::Resize {
+                    start_x: x,
+                    start_width: width,
+                }
+            } else {
+                CameraDrag::Move {
+                    offset_x: x - cam_x,
+                    offset_y: y - cam_y,
+                }
+            });
+        }
+        PointerPhase::Move => match s.drag {
+            Some(CameraDrag::Move { offset_x, offset_y }) => {
+                pipeline::camera_set_position(&mut s.live, x - offset_x, y - offset_y)
+            }
+            Some(CameraDrag::Resize {
+                start_x,
+                start_width,
+            }) => pipeline::camera_set_width(&mut s.live, start_width + x - start_x),
+            None => {}
+        },
+        PointerPhase::Up => s.drag = None,
+    }
+}
+
+fn adjust_camera_key(session: &mut Option<Session>, key: PreviewKey) {
+    let Some(s) = session else { return };
+    let Some((x, y, width, _)) = pipeline::camera_rect(&s.live) else {
+        return;
+    };
+    match key {
+        PreviewKey::Left => pipeline::camera_set_position(&mut s.live, x - 32, y),
+        PreviewKey::Right => pipeline::camera_set_position(&mut s.live, x + 32, y),
+        PreviewKey::Up => pipeline::camera_set_position(&mut s.live, x, y - 32),
+        PreviewKey::Down => pipeline::camera_set_position(&mut s.live, x, y + 32),
+        PreviewKey::Grow => pipeline::camera_set_width(&mut s.live, width + 32),
+        PreviewKey::Shrink => pipeline::camera_set_width(&mut s.live, width - 32),
     }
 }
 
@@ -255,10 +391,12 @@ async fn start_share(
     }
     Some(Session {
         live,
+        preview: None,
         audio: running,
         source,
         cfg,
         retries: 0,
+        drag: None,
     })
 }
 
@@ -412,7 +550,9 @@ async fn start_windows(
 
 fn watch_bus(live: &pipeline::Live, tx: mpsc::UnboundedSender<Cmd>) {
     use futures::StreamExt;
-    let Some(bus) = live.pipeline.bus() else { return };
+    let Some(bus) = live.pipeline.bus() else {
+        return;
+    };
     let mut stream = bus.stream();
     tokio::spawn(async move {
         while let Some(msg) = stream.next().await {
@@ -448,11 +588,17 @@ async fn stop_session(session: &mut Option<Session>, tray: &tray::TrayHandle) {
 
 /// pids com nó de saída de áudio ativo agora (para desempatar janelas)
 async fn audio_pids() -> Option<Vec<u32>> {
-    let out = tokio::process::Command::new("pw-dump").output().await.ok()?;
+    let out = tokio::process::Command::new("pw-dump")
+        .output()
+        .await
+        .ok()?;
     let v: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).ok()?;
     let mut pids = vec![];
     for n in &v {
-        let Some(props) = n.get("info").and_then(|i| i.get("props")).and_then(|p| p.as_object())
+        let Some(props) = n
+            .get("info")
+            .and_then(|i| i.get("props"))
+            .and_then(|p| p.as_object())
         else {
             continue;
         };
@@ -464,7 +610,10 @@ async fn audio_pids() -> Option<Vec<u32>> {
         if !class_ok {
             continue;
         }
-        if let Some(p) = props.get("application.process.pid").and_then(|p| p.as_i64()) {
+        if let Some(p) = props
+            .get("application.process.pid")
+            .and_then(|p| p.as_i64())
+        {
             pids.push(p as u32);
         }
     }
@@ -482,7 +631,10 @@ async fn app_candidates() -> Vec<picker::Candidate> {
     let mut out = vec![];
     let mut seen = std::collections::HashSet::new();
     for n in &v {
-        let Some(props) = n.get("info").and_then(|i| i.get("props")).and_then(|p| p.as_object())
+        let Some(props) = n
+            .get("info")
+            .and_then(|i| i.get("props"))
+            .and_then(|p| p.as_object())
         else {
             continue;
         };
@@ -497,7 +649,10 @@ async fn app_candidates() -> Vec<picker::Candidate> {
         if low.starts_with("pw-cat") || low.starts_with("discord") || low.starts_with("fockytv") {
             continue;
         }
-        let Some(pid) = props.get("application.process.pid").and_then(|p| p.as_i64()) else {
+        let Some(pid) = props
+            .get("application.process.pid")
+            .and_then(|p| p.as_i64())
+        else {
             continue;
         };
         if pid <= 0 || !seen.insert(pid) {

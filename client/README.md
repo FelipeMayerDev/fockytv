@@ -11,8 +11,8 @@ nativa, sem re-escala.
   compartilhar).
 - **Compartilhar/Parar**: item de menu do tray, clique no ícone, ou o atalho.
   Ao iniciar, escolha 15/30/60 fps e 2/6/12 Mbps; a escolha vale pela sessão.
-- Escolha **Monitor** ou **Janela** no diálogo do portal. A escolha fica
-  memorizada (restore token): na próxima vez o diálogo já abre com ela.
+- Escolha **Monitor** ou **Janela** no diálogo do portal. Ele abre a cada
+  compartilhamento para permitir trocar a fonte.
 - Áudio:
   - **Janela** → só o som daquele app (exclusivo). O client casa a geometria
     do stream com as janelas do Hyprland (`hyprctl`) pra achar o processo;

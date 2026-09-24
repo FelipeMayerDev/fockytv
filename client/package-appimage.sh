@@ -9,7 +9,8 @@ OUT=FockyTV-Share-x86_64.AppImage
 APPDIR=build-appdir
 rm -rf "$APPDIR"
 
-ELEMENTS=(pipewiresrc queue videorate capsfilter videoconvert openh264enc
+ELEMENTS=(pipewiresrc queue videorate capsfilter videoconvert videoscale videoflip compositor
+          intervideosink intervideosrc glimagesink textoverlay v4l2src openh264enc
           h264parse rtph264pay opusenc rtpopuspay audioconvert appsrc whipsink
           webrtcbin nicesrc nicesink dtlssrtpenc dtlsenc srtpenc srtpdec
           rtpbin rtpsession rtprtxsend rtpstorage dtlssrtpdec)
@@ -73,6 +74,8 @@ copied=1
 while [ "$copied" -gt 0 ]; do
     copied=0
     for f in "$APPDIR/usr/bin/"* "$APPDIR/usr/lib/"*.so* "$APPDIR/usr/lib/gstreamer-1.0/"*.so*; do
+        # config.json também fica em usr/bin; ldd nele dispara o loader 32-bit.
+        [ -x "$f" ] || case "$f" in *.so|*.so.*) ;; *) continue ;; esac
         while read -r lib; do
             [ -f "$lib" ] || continue
             base=$(basename "$lib")
@@ -89,14 +92,12 @@ HERE="$(dirname "$(readlink -f "$0")")"
 export LD_LIBRARY_PATH="$HERE/usr/lib:$LD_LIBRARY_PATH"
 export GST_PLUGIN_SYSTEM_PATH_1_0="$HERE/usr/lib/gstreamer-1.0"
 export GST_PLUGIN_PATH_1_0="$HERE/usr/lib/gstreamer-1.0"
-export GST_PLUGIN_SCANNER="$HERE/usr/libexec/gst-plugin-scanner"
+# O AppImage já limita os plugins ao conjunto embutido. Escanear no processo
+# evita invocar um gst-plugin-scanner externo com loader/libc incompatíveis.
+export GST_REGISTRY_FORK=no
 exec "$HERE/usr/bin/fockytv-share" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
-
-# scanner do gstreamer (o loader externo procura por ele)
-mkdir -p "$APPDIR/usr/libexec"
-cp /usr/libexec/gstreamer-1.0/gst-plugin-scanner "$APPDIR/usr/libexec/" 2>/dev/null || true
 
 echo "── appimagetool"
 if [ ! -x build/appimagetool-x86_64.AppImage ]; then
@@ -109,7 +110,13 @@ if [ ! -d build/appimagetool-squashfs ]; then
     (cd build && ./appimagetool-x86_64.AppImage --appimage-extract >/dev/null && mv squashfs-root appimagetool-squashfs)
 fi
 rm -f "$OUT"
-build/appimagetool-squashfs/AppRun "$APPDIR" "$OUT"
+RUNTIME=build/runtime-x86_64
+if [ ! -x "$RUNTIME" ]; then
+    curl -fL --retry 3 --retry-delay 2 -o "$RUNTIME" \
+        https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
+    chmod +x "$RUNTIME"
+fi
+build/appimagetool-squashfs/AppRun --runtime-file "$RUNTIME" "$APPDIR" "$OUT"
 chmod +x "$OUT"
 du -h "$OUT"
 echo "OK: $OUT (coloque um config.json ao lado dele)"

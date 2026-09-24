@@ -27,7 +27,10 @@ pub fn configure(tx: UnboundedSender<Cmd>) {
             return;
         };
         let shortcut = NewShortcut::new("share", "Compartilhar/parar tela");
-        let Ok(request) = portal.bind_shortcuts(&session, &[shortcut], None, Default::default()).await else {
+        let Ok(request) = portal
+            .bind_shortcuts(&session, &[shortcut], None, Default::default())
+            .await
+        else {
             eprintln!("[fockytv] não foi possível registrar o atalho");
             return;
         };
@@ -35,8 +38,12 @@ pub fn configure(tx: UnboundedSender<Cmd>) {
             eprintln!("[fockytv] atalho recusado pelo portal");
             return;
         }
-        let Ok(mut events) = portal.receive_activated().await else { return };
-        let _ = portal.configure_shortcuts(&session, None, Default::default()).await;
+        let Ok(mut events) = portal.receive_activated().await else {
+            return;
+        };
+        let _ = portal
+            .configure_shortcuts(&session, None, Default::default())
+            .await;
         loop {
             tokio::select! {
                 Some(_) = requests.recv() => {

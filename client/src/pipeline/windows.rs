@@ -31,7 +31,11 @@ pub fn build(
             pick.hwnd
         )
     };
-    let bitrate = bitrate_for(pick.width.unsigned_abs(), pick.height.unsigned_abs(), cfg.max_bitrate);
+    let bitrate = bitrate_for(
+        pick.width.unsigned_abs(),
+        pick.height.unsigned_abs(),
+        cfg.max_bitrate,
+    );
     let gop = (cfg.fps * 2).max(30);
 
     let launch = format!(
@@ -42,11 +46,16 @@ pub fn build(
         ! videorate drop-only=true
         ! capsfilter name=vcaps caps=video/x-raw,framerate={fps}/1
         ! videoconvert
+        ! compositor name=canvas
+        canvas. ! capsfilter caps=video/x-raw,width={width},height={height} ! tee name=out
+        out. ! queue leaky=downstream max-size-buffers=2 max-size-time=0
         ! openh264enc name=venc usage-type=screen rate-control=bitrate scene-change-detection=false complexity=medium bitrate={bitrate} gop-size={gop}
         ! h264parse
         ! rtph264pay pt=96 config-interval=-1
         ! queue leaky=downstream max-size-time=1000000000
         ! whip.
+        out. ! queue leaky=downstream max-size-buffers=2 max-size-time=0
+        ! intervideosink channel=fockytv-share-preview
         appsrc name=aud is-live=true do-timestamp=true format=time max-bytes=524288
         ! queue leaky=downstream max-size-time=300000000
         ! audioconvert
@@ -60,6 +69,8 @@ pub fn build(
             use-link-headers=true
         "#,
         fps = cfg.fps,
+        width = pick.width,
+        height = pick.height,
         url = cfg.server_url.trim_end_matches('/'),
         key = cfg.display_name,
         abr = cfg.audio_bitrate,
@@ -79,12 +90,15 @@ pub fn build(
         .ok_or("appsrc aud não achado")?;
     // rate/channels têm que ser (int) no caps — u32 vira (uint) e o sink
     // rejeita na negociação
-    appsrc.set_property("caps", &gst::Caps::builder("audio/x-raw")
-        .field("format", "F32LE")
-        .field("rate", audio::RATE as i32)
-        .field("channels", 2i32)
-        .field("layout", "interleaved")
-        .build());
+    appsrc.set_property(
+        "caps",
+        &gst::Caps::builder("audio/x-raw")
+            .field("format", "F32LE")
+            .field("rate", audio::RATE as i32)
+            .field("channels", 2i32)
+            .field("layout", "interleaved")
+            .build(),
+    );
 
     pipeline
         .set_state(gst::State::Playing)
@@ -92,7 +106,10 @@ pub fn build(
 
     let running = audio::windows::start(target, appsrc);
     Ok((
-        Live { pipeline },
+        Live {
+            pipeline,
+            camera: None,
+        },
         running,
     ))
 }

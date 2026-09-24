@@ -36,7 +36,8 @@ pub fn build(
     let source = if test_video {
         "videotestsrc is-live=true pattern=ball".to_string()
     } else {
-        "appsrc name=vid is-live=true do-timestamp=true format=time max-bytes=8388608 block=true".to_string()
+        "appsrc name=vid is-live=true do-timestamp=true format=time max-bytes=8388608 block=true"
+            .to_string()
     };
 
     let launch = format!(
@@ -45,11 +46,16 @@ pub fn build(
         ! queue leaky=downstream max-size-buffers=2 max-size-time=0
         ! {rate_chain}
         ! videoconvert
+        ! compositor name=canvas
+        canvas. ! capsfilter caps=video/x-raw,width={w},height={h} ! tee name=out
+        out. ! queue leaky=downstream max-size-buffers=2 max-size-time=0
         ! openh264enc name=venc usage-type=screen rate-control=bitrate scene-change-detection=false complexity=medium bitrate={bitrate} gop-size={gop}
         ! h264parse
         ! rtph264pay pt=96 config-interval=-1
         ! queue leaky=downstream max-size-time=1000000000
         ! whip.
+        out. ! queue leaky=downstream max-size-buffers=2 max-size-time=0
+        ! intervideosink channel=fockytv-share-preview
         appsrc name=aud is-live=true do-timestamp=true format=time max-bytes=524288
         ! queue leaky=downstream max-size-time=300000000
         ! audioconvert
@@ -66,7 +72,10 @@ pub fn build(
             // diagnóstico: sem videorate/caps — deixa o framerate do stream passar direto
             "identity silent=true".to_string()
         } else {
-            format!("videorate drop-only=true ! capsfilter name=vcaps caps=video/x-raw,framerate={}/1", cfg.fps)
+            format!(
+                "videorate drop-only=true ! capsfilter name=vcaps caps=video/x-raw,framerate={}/1",
+                cfg.fps
+            )
         },
         url = cfg.server_url.trim_end_matches('/'),
         key = cfg.display_name,
@@ -87,12 +96,15 @@ pub fn build(
         .ok_or("appsrc aud não achado")?;
     // rate/channels têm que ser (int) no caps — u32 vira (uint) e o sink
     // rejeita na negociação
-    appsrc.set_property("caps", &gst::Caps::builder("audio/x-raw")
-        .field("format", "F32LE")
-        .field("rate", audio::RATE as i32)
-        .field("channels", 2i32)
-        .field("layout", "interleaved")
-        .build());
+    appsrc.set_property(
+        "caps",
+        &gst::Caps::builder("audio/x-raw")
+            .field("format", "F32LE")
+            .field("rate", audio::RATE as i32)
+            .field("channels", 2i32)
+            .field("layout", "interleaved")
+            .build(),
+    );
 
     // FOCKYTV_DOT=1 + GST_DEBUG_DUMP_DOT_DIR=/tmp → grafo do pipeline em .dot
     if std::env::var("FOCKYTV_DOT").is_ok() {
@@ -112,10 +124,15 @@ pub fn build(
             .and_then(|e| e.dynamic_cast::<gst_app::AppSrc>().ok())
             .ok_or("appsrc vid não achado")?;
         // pw consome o fd: clona pra reconexões futuras manterem a fonte
-        let fd2 = fd
-            .try_clone()
-            .map_err(|e| format!("dup fd: {e}"))?;
+        let fd2 = fd.try_clone().map_err(|e| format!("dup fd: {e}"))?;
         video = Some(crate::video_pw::start(fd2, node, vid));
     }
-    Ok((Live { pipeline, video }, running))
+    Ok((
+        Live {
+            pipeline,
+            camera: None,
+            video,
+        },
+        running,
+    ))
 }

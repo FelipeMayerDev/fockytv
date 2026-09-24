@@ -62,7 +62,10 @@ pub fn pick() -> Result<Pick, String> {
         use windows::Win32::Foundation::*;
         use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
         use windows::Win32::UI::WindowsAndMessaging::*;
-        let title: Vec<u16> = "FockyTV — o que compartilhar?".encode_utf16().chain([0]).collect();
+        let title: Vec<u16> = "FockyTV — o que compartilhar?"
+            .encode_utf16()
+            .chain([0])
+            .collect();
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             windows::core::PCWSTR(class_name.as_ptr()),
@@ -84,7 +87,11 @@ pub fn pick() -> Result<Pick, String> {
             WS_EX_CLIENTEDGE,
             windows::core::PCWSTR(list_cls.as_ptr()),
             None,
-            WINDOW_STYLE((WS_CHILD | WS_VISIBLE | WS_VSCROLL).0 | LBS_NOTIFY as u32 | LBS_NOINTEGRALHEIGHT as u32),
+            WINDOW_STYLE(
+                (WS_CHILD | WS_VISIBLE | WS_VSCROLL).0
+                    | LBS_NOTIFY as u32
+                    | LBS_NOINTEGRALHEIGHT as u32,
+            ),
             10,
             10,
             w - 36,
@@ -98,7 +105,12 @@ pub fn pick() -> Result<Pick, String> {
         for e in entries {
             let mut s: Vec<u16> = e.label.encode_utf16().collect();
             s.push(0);
-            SendMessageW(lb, LB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(s.as_ptr() as isize)));
+            SendMessageW(
+                lb,
+                LB_ADDSTRING,
+                Some(WPARAM(0)),
+                Some(LPARAM(s.as_ptr() as isize)),
+            );
         }
         SendMessageW(lb, LB_SETCURSEL, Some(WPARAM(0)), Some(LPARAM(0)));
 
@@ -171,7 +183,9 @@ unsafe extern "system" fn wnd_proc(
                 if sel >= 0 {
                     let picked = ENTRIES.with(|e| {
                         let entries = e.borrow();
-                        entries.and_then(|v| v.get(sel as usize)).map(|e| e.pick.clone())
+                        entries
+                            .and_then(|v| v.get(sel as usize))
+                            .map(|e| e.pick.clone())
                     });
                     finish(hwnd, picked);
                 }
@@ -236,9 +250,9 @@ unsafe extern "system" fn win_enum(
     hwnd: windows::Win32::Foundation::HWND,
     l: windows::Win32::Foundation::LPARAM,
 ) -> windows::core::BOOL {
+    use windows::core::BOOL;
     use windows::Win32::Foundation::*;
     use windows::Win32::Graphics::Dwm::DwmGetWindowAttribute;
-    use windows::core::BOOL;
     use windows::Win32::UI::WindowsAndMessaging::*;
     let v = &mut *(l.0 as *mut Vec<Entry>);
     if IsWindowVisible(hwnd).0 == 0 {

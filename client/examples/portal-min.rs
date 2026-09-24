@@ -3,9 +3,9 @@
 //!
 //! Uso: cargo run --example portal-min [-- --mode plain|queue|caps]
 
-use std::os::fd::AsRawFd;
-use gstreamer as gst;
 use gst::prelude::*;
+use gstreamer as gst;
+use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -114,18 +114,15 @@ async fn main() -> ashpd::Result<()> {
             .by_name("src")
             .unwrap();
         let pad = src.static_pad("src").unwrap();
-        pad.add_probe(
-            gst::PadProbeType::BUFFER,
-            move |_pad, info| {
-                if let Some(_b) = info.buffer() {
-                    let n = count.fetch_add(1, Ordering::Relaxed);
-                    if n % 120 == 0 {
-                        eprintln!("[{:.1}s] {n} buffers", elapsed_secs());
-                    }
+        pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, info| {
+            if let Some(_b) = info.buffer() {
+                let n = count.fetch_add(1, Ordering::Relaxed);
+                if n % 120 == 0 {
+                    eprintln!("[{:.1}s] {n} buffers", elapsed_secs());
                 }
-                gst::PadProbeReturn::Ok
-            },
-        )
+            }
+            gst::PadProbeReturn::Ok
+        })
         .unwrap();
     }
     let _ = std::mem::forget(session); // segura a sessão
@@ -152,7 +149,6 @@ fn elapsed_secs() -> f64 {
         % 10_000.0
 }
 
-
 /// Barreira appsink→appsrc: corta toda negociação de pool/allocation entre
 /// o pipewiresrc e o encoder (uma cópia a mais por frame).
 async fn run_barrier(fd: std::os::fd::OwnedFd, node: u32) -> ashpd::Result<()> {
@@ -163,7 +159,8 @@ async fn run_barrier(fd: std::os::fd::OwnedFd, node: u32) -> ashpd::Result<()> {
         .property("fd", fd.as_raw_fd())
         .property("path", node.to_string())
         .property("keepalive-time", 1000i32)
-        .build().unwrap();
+        .build()
+        .unwrap();
     let conv = gst::ElementFactory::make("videoconvert").build().unwrap();
     let caps = gst::Caps::builder("video/x-raw")
         .field("format", "I420")
@@ -174,12 +171,13 @@ async fn run_barrier(fd: std::os::fd::OwnedFd, node: u32) -> ashpd::Result<()> {
         .max_buffers(2)
         .drop(true)
         .build();
-    let enc = gst::parse::launch(
-        "openh264enc usage-type=screen complexity=medium bitrate=16000000",
-    ).unwrap();
+    let enc =
+        gst::parse::launch("openh264enc usage-type=screen complexity=medium bitrate=16000000")
+            .unwrap();
     let fsink = gst::ElementFactory::make("fakesink")
         .property("sync", false)
-        .build().unwrap();
+        .build()
+        .unwrap();
     let appsrc = app::AppSrc::builder()
         .is_live(true)
         .do_timestamp(true)
@@ -190,7 +188,9 @@ async fn run_barrier(fd: std::os::fd::OwnedFd, node: u32) -> ashpd::Result<()> {
     let pipeline = gst::Pipeline::new();
     let appsrc_el: &gst::Element = appsrc.upcast_ref();
     let sink_el: &gst::Element = sink.upcast_ref();
-    pipeline.add_many([&src, &conv, sink_el, appsrc_el, &enc, &fsink]).unwrap();
+    pipeline
+        .add_many([&src, &conv, sink_el, appsrc_el, &enc, &fsink])
+        .unwrap();
     gst::Element::link_many([&src, &conv, sink_el]).unwrap();
     gst::Element::link_many([appsrc_el, &enc, &fsink]).unwrap();
 
@@ -204,7 +204,9 @@ async fn run_barrier(fd: std::os::fd::OwnedFd, node: u32) -> ashpd::Result<()> {
             loop {
                 match sink.pull_sample() {
                     Ok(sample) => {
-                        let Some(buffer) = sample.buffer() else { continue };
+                        let Some(buffer) = sample.buffer() else {
+                            continue;
+                        };
                         let b = buffer.copy();
                         if appsrc.push_buffer(b).is_err() {
                             return;
@@ -230,12 +232,19 @@ async fn run_barrier(fd: std::os::fd::OwnedFd, node: u32) -> ashpd::Result<()> {
                 eprintln!("[bus] {m:?}");
             }
         }
-        eprintln!("[barrier] estado: {:?}", pipeline.state(gst::ClockTime::from_seconds(1)));
+        eprintln!(
+            "[barrier] estado: {:?}",
+            pipeline.state(gst::ClockTime::from_seconds(1))
+        );
     }
     let start = std::time::Instant::now();
     while start.elapsed().as_secs() < 25 {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        eprintln!("t={:>2}s total={}", start.elapsed().as_secs(), count.load(Ordering::Relaxed));
+        eprintln!(
+            "t={:>2}s total={}",
+            start.elapsed().as_secs(),
+            count.load(Ordering::Relaxed)
+        );
     }
     let _ = pipeline.set_state(gst::State::Null);
     let n = count.load(Ordering::Relaxed);

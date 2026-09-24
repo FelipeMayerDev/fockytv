@@ -34,7 +34,11 @@ fn main() {
         ! audioconvert ! opusenc bitrate=192000 ! rtpopuspay pt=111
         ! queue ! whip.
         whipsink name=whip whip-endpoint="{s}/api/whip" auth-token=smoke use-link-headers=true"#,
-        chain = if src == "app" { "appsrc name=aud is-live=true do-timestamp=true format=time".to_string() } else { String::new() },
+        chain = if src == "app" {
+            "appsrc name=aud is-live=true do-timestamp=true format=time".to_string()
+        } else {
+            String::new()
+        },
         s = server.trim_end_matches('/'),
     );
     println!("== fonte: {src}\n{launch}");
@@ -97,10 +101,7 @@ fn main() {
         }
     }
     let _ = pipe.send_event(gst::event::Eos::new());
-    let _ = bus.timed_pop_filtered(
-        gst::ClockTime::from_seconds(2),
-        &[gst::MessageType::Eos],
-    );
+    let _ = bus.timed_pop_filtered(gst::ClockTime::from_seconds(2), &[gst::MessageType::Eos]);
     let _ = pipe.set_state(gst::State::Null);
     println!("{}", if ok { "OK" } else { "FALHOU" });
 }

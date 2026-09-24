@@ -11,9 +11,15 @@ pub enum State {
 }
 
 pub const QUALITY: [(u32, u64); 9] = [
-    (15, 2_000_000), (15, 6_000_000), (15, 12_000_000),
-    (30, 2_000_000), (30, 6_000_000), (30, 12_000_000),
-    (60, 2_000_000), (60, 6_000_000), (60, 12_000_000),
+    (15, 2_000_000),
+    (15, 6_000_000),
+    (15, 12_000_000),
+    (30, 2_000_000),
+    (30, 6_000_000),
+    (30, 12_000_000),
+    (60, 2_000_000),
+    (60, 6_000_000),
+    (60, 12_000_000),
 ];
 
 pub fn quality_label(fps: u32, bitrate: u64) -> String {
@@ -40,8 +46,8 @@ mod tests {
 #[cfg(target_os = "linux")]
 mod imp {
     use super::{quality_label, Candidate, Cmd, State, QUALITY};
-    use ksni::menu::StandardItem;
     use ksni::blocking::TrayMethods;
+    use ksni::menu::StandardItem;
     use ksni::{MenuItem, Tray};
     use std::sync::{Arc, Mutex};
     use tokio::sync::mpsc::UnboundedSender;
@@ -81,22 +87,30 @@ mod imp {
                 ..Default::default()
             }
         }
-        // clique no ícone = mesma coisa que o atalho
+        // O clique só inicia; a transmissão em curso só para pelo menu.
         fn activate(&mut self, _x: i32, _y: i32) {
-            let _ = self.tx.send(Cmd::Share);
+            if matches!(*self.state.lock().unwrap(), State::Idle) {
+                let _ = self.tx.send(Cmd::Share);
+            }
         }
         fn menu(&self) -> Vec<MenuItem<Self>> {
             let mut items: Vec<MenuItem<Self>> = vec![];
             match &*self.state.lock().unwrap() {
                 State::Idle => {
                     items.push(MenuItem::Standard(StandardItem {
-                        label: "Compartilhar tela".into(),
-                        icon_name: "video-share-symbolic".into(),
-                        activate: Box::new(|t: &mut Self| {
-                            let _ = t.tx.send(Cmd::Share);
-                        }),
+                        label: "Compartilhar tela — escolha a qualidade:".into(),
+                        enabled: false,
                         ..Default::default()
                     }));
+                    for (fps, bitrate) in QUALITY {
+                        items.push(MenuItem::Standard(StandardItem {
+                            label: quality_label(fps, bitrate),
+                            activate: Box::new(move |t: &mut Self| {
+                                let _ = t.tx.send(Cmd::StartShare { fps, bitrate });
+                            }),
+                            ..Default::default()
+                        }));
+                    }
                 }
                 State::ChoosingQuality => {
                     items.push(MenuItem::Standard(StandardItem {
@@ -128,6 +142,45 @@ mod imp {
                         ..Default::default()
                     }));
                     items.push(MenuItem::Standard(StandardItem {
+                        label: "Ver preview".into(),
+                        icon_name: "video-display-symbolic".into(),
+                        activate: Box::new(|t: &mut Self| {
+                            let _ = t.tx.send(Cmd::Preview);
+                        }),
+                        ..Default::default()
+                    }));
+                    items.push(MenuItem::Standard(StandardItem {
+                        label: "Compartilhar webcam".into(),
+                        icon_name: "camera-web-symbolic".into(),
+                        activate: Box::new(|t: &mut Self| {
+                            let _ = t.tx.send(Cmd::Webcam);
+                        }),
+                        ..Default::default()
+                    }));
+                    for (label, key) in [
+                        ("Webcam: ←", crate::PreviewKey::Left),
+                        ("Webcam: →", crate::PreviewKey::Right),
+                        ("Webcam: ↑", crate::PreviewKey::Up),
+                        ("Webcam: ↓", crate::PreviewKey::Down),
+                        ("Webcam: + tamanho", crate::PreviewKey::Grow),
+                        ("Webcam: − tamanho", crate::PreviewKey::Shrink),
+                    ] {
+                        items.push(MenuItem::Standard(StandardItem {
+                            label: label.into(),
+                            activate: Box::new(move |t: &mut Self| {
+                                let _ = t.tx.send(Cmd::PreviewKey(key));
+                            }),
+                            ..Default::default()
+                        }));
+                    }
+                    items.push(MenuItem::Standard(StandardItem {
+                        label: "Webcam: espelhar".into(),
+                        activate: Box::new(|t: &mut Self| {
+                            let _ = t.tx.send(Cmd::MirrorWebcam);
+                        }),
+                        ..Default::default()
+                    }));
+                    items.push(MenuItem::Standard(StandardItem {
                         label: "Parar".into(),
                         icon_name: "media-playback-stop-symbolic".into(),
                         activate: Box::new(|t: &mut Self| {
@@ -137,6 +190,16 @@ mod imp {
                     }));
                 }
             }
+            // Fica antes das opções extras para não sumir abaixo do menu longo da webcam.
+            items.push(MenuItem::Separator);
+            items.push(MenuItem::Standard(StandardItem {
+                label: "Sair".into(),
+                activate: Box::new(|t: &mut Self| {
+                    let _ = t.tx.send(Cmd::Quit);
+                }),
+                ..Default::default()
+            }));
+
             let cands = self.disambig.lock().unwrap().clone();
             if !cands.is_empty() {
                 items.push(MenuItem::Separator);
@@ -160,14 +223,6 @@ mod imp {
                 label: "Configurar tecla de atalho…".into(),
                 activate: Box::new(|t: &mut Self| {
                     let _ = t.tx.send(Cmd::ConfigureHotkey);
-                }),
-                ..Default::default()
-            }));
-            items.push(MenuItem::Separator);
-            items.push(MenuItem::Standard(StandardItem {
-                label: "Sair".into(),
-                activate: Box::new(|t: &mut Self| {
-                    let _ = t.tx.send(Cmd::Quit);
                 }),
                 ..Default::default()
             }));
@@ -281,35 +336,81 @@ mod imp {
         }
     }
 
-    fn ui_thread(tx: UnboundedSender<Cmd>, from_main: mpsc::Receiver<State>, hotkey: Option<String>) -> ! {
+    fn ui_thread(
+        tx: UnboundedSender<Cmd>,
+        from_main: mpsc::Receiver<State>,
+        hotkey: Option<String>,
+    ) -> ! {
         use global_hotkey::hotkey::{Code, HotKey, Modifiers};
         use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
         use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
         use tray_icon::TrayIconBuilder;
 
         let share = MenuItem::with_id("share", "Compartilhar tela", true, None);
+        let preview = MenuItem::with_id("preview", "Ver preview", false, None);
+        let webcam = MenuItem::with_id("webcam", "Compartilhar webcam", false, None);
+        let camera_controls = [
+            (
+                MenuItem::with_id("cam-mirror", "Webcam: espelhar", false, None),
+                Cmd::MirrorWebcam,
+            ),
+        ];
         let stop = MenuItem::with_id("stop", "Parar", false, None);
         let quality = QUALITY.map(|(fps, bitrate)| {
-            (MenuItem::with_id(format!("quality-{fps}-{bitrate}"), quality_label(fps, bitrate), false, None), fps, bitrate)
+            (
+                MenuItem::with_id(
+                    format!("quality-{fps}-{bitrate}"),
+                    quality_label(fps, bitrate),
+                    false,
+                    None,
+                ),
+                fps,
+                bitrate,
+            )
         });
         let hotkey_choices = [
-            (MenuItem::with_id("hotkey-f10", "Atalho: Ctrl+Shift+F10", true, None), Code::F10),
-            (MenuItem::with_id("hotkey-f11", "Atalho: Ctrl+Shift+F11", true, None), Code::F11),
-            (MenuItem::with_id("hotkey-f12", "Atalho: Ctrl+Shift+F12", true, None), Code::F12),
+            (
+                MenuItem::with_id("hotkey-f10", "Atalho: Ctrl+Shift+F10", true, None),
+                Code::F10,
+            ),
+            (
+                MenuItem::with_id("hotkey-f11", "Atalho: Ctrl+Shift+F11", true, None),
+                Code::F11,
+            ),
+            (
+                MenuItem::with_id("hotkey-f12", "Atalho: Ctrl+Shift+F12", true, None),
+                Code::F12,
+            ),
         ];
-        let hotkey_label = MenuItem::with_id("hotkey-label", "Configurar atalho (selecione):", false, None);
+        let hotkey_label = MenuItem::with_id(
+            "hotkey-label",
+            "Configurar atalho (selecione):",
+            false,
+            None,
+        );
         let quit = MenuItem::with_id("quit", "Sair", true, None);
         let menu = Menu::new();
         let _ = menu.append_items(&[
             &share,
+            &preview,
+            &webcam,
+            &camera_controls[0].0,
             &stop,
             &PredefinedMenuItem::separator(),
-            &quality[0].0, &quality[1].0, &quality[2].0,
-            &quality[3].0, &quality[4].0, &quality[5].0,
-            &quality[6].0, &quality[7].0, &quality[8].0,
+            &quality[0].0,
+            &quality[1].0,
+            &quality[2].0,
+            &quality[3].0,
+            &quality[4].0,
+            &quality[5].0,
+            &quality[6].0,
+            &quality[7].0,
+            &quality[8].0,
             &PredefinedMenuItem::separator(),
             &hotkey_label,
-            &hotkey_choices[0].0, &hotkey_choices[1].0, &hotkey_choices[2].0,
+            &hotkey_choices[0].0,
+            &hotkey_choices[1].0,
+            &hotkey_choices[2].0,
             &PredefinedMenuItem::separator(),
             &quit,
         ]);
@@ -335,6 +436,8 @@ mod imp {
         let hotkey_rx = GlobalHotKeyEvent::receiver();
         let share_id = share.id().clone();
         let stop_id = stop.id().clone();
+        let preview_id = preview.id().clone();
+        let webcam_id = webcam.id().clone();
         let quit_id = quit.id().clone();
 
         let mut msg = windows::Win32::UI::WindowsAndMessaging::MSG::default();
@@ -350,18 +453,32 @@ mod imp {
             while let Ok(ev) = menu_rx.try_recv() {
                 if ev.id == share_id {
                     let _ = tx.send(Cmd::Share);
+                } else if ev.id == preview_id {
+                    let _ = tx.send(Cmd::Preview);
+                } else if ev.id == webcam_id {
+                    let _ = tx.send(Cmd::Webcam);
                 } else if ev.id == stop_id {
                     let _ = tx.send(Cmd::Stop);
                 } else if ev.id == quit_id {
                     let _ = tx.send(Cmd::Quit);
                 }
+                for (item, cmd) in &camera_controls {
+                    if ev.id == *item.id() {
+                        let _ = tx.send(cmd.clone());
+                    }
+                }
                 for (item, fps, bitrate) in &quality {
                     if ev.id == *item.id() {
-                        let _ = tx.send(Cmd::StartShare { fps: *fps, bitrate: *bitrate });
+                        let _ = tx.send(Cmd::StartShare {
+                            fps: *fps,
+                            bitrate: *bitrate,
+                        });
                     }
                 }
                 for (item, key) in &hotkey_choices {
-                    if ev.id != *item.id() { continue; }
+                    if ev.id != *item.id() {
+                        continue;
+                    }
                     let next = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), *key);
                     if hotkeys.unregister(hk).is_ok() && hotkeys.register(next).is_ok() {
                         hk = next;
@@ -381,27 +498,55 @@ mod imp {
             while let Ok(s) = from_main.try_recv() {
                 match s {
                     State::Idle => {
-                        let _ = share.set_text("Compartilhar tela");
-                        let _ = share.set_enabled(true);
+                        let _ = share.set_text("Escolha a qualidade abaixo");
+                        let _ = share.set_enabled(false);
                         let _ = stop.set_enabled(false);
-                        for (item, ..) in &quality { let _ = item.set_enabled(false); }
+                        let _ = preview.set_enabled(false);
+                        let _ = webcam.set_enabled(false);
+                        for (item, _) in &camera_controls {
+                            let _ = item.set_enabled(false);
+                        }
+                        for (item, ..) in &quality {
+                            let _ = item.set_enabled(true);
+                        }
                     }
                     State::ChoosingQuality => {
                         let _ = share.set_enabled(false);
                         let _ = share.set_text("Escolha a qualidade abaixo");
                         let _ = stop.set_enabled(false);
-                        for (item, ..) in &quality { let _ = item.set_enabled(true); }
+                        let _ = preview.set_enabled(false);
+                        let _ = webcam.set_enabled(false);
+                        for (item, _) in &camera_controls {
+                            let _ = item.set_enabled(false);
+                        }
+                        for (item, ..) in &quality {
+                            let _ = item.set_enabled(true);
+                        }
                     }
                     State::Picking => {
                         let _ = share.set_enabled(false);
                         let _ = share.set_text("Escolhendo fonte…");
-                        for (item, ..) in &quality { let _ = item.set_enabled(false); }
+                        let _ = preview.set_enabled(false);
+                        let _ = webcam.set_enabled(false);
+                        for (item, _) in &camera_controls {
+                            let _ = item.set_enabled(false);
+                        }
+                        for (item, ..) in &quality {
+                            let _ = item.set_enabled(false);
+                        }
                     }
                     State::Live { status } => {
                         let _ = share.set_text(format!("Ao vivo — {status}"));
                         let _ = share.set_enabled(false);
                         let _ = stop.set_enabled(true);
-                        for (item, ..) in &quality { let _ = item.set_enabled(false); }
+                        let _ = preview.set_enabled(true);
+                        let _ = webcam.set_enabled(true);
+                        for (item, _) in &camera_controls {
+                            let _ = item.set_enabled(true);
+                        }
+                        for (item, ..) in &quality {
+                            let _ = item.set_enabled(false);
+                        }
                     }
                 }
             }

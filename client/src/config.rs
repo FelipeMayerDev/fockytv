@@ -101,8 +101,13 @@ pub fn load() -> Result<Config, String> {
         return Err("sem displayName no config.json".into());
     }
     if let Some(p) = found {
-        eprintln!("[fockytv] config: {} (server {}, nick {}, {}fps)",
-            p.display(), cfg.server_url, cfg.display_name, cfg.fps);
+        eprintln!(
+            "[fockytv] config: {} (server {}, nick {}, {}fps)",
+            p.display(),
+            cfg.server_url,
+            cfg.display_name,
+            cfg.fps
+        );
     }
     Ok(cfg)
 }
@@ -113,8 +118,11 @@ pub fn save_hotkey(hotkey: &str) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("criar {}: {e}", dir.display()))?;
     }
-    std::fs::write(&path, format!("{{\"hotkey\":{}}}", serde_json::to_string(hotkey).unwrap()))
-        .map_err(|e| format!("salvar {}: {e}", path.display()))
+    std::fs::write(
+        &path,
+        format!("{{\"hotkey\":{}}}", serde_json::to_string(hotkey).unwrap()),
+    )
+    .map_err(|e| format!("salvar {}: {e}", path.display()))
 }
 
 fn load_hotkey() -> Option<String> {
@@ -130,7 +138,8 @@ fn settings_path() -> PathBuf {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".config")));
-    base.unwrap_or_else(|| PathBuf::from(".")).join("fockytv-share/settings.json")
+    base.unwrap_or_else(|| PathBuf::from("."))
+        .join("fockytv-share/settings.json")
 }
 
 /// Bitrate de vídeo pela quantidade de pixels — 60fps em resolução nativa
@@ -140,8 +149,8 @@ pub fn bitrate_for(width: u32, height: u32, manual: u64) -> u64 {
         return manual;
     }
     match width as u64 * height as u64 {
-        p if p <= 2_300_000 => 10_000_000,   // ~1080p
-        p if p <= 3_800_000 => 16_000_000,   // ~1440p
-        _ => 24_000_000,                     // 4K
+        p if p <= 2_300_000 => 10_000_000, // ~1080p
+        p if p <= 3_800_000 => 16_000_000, // ~1440p
+        _ => 24_000_000,                   // 4K
     }
 }

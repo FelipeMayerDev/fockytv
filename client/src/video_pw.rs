@@ -144,7 +144,9 @@ fn run(fd: OwnedFd, node: u32, appsrc: gst_app::AppSrc, stop: Arc<AtomicBool>) {
                 return;
             };
             let datas = buffer.datas_mut();
-            let Some(data) = datas.first_mut() else { return };
+            let Some(data) = datas.first_mut() else {
+                return;
+            };
             let chunk = data.chunk();
             let size = chunk.size() as usize;
             let offset = chunk.offset() as usize;
@@ -243,7 +245,9 @@ fn run(fd: OwnedFd, node: u32, appsrc: gst_app::AppSrc, stop: Arc<AtomicBool>) {
             break;
         }
         // itera o mainloop por até 300ms
-        mainloop.loop_().iterate(pw::loop_::Timeout::Finite(std::time::Duration::from_millis(300)));
+        mainloop.loop_().iterate(pw::loop_::Timeout::Finite(
+            std::time::Duration::from_millis(300),
+        ));
     }
     let _ = stream.disconnect();
     eprintln!("[fockytv] pw captura encerrada");

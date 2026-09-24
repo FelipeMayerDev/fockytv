@@ -1,12 +1,8 @@
 use serde::Deserialize;
 use std::os::fd::OwnedFd;
-use std::path::PathBuf;
 
 use super::Candidate;
-use ashpd::desktop::{
-    PersistMode,
-    screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType},
-};
+use ashpd::desktop::screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType};
 
 /// O que o portal entregou depois da escolha do usuário.
 pub struct Pick {
@@ -17,30 +13,8 @@ pub struct Pick {
     pub size: Option<(i32, i32)>,
 }
 
-fn token_path() -> PathBuf {
-    let base = std::env::var("XDG_CACHE_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|_| std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))
-        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
-    base.join("fockytv-share")
-}
-
-pub fn load_token() -> Option<String> {
-    std::fs::read_to_string(token_path().join("portal-token"))
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
-fn save_token(tok: &str) {
-    let p = token_path();
-    let _ = std::fs::create_dir_all(&p);
-    let _ = std::fs::write(p.join("portal-token"), tok);
-}
-
 /// Abre o diálogo nativo do portal (monitor OU janela) e devolve a fonte.
-/// O restore_token memoriza a última escolha — na próxima, o diálogo abre
-/// já com ela; se o compositor aceitar, nem precisa interagir de novo.
+/// Não usa restore token: cada compartilhamento precisa permitir nova escolha.
 pub async fn pick() -> Result<Pick, String> {
     let proxy = Screencast::new()
         .await
@@ -50,14 +24,10 @@ pub async fn pick() -> Result<Pick, String> {
         .await
         .map_err(|e| format!("create_session: {e}"))?;
 
-    let mut opts = SelectSourcesOptions::default()
+    let opts = SelectSourcesOptions::default()
         .set_cursor_mode(CursorMode::Embedded)
         .set_sources(SourceType::Monitor | SourceType::Window)
-        .set_multiple(false)
-        .set_persist_mode(PersistMode::ExplicitlyRevoked);
-    if let Some(tok) = load_token() {
-        opts = opts.set_restore_token(tok.as_str());
-    }
+        .set_multiple(false);
     proxy
         .select_sources(&session, opts)
         .await
@@ -69,9 +39,6 @@ pub async fn pick() -> Result<Pick, String> {
         .map_err(|e| format!("start: {e}"))?
         .response()
         .map_err(|e| format!("seleção cancelada ({e})"))?;
-    if let Some(tok) = streams.restore_token() {
-        save_token(tok);
-    }
     let stream = streams
         .streams()
         .first()
@@ -119,9 +86,7 @@ pub async fn hypr_clients() -> Vec<HyprClient> {
         .output()
         .await;
     match out {
-        Ok(o) if o.status.success() => {
-            serde_json::from_slice(&o.stdout).unwrap_or_default()
-        }
+        Ok(o) if o.status.success() => serde_json::from_slice(&o.stdout).unwrap_or_default(),
         _ => vec![],
     }
 }

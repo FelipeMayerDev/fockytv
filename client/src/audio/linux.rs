@@ -12,7 +12,7 @@ use super::{feeder, AudioMode};
 /// Binário cujo áudio NUNCA entra na transmissão (prefixo, sem distinguir
 /// maiúsculas): o Discord (conversa privada) e tudo que for FockyTV (o canal
 /// de música local voltaria como eco fora de sincronia).
-const AUDIO_NEVER: [&str; 2] = ["discord", "fockytv"];
+const AUDIO_NEVER: [&str; 3] = ["discord", "vesktop", "fockytv"];
 
 /// Um nó de gravação pw-cat com autoconnect desligado; o poller liga nele os
 /// apps aprovados com pw-link (nó↔nó — o PipeWire casa os canais e mistura).
@@ -271,14 +271,20 @@ mod tests {
     use super::*;
 
     fn props(pairs: &[(&str, Value)]) -> HashMap<String, Value> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
     }
 
     #[test]
     fn exclui_discord_e_fockytv() {
         let mut p = props(&[
             ("media.class", Value::String("Stream/Output/Audio".into())),
-            ("application.process.binary", Value::String("Discord".into())),
+            (
+                "application.process.binary",
+                Value::String("Discord".into()),
+            ),
         ]);
         assert!(!eligible(&p, "fockytv-capture", &AudioMode::Exclude));
         p.insert(
@@ -289,9 +295,14 @@ mod tests {
         assert!(!eligible(&p, "fockytv-capture", &AudioMode::Exclude));
         p.insert(
             "application.process.binary".into(),
-            Value::String("firefox".into()),
+            Value::String("vesktop".into()),
         );
         p.remove("application.name");
+        assert!(!eligible(&p, "fockytv-capture", &AudioMode::Exclude));
+        p.insert(
+            "application.process.binary".into(),
+            Value::String("firefox".into()),
+        );
         assert!(eligible(&p, "fockytv-capture", &AudioMode::Exclude));
         p.insert(
             "application.process.binary".into(),
@@ -304,7 +315,10 @@ mod tests {
     fn janela_so_o_pid() {
         let p = props(&[
             ("media.class", Value::String("Stream/Output/Audio".into())),
-            ("application.process.binary", Value::String("firefox".into())),
+            (
+                "application.process.binary",
+                Value::String("firefox".into()),
+            ),
             ("application.process.pid", Value::Number(4242.into())),
         ]);
         assert!(eligible(&p, "fockytv-capture", &AudioMode::OnlyPid(4242)));

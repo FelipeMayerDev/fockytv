@@ -34,12 +34,17 @@ pub async fn listen(tx: tokio::sync::mpsc::UnboundedSender<Cmd>) {
     let path = sock_path();
     let _ = std::fs::remove_file(&path);
     let Ok(listener) = UnixListener::bind(&path) else {
-        eprintln!("[fockytv] aviso: sem socket de controle ({})", path.display());
+        eprintln!(
+            "[fockytv] aviso: sem socket de controle ({})",
+            path.display()
+        );
         return;
     };
     tokio::spawn(async move {
         loop {
-            let Ok((mut sock, _)) = listener.accept().await else { return };
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
             let tx = tx.clone();
             tokio::spawn(async move {
                 let mut buf = String::new();
