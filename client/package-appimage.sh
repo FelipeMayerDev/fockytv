@@ -10,7 +10,7 @@ APPDIR=build-appdir
 rm -rf "$APPDIR"
 
 ELEMENTS=(pipewiresrc queue videorate capsfilter videoconvert videoscale videoflip compositor
-          intervideosink intervideosrc glimagesink textoverlay v4l2src openh264enc
+          intervideosink intervideosrc ximagesink textoverlay v4l2src openh264enc
           h264parse rtph264pay opusenc rtpopuspay audioconvert appsrc whipsink
           webrtcbin nicesrc nicesink dtlssrtpenc dtlsenc srtpenc srtpdec
           rtpbin rtpsession rtprtxsend rtpstorage dtlssrtpdec)
