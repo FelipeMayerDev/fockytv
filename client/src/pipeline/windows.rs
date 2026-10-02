@@ -8,13 +8,14 @@ use crate::config::{bitrate_for, Config};
 
 /// Pipeline Windows:
 ///
-///   d3d11screencapturesrc (monitor OU window-handle via WGC) → openh264 ┐
+///   d3d11screencapturesrc (monitor OU window-handle via WGC) → encoder ┐
 ///                                                                      ├→ whipsink
 ///   audio-helper.exe (WASAPI por processo) → appsrc → opus ───────────┘
 ///
 /// A captura sai em memória D3D11: o d3d11download traz pra RAM antes do
 /// videoconvert. Mesma cadeia de qualidade do Linux: 60fps drop-only,
-/// resolução nativa, bitrate pela resolução.
+/// resolução nativa, bitrate pela resolução. Encoder pela escada
+/// (encoder.rs): D3D11 → Media Foundation → x264 → OpenH264.
 pub fn build(
     pick: &crate::picker::windows::Pick,
     target: AudioTarget,
@@ -37,6 +38,7 @@ pub fn build(
         cfg.max_bitrate,
     );
     let gop = (cfg.fps * 2).max(30);
+    let venc = super::encoder::select(&cfg.encoder)?;
 
     let launch = format!(
         r#"
@@ -49,7 +51,7 @@ pub fn build(
         ! compositor name=canvas
         canvas. ! capsfilter caps=video/x-raw,width={width},height={height} ! tee name=out
         out. ! queue leaky=downstream max-size-buffers=2 max-size-time=0
-        ! openh264enc name=venc usage-type=screen rate-control=bitrate scene-change-detection=false complexity=medium bitrate={bitrate} gop-size={gop}
+        ! {venc_chunk}
         ! h264parse
         ! rtph264pay pt=96 config-interval=-1
         ! queue leaky=downstream max-size-time=1000000000
@@ -74,7 +76,9 @@ pub fn build(
         url = cfg.server_url.trim_end_matches('/'),
         key = cfg.display_name,
         abr = cfg.audio_bitrate,
+        venc_chunk = venc.props(bitrate, gop),
     );
+    super::encoder::set_applied_bitrate(venc.bitrate(bitrate));
     if std::env::var("FOCKYTV_DUMP_LAUNCH").is_ok() {
         eprintln!("[fockytv] launch:\n{launch}");
     }

@@ -11,6 +11,9 @@ pub struct Config {
     /// 0 = escolher pela resolução da tela
     pub max_bitrate: u64,
     pub audio_bitrate: u32,
+    /// Escada de encoder de vídeo: "auto" (default), "hw", "sw" ou o nome
+    /// exato do elemento (ex.: "vah264lpenc", "x264enc").
+    pub encoder: String,
     pub hotkey: Option<String>,
 }
 
@@ -30,6 +33,8 @@ struct Raw {
     #[serde(default)]
     #[serde(rename = "audioBitrate")]
     audio_bitrate: Option<u32>,
+    #[serde(default)]
+    encoder: Option<String>,
     #[serde(default)]
     hotkey: Option<String>,
 }
@@ -85,6 +90,11 @@ pub fn load() -> Result<Config, String> {
         fps: raw.fps.filter(|f| *f > 0 && *f <= 240).unwrap_or(60),
         max_bitrate: raw.max_bitrate.unwrap_or(0),
         audio_bitrate: raw.audio_bitrate.unwrap_or(192_000),
+        encoder: std::env::var("FOCKYTV_ENCODER")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or(raw.encoder.filter(|s| !s.trim().is_empty()))
+            .unwrap_or_else(|| "auto".into()),
         hotkey: load_hotkey().or(raw.hotkey),
     };
     if cfg.server_url.is_empty() {
@@ -102,11 +112,12 @@ pub fn load() -> Result<Config, String> {
     }
     if let Some(p) = found {
         eprintln!(
-            "[fockytv] config: {} (server {}, nick {}, {}fps)",
+            "[fockytv] config: {} (server {}, nick {}, {}fps, encoder {})",
             p.display(),
             cfg.server_url,
             cfg.display_name,
-            cfg.fps
+            cfg.fps,
+            cfg.encoder
         );
     }
     Ok(cfg)

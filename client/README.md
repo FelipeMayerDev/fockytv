@@ -10,7 +10,12 @@ nativa, sem re-escala.
 - Inicie o app: aparece o ícone no tray (clique no ícone = mesmo botão de
   compartilhar).
 - **Compartilhar/Parar**: item de menu do tray, clique no ícone, ou o atalho.
-  Ao iniciar, escolha 15/30/60 fps e 2/6/12 Mbps; a escolha vale pela sessão.
+  Ao iniciar, escolha 15/30/60 fps — 2/6/12 Mbps nos baixos, 6/12/24 no 60;
+  a escolha vale pela sessão.
+- **Encoder**: escolhido por probe na hora de transmitir — VAAPI (hardware)
+  → NVENC → x264 → OpenH264 (Linux); D3D11 → Media Foundation → x264 →
+  OpenH264 (Windows). O tray/log diz qual entrou. VA no host exige o driver
+  instalado (Arch: `intel-media-driver` + `gst-plugin-va`).
 - Escolha **Monitor** ou **Janela** no diálogo do portal. Ele abre a cada
   compartilhamento para permitir trocar a fonte.
 - Áudio:
@@ -46,13 +51,17 @@ Electron:
   "displayName": "focky",
   "fps": 60,
   "maxBitrate": 0,
-  "audioBitrate": 192000
+  "audioBitrate": 192000,
+  "encoder": "auto"
 }
 ```
 
 `displayName` é a stream key (o nick). `maxBitrate` 0 = automático pela
-resolução (1080p→10M, 1440p→16M, 4K→24M). Env `FOCKYTV_SERVER` /
-`FOCKYTV_NAME` sobrescrevem (útil pra teste na LAN).
+resolução (1080p→10M, 1440p→16M, 4K→24M). `encoder`: "auto" (default),
+"hw", "sw" ou o elemento exato (ex. "vah264lpenc", "x264enc") — pedido
+explícito que não funciona é erro, sem fallback silencioso. Env
+`FOCKYTV_SERVER` / `FOCKYTV_NAME` / `FOCKYTV_ENCODER` sobrescrevem (útil
+pra teste na LAN).
 
 O menu de qualidade substitui `fps` e `maxBitrate` apenas durante o
 compartilhamento atual.

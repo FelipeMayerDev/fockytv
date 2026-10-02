@@ -10,13 +10,14 @@ use crate::config::{bitrate_for, Config};
 
 /// Monta e sobe o pipeline completo de publicação:
 ///
-///   pipewiresrc → 60fps nativo → openh264 → rtph264pay ┐
-///                                                      ├→ whipsink → WHIP
-///   pw-cat → appsrc → opus → rtpopuspay ───────────────┘
+///   pipewiresrc → 60fps nativo → encoder da escada → rtph264pay ┐
+///                                                               ├→ whipsink → WHIP
+///   pw-cat → appsrc → opus → rtpopuspay ──────────────────────┘
 ///
 /// A resolução nunca sobe e nunca re-escala: videorate drop-only derruba o
 /// que passar do fps configurado. O bitrate inicial é estimado pelo tamanho
-/// (lógico) do portal e afinado depois que os caps reais negociarem.
+/// (lógico) do portal e afinado depois que os caps reais negociarem. O
+/// encoder vem da escada (encoder.rs): VAAPI → NVENC → x264 → OpenH264.
 pub fn build(
     fd: &std::os::fd::OwnedFd,
     node: u32,
@@ -28,6 +29,7 @@ pub fn build(
     let (w, h) = size.unwrap_or((1920, 1080));
     let bitrate = bitrate_for(w.unsigned_abs(), h.unsigned_abs(), cfg.max_bitrate);
     let gop = (cfg.fps * 2).max(30);
+    let venc = super::encoder::select(&cfg.encoder)?;
     // FOCKYTV_TEST_VIDEO=1 troca a fonte por videotestsrc (diagnóstico sem
     // portal). No caminho normal a captura é PipeWire nativo (video_pw.rs)
     // empurrando neste appsrc — o gstpipewiresrc desta versão dead-locka com
@@ -49,7 +51,7 @@ pub fn build(
         ! compositor name=canvas
         canvas. ! capsfilter caps=video/x-raw,width={w},height={h} ! tee name=out
         out. ! queue leaky=downstream max-size-buffers=2 max-size-time=0
-        ! openh264enc name=venc usage-type=screen rate-control=bitrate scene-change-detection=false complexity=medium bitrate={bitrate} gop-size={gop}
+        ! {venc_chunk}
         ! h264parse
         ! rtph264pay pt=96 config-interval=-1
         ! queue leaky=downstream max-size-time=1000000000
@@ -80,7 +82,9 @@ pub fn build(
         url = cfg.server_url.trim_end_matches('/'),
         key = cfg.display_name,
         abr = cfg.audio_bitrate,
+        venc_chunk = venc.props(bitrate, gop),
     );
+    super::encoder::set_applied_bitrate(venc.bitrate(bitrate));
 
     if std::env::var("FOCKYTV_DUMP_LAUNCH").is_ok() {
         eprintln!("[fockytv] launch:\n{launch}");

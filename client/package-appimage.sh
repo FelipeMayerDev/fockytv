@@ -14,6 +14,11 @@ ELEMENTS=(pipewiresrc queue videorate capsfilter videoconvert videoscale videofl
           h264parse rtph264pay opusenc rtpopuspay audioconvert appsrc whipsink
           webrtcbin nicesrc nicesink dtlssrtpenc dtlsenc srtpenc srtpdec
           rtpbin rtpsession rtprtxsend rtpstorage dtlssrtpdec)
+# Encoders da escada (src/pipeline/encoder.rs): embute o que existir na
+# máquina de build — o probe do cliente escolhe em runtime, e o que faltar
+# aqui só reduz a escada (VA no host precisa do intel-media-driver installado
+# no sistema de quem executa; libva/x264 vem dentro do AppImage por ldd).
+OPTIONAL=(vah264lpenc nvh264enc x264enc)
 
 echo "── build release"
 cargo build --release
@@ -46,12 +51,21 @@ EOF
 
 echo "── plugins gstreamer"
 declare -A SEEN
-for el in "${ELEMENTS[@]}"; do
+copy_plugin() {
+    local el="$1" so
     so=$(gst-inspect-1.0 "$el" 2>/dev/null | grep -oP 'Filename\s+\K\S+' || true)
-    [ -n "$so" ] || { echo "elemento sem plugin: $el"; exit 1; }
-    [ -n "${SEEN[$so]:-}" ] && continue
+    if [ -z "$so" ]; then
+        return 1
+    fi
+    [ -n "${SEEN[$so]:-}" ] && return 0
     SEEN[$so]=1
     cp -L "$so" "$APPDIR/usr/lib/gstreamer-1.0/"
+}
+for el in "${ELEMENTS[@]}"; do
+    copy_plugin "$el" || { echo "elemento sem plugin: $el"; exit 1; }
+done
+for el in "${OPTIONAL[@]}"; do
+    copy_plugin "$el" || echo "   opcional ausente (escada sem $el): $el"
 done
 
 # libs que vêm do host (glibc, toolchain runtime e pilha gráfica/Wayland)

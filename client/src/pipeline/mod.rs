@@ -1,6 +1,14 @@
 use gstreamer as gst;
 use gstreamer::prelude::*;
 
+#[cfg(target_os = "linux")]
+use crate::audio::AudioMode;
+#[cfg(target_os = "windows")]
+use crate::audio::AudioTarget;
+use crate::config::Config;
+
+pub mod encoder;
+
 /// Pipeline ao vivo. O fd do portal fica com a sessão no main (ela o
 /// mantém aberto e o reutiliza nas reconexões do whipsink).
 pub struct Live {
@@ -243,18 +251,36 @@ impl Preview {
 #[cfg(target_os = "linux")]
 pub mod linux;
 
-
-#[cfg(target_os = "linux")]
-pub use linux::build;
-
 #[cfg(target_os = "windows")]
 pub mod windows;
 
-#[cfg(target_os = "windows")]
-pub use windows::build;
+/// Build com invalidação da escada de encoders: um erro depois da escolha
+/// (device de hardware que sumiu, driver resetado) não pode deixar a escolha
+/// morta presa no cache — a próxima sessão re-probe.
+#[cfg(target_os = "linux")]
+pub fn build(
+    fd: &std::os::fd::OwnedFd,
+    node: u32,
+    size: Option<(i32, i32)>,
+    mode: AudioMode,
+    cfg: &Config,
+) -> Result<(Live, crate::audio::Running), String> {
+    linux::build(fd, node, size, mode, cfg).inspect_err(|_| encoder::invalidate())
+}
 
-/// Ajusta o bitrate do openh264enc ao vivo quando a resolução real negociada
-/// difere da estimativa (portal devolve tamanho lógico, não pixels).
+#[cfg(target_os = "windows")]
+pub fn build(
+    pick: &crate::picker::windows::Pick,
+    target: AudioTarget,
+    cfg: &Config,
+) -> Result<(Live, crate::audio::Running), String> {
+    windows::build(pick, target, cfg).inspect_err(|_| encoder::invalidate())
+}
+
+/// Ajusta o bitrate do encoder ao vivo quando a resolução real negociada
+/// difere da estimativa (portal devolve tamanho lógico, não pixels). A
+/// unidade do `bitrate` depende do encoder escolhido (bps no OpenH264, kbps
+/// no resto) — a conversão fica no encoder::Kind.
 pub fn refine_bitrate(live: &Live, manual: u64) -> Option<(u32, u32, u32)> {
     let capsfilter = live.pipeline.by_name("vcaps")?;
     let pad = capsfilter.static_pad("sink")?;
@@ -268,10 +294,13 @@ pub fn refine_bitrate(live: &Live, manual: u64) -> Option<(u32, u32, u32)> {
         .map(|f| f.numer() as u32)
         .unwrap_or(0);
     if let Some(enc) = live.pipeline.by_name("venc") {
-        let want = crate::config::bitrate_for(w, h, manual);
-        let cur = enc.property::<u32>("bitrate");
-        if cur != want as u32 {
-            let _ = enc.set_property("bitrate", want as u32);
+        let want = encoder::chosen_kind()
+            .map(|k| k.bitrate(crate::config::bitrate_for(w, h, manual)))
+            .unwrap_or_else(|| crate::config::bitrate_for(w, h, manual));
+        if encoder::applied_bitrate() != want {
+            // por string: o tipo gint/guint da property varia por encoder
+            enc.set_property_from_str("bitrate", &want.to_string());
+            encoder::set_applied_bitrate(want);
         }
     }
     Some((w, h, fps))
