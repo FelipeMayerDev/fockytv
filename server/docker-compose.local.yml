@@ -1,7 +1,8 @@
-# Local (máquina do focky): o compose principal aponta o NAT 1:1 pro IP do
-# servidor de deploy (192.168.1.129); daqui, os candidatos ICE precisam ser
-# o IP desta máquina pra WebRTC conectar na LAN.
+# Local (máquina do focky): o compose principal aponta o candidato ICE pro
+# IP do servidor de deploy (192.168.1.129); daqui, os candidatos ICE precisam
+# ser o IP desta máquina pra WebRTC conectar na LAN.
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
 services:
-  broadcast-box:
+  mediamtx:
     environment:
-      - NAT_1_TO_1_IP=192.168.1.175
+      - MTX_WEBRTCADDITIONALHOSTS=192.168.1.175
