@@ -725,7 +725,9 @@ function release (pc) {
 function tuneSender (s, fps) {
   const p = s.getParameters()
   if (!p.encodings?.length) p.encodings = [{}]
-  p.encodings[0].maxBitrate = 15_000_000
+  // 32M = mesmo teto do client nativo (1080p60 com movimento). O Chrome só
+  // usa o que o encoder dele aguentar — em software costuma capar antes.
+  p.encodings[0].maxBitrate = 32_000_000
   p.encodings[0].maxFramerate = fps
   p.encodings[0].scaleResolutionDownBy = 1
   p.degradationPreference = 'maintain-resolution'
