@@ -19,6 +19,9 @@ use gstreamer::prelude::*;
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
+    /// VDENC dos iGPUs — só registra se o driver expõe VAEntrypointEncSliceLP
+    VaH264Lp,
+    /// VAAPI genérico (EncSlice) — o caminho normal em Intel/AMD
     VaH264,
     NvH264,
     D3d11H264,
@@ -30,7 +33,8 @@ pub enum Kind {
 impl Kind {
     pub fn element(self) -> &'static str {
         match self {
-            Kind::VaH264 => "vah264lpenc",
+            Kind::VaH264Lp => "vah264lpenc",
+            Kind::VaH264 => "vah264enc",
             Kind::NvH264 => "nvh264enc",
             Kind::D3d11H264 => "d3d11h264enc",
             Kind::MfH264 => "mfh264enc",
@@ -41,6 +45,7 @@ impl Kind {
 
     pub fn label(self) -> &'static str {
         match self {
+            Kind::VaH264Lp => "VAAPI LP (hardware)",
             Kind::VaH264 => "VAAPI (hardware)",
             Kind::NvH264 => "NVENC (hardware)",
             Kind::D3d11H264 => "D3D11 (hardware)",
@@ -79,10 +84,17 @@ impl Kind {
                 "x264enc name=venc tune=zerolatency speed-preset=superfast \
                  bitrate={kbps} key-int-max={gop}"
             ),
-            // LP = VDENC, o bloco de encode leve dos iGPUs Intel/AMD: feito
-            // pra realtime e consome pouca CPU. Sem rate-control explícito,
-            // o default CBR do plugin serve.
-            Kind::VaH264 => format!("vah264lpenc name=venc bitrate={kbps} gop-size={gop}"),
+            // Os dois VAAPI: LP primeiro (bloco VDENC, feito pra realtime e
+            // quase não consome CPU), genérico depois. b-frames e CBR já são
+            // default do plugin; o GOP entra por key-int-max (nome na 1.28 —
+            // o probe valida, e um nome errado em outra versão só derruba o
+            // candidato pro próximo da escada).
+            Kind::VaH264Lp => {
+                format!("vah264lpenc name=venc bitrate={kbps} key-int-max={gop}")
+            }
+            Kind::VaH264 => {
+                format!("vah264enc name=venc bitrate={kbps} key-int-max={gop}")
+            },
             Kind::NvH264 => format!(
                 "nvh264enc name=venc preset=low-latency-hq tune=ultra-low-latency \
                  rc-mode=cbr bitrate={kbps} gop-size={gop}"
@@ -96,7 +108,13 @@ impl Kind {
 }
 
 #[cfg(target_os = "linux")]
-pub const LADDER: [Kind; 4] = [Kind::VaH264, Kind::NvH264, Kind::X264, Kind::OpenH264];
+pub const LADDER: [Kind; 5] = [
+    Kind::VaH264Lp,
+    Kind::VaH264,
+    Kind::NvH264,
+    Kind::X264,
+    Kind::OpenH264,
+];
 #[cfg(target_os = "windows")]
 pub const LADDER: [Kind; 4] = [Kind::D3d11H264, Kind::MfH264, Kind::X264, Kind::OpenH264];
 

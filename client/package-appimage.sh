@@ -10,7 +10,7 @@ APPDIR=build-appdir
 rm -rf "$APPDIR"
 
 ELEMENTS=(pipewiresrc queue videorate capsfilter videoconvert videoscale videoflip compositor
-          intervideosink intervideosrc ximagesink textoverlay v4l2src openh264enc
+          intervideosink intervideosrc ximagesink textoverlay v4l2src openh264enc videotestsrc
           h264parse rtph264pay opusenc rtpopuspay audioconvert appsrc whipsink
           webrtcbin nicesrc nicesink dtlssrtpenc dtlsenc srtpenc srtpdec
           rtpbin rtpsession rtprtxsend rtpstorage dtlssrtpdec)
@@ -18,7 +18,8 @@ ELEMENTS=(pipewiresrc queue videorate capsfilter videoconvert videoscale videofl
 # máquina de build — o probe do cliente escolhe em runtime, e o que faltar
 # aqui só reduz a escada (VA no host precisa do intel-media-driver installado
 # no sistema de quem executa; libva/x264 vem dentro do AppImage por ldd).
-OPTIONAL=(vah264lpenc nvh264enc x264enc)
+# videotestsrc é obrigatório: é a fonte do probe E do FOCKYTV_TEST_VIDEO.
+OPTIONAL=(vah264lpenc vah264enc nvh264enc x264enc)
 
 echo "── build release"
 cargo build --release
@@ -53,7 +54,10 @@ echo "── plugins gstreamer"
 declare -A SEEN
 copy_plugin() {
     local el="$1" so
-    so=$(gst-inspect-1.0 "$el" 2>/dev/null | grep -oP 'Filename\s+\K\S+' || true)
+    # ancorado com indentação: nos elementos o caminho é a linha "Filename"
+    # dentro de "Plugin Details" (indentada) — e docs de propriedade podem
+    # conter a palavra "Filename" (ex.: multipass-cache-file do x264enc)
+    so=$(gst-inspect-1.0 "$el" 2>/dev/null | grep -m1 -oP '^\s+Filename\s+\K\S+' || true)
     if [ -z "$so" ]; then
         return 1
     fi

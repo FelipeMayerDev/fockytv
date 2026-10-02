@@ -15,7 +15,8 @@ nativa, sem re-escala.
 - **Encoder**: escolhido por probe na hora de transmitir — VAAPI (hardware)
   → NVENC → x264 → OpenH264 (Linux); D3D11 → Media Foundation → x264 →
   OpenH264 (Windows). O tray/log diz qual entrou. VA no host exige o driver
-  instalado (Arch: `intel-media-driver` + `gst-plugin-va`).
+  instalado (Arch: `intel-media-driver` + `gst-plugin-va`; iGPUs sem o
+  entrypoint LP usam o `vah264enc` genérico).
 - Escolha **Monitor** ou **Janela** no diálogo do portal. Ele abre a cada
   compartilhamento para permitir trocar a fonte.
 - Áudio:
