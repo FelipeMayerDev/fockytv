@@ -154,14 +154,16 @@ fn settings_path() -> PathBuf {
 }
 
 /// Bitrate de vídeo pela quantidade de pixels — 60fps em resolução nativa
-/// pede folga; quem quiser trava no config.json (maxBitrate).
+/// pede folga; quem quiser trava no config.json (maxBitrate). Com encoder de
+/// hardware a cadeia aguenta esses valores de sobra; o teto real é o upload
+/// de quem publica.
 pub fn bitrate_for(width: u32, height: u32, manual: u64) -> u64 {
     if manual > 0 {
         return manual;
     }
     match width as u64 * height as u64 {
-        p if p <= 2_300_000 => 10_000_000, // ~1080p
-        p if p <= 3_800_000 => 16_000_000, // ~1440p
-        _ => 24_000_000,                   // 4K
+        p if p <= 2_300_000 => 12_000_000, // ~1080p
+        p if p <= 3_800_000 => 20_000_000, // ~1440p
+        _ => 32_000_000,                   // 4K
     }
 }

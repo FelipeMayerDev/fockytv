@@ -11,7 +11,8 @@ pub enum State {
 }
 
 // 60fps pede mais bitrate que 30fps pro mesmo conteúdo: a fileira do 60
-// anda em 6/12/24 em vez de repetir 2/6/12 (12 fixo engasgava movimento).
+// anda em 8/16/32 (32 = H264 1080p60 limpo com movimento pesado). O teto
+// real é o upload de quem publica; maxBitrate no config.json vai além.
 pub const QUALITY: [(u32, u64); 9] = [
     (15, 2_000_000),
     (15, 6_000_000),
@@ -19,16 +20,16 @@ pub const QUALITY: [(u32, u64); 9] = [
     (30, 2_000_000),
     (30, 6_000_000),
     (30, 12_000_000),
-    (60, 6_000_000),
-    (60, 12_000_000),
-    (60, 24_000_000),
+    (60, 8_000_000),
+    (60, 16_000_000),
+    (60, 32_000_000),
 ];
 
 pub fn quality_label(fps: u32, bitrate: u64) -> String {
     let name = match bitrate {
         2_000_000 => "econômico",
-        6_000_000 => "stream",
-        12_000_000 => "alta",
+        6_000_000 | 8_000_000 => "stream",
+        12_000_000 | 16_000_000 => "alta",
         _ => "máxima",
     };
     format!("{fps} fps — {} Mbps ({name})", bitrate / 1_000_000)
@@ -42,8 +43,8 @@ mod tests {
     fn perfis_cobrem_fps_e_bitrates_pedidos() {
         assert!(QUALITY.iter().any(|p| *p == (15, 2_000_000)));
         assert!(QUALITY.iter().any(|p| *p == (30, 6_000_000)));
-        assert!(QUALITY.iter().any(|p| *p == (60, 12_000_000)));
-        assert!(QUALITY.iter().any(|p| *p == (60, 24_000_000)));
+        assert!(QUALITY.iter().any(|p| *p == (60, 16_000_000)));
+        assert!(QUALITY.iter().any(|p| *p == (60, 32_000_000)));
     }
 }
 
