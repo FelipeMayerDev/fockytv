@@ -535,6 +535,18 @@
     <label class="switch"><input type="checkbox" id="cfg-rpc" data-set="rpc"><span></span></label>
   </div>
 
+  <div class="row" style="margin:12px 0 0">
+    <div>
+      <label style="color:hsl(var(--foreground))">Latência do player</label>
+      <p class="desc" style="margin:2px 0 0">equilibrada guarda quadros pra engolir falha de rede; mínima é pro jogo em LAN</p>
+    </div>
+    <select id="cfg-latency" data-set-val="latency" style="width:auto">
+      <option value="0">Mínima (0 ms)</option>
+      <option value="150" selected>Equilibrada (150 ms)</option>
+      <option value="400">Suave (400 ms)</option>
+    </select>
+  </div>
+
   <div class="actions">
     <button id="cfg-close">Fechar</button>
   </div>
@@ -766,11 +778,33 @@ async function publish (key, st, fps, codec) {
   return pc
 }
 
+// ── buffer de jitter do viewer (config "Latência do player") ─────────────
+// Sem alvo explícito o navegador gerencia o buffer sozinho e oscila: com
+// jitter de rede ele deixa o quadro atrasar e derruba — o 60fps engasga. O
+// alvo fixo guarda quadros o bastante pra variância da rede; 0 = latência
+// crua, engasga no aperto. Vale pra player, grade e áudio da música: todos
+// passam por watch(). Firefox antigo só conhece o hint, em segundos.
+const viewerPcs = new Set()
+const latencyTarget = () => +(setVal('latency') ?? 150)
+function tuneReceiver (r) {
+  const ms = latencyTarget()
+  if ('jitterBufferTarget' in RTCRtpReceiver.prototype) r.jitterBufferTarget = ms
+  else try { r.playoutDelayHint = ms / 1000 } catch {}
+}
+function retuneViewers () {
+  viewerPcs.forEach(p => {
+    if (p.connectionState === 'closed') { viewerPcs.delete(p); return }
+    p.getReceivers().forEach(tuneReceiver)
+  })
+}
+
 async function watch (key, videoEl, viewer) {
   const pc = new RTCPeerConnection()
+  viewerPcs.add(pc)
   pc.addTransceiver('video', { direction: 'recvonly' })
   pc.addTransceiver('audio', { direction: 'recvonly' })
   pc.ontrack = e => {
+    tuneReceiver(e.receiver)
     videoEl.srcObject = e.streams[0]
     videoEl.play?.().catch(() => {})
     if (discord) pc.oniceconnectionstatechange =
@@ -1592,6 +1626,8 @@ document.querySelectorAll('#dlg-cfg [data-set]').forEach(el =>
   el.onchange = e => localStorage.setItem('set:' + e.target.dataset.set, e.target.checked ? '1' : '0'))
 document.querySelectorAll('#dlg-cfg [data-set-val]').forEach(el =>
   el.onchange = e => localStorage.setItem('set:' + e.target.dataset.setVal, e.target.value))
+// o genérico acima só grava; este aplica na hora nas sessões já abertas
+$('#cfg-latency').addEventListener('change', retuneViewers)
 
 $('#cfg-close').onclick = () => $('#dlg-cfg').close()
 
@@ -2269,16 +2305,22 @@ async function showNet (pc) {
   const total = d ? d.lost + d.got : 0
   const loss = total > 0 ? (100 * d.lost) / total : 0
   const [color, label] = grade(loss, rtt, !!d && d.got === 0)
+  // buffer de playout real (média desde o início da sessão): é o efeito do
+  // "Latência do player" nas configurações — deixa ver o alvo valendo
+  const buf = v.jitterBufferEmittedCount
+    ? Math.round(v.jitterBufferDelay / v.jitterBufferEmittedCount * 1000)
+    : null
 
   $('#net-dot').style.background = color
   $('#net').title = `Conexão ${label}`
+  const bufTxt = buf != null ? ` · buffer ${buf} ms` : ''
   $('#net-stats').textContent = audioMode
     ? `${d && d.bytes > 0 ? Math.round((d.bytes * 8) / 2 / 1000) : '—'} kbps` +
       (rtt ? ` · ${Math.round(rtt)} ms` : '') +
-      (loss >= 0.1 ? ` · ${loss.toFixed(1)}% perda` : '')
+      (loss >= 0.1 ? ` · ${loss.toFixed(1)}% perda` : '') + bufTxt
     : `${v.frameWidth ?? '—'}×${v.frameHeight ?? '—'} · ${Math.round(v.framesPerSecond ?? 0)} fps` +
       (rtt ? ` · ${Math.round(rtt)} ms` : '') +
-      (loss >= 0.1 ? ` · ${loss.toFixed(1)}% perda` : '')
+      (loss >= 0.1 ? ` · ${loss.toFixed(1)}% perda` : '') + bufTxt
 }
 
 // ── grade ao vivo ────────────────────────────────────────────────────────
