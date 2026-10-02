@@ -771,6 +771,22 @@ async function publish (key, st, fps, codec) {
       .filter(c => c.mimeType.toLowerCase() === codec)
     if (list.length) pc.getTransceivers().find(t => t.sender === sender)
       .setCodecPreferences(list)
+  } else if (/Windows|Mac/.test(navigator.userAgent)) {
+    // Sem escolha explícita: H264 primeiro — é o que sai por hardware em
+    // qualquer GPU de desktop (D3D11/VideoToolbox) — e AV1 em seguida
+    // (hardware nas GPUs novas). O "Automático" do Chrome costuma cair em
+    // VP8 de software, o caminho do "não passa de 40 fps". No Linux o auto
+    // fica: H264 de software (openh264) é pior que o VP8 de software dele.
+    const caps = RTCRtpSender.getCapabilities('video').codecs
+    const prio = [
+      ...caps.filter(c => /^video\/h264/i.test(c.mimeType)),
+      ...caps.filter(c => /^video\/av1/i.test(c.mimeType)),
+    ]
+    if (prio.length) {
+      const rest = caps.filter(c => !prio.includes(c))
+      pc.getTransceivers().find(t => t.sender === sender)
+        .setCodecPreferences([...prio, ...rest])
+    }
   }
 
   await tuneSender(sender, fps)

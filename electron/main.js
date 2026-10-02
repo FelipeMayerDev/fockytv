@@ -14,6 +14,13 @@ if (!app.requestSingleInstanceLock()) app.quit()
 
 const wayland = process.platform === 'linux' && !!process.env.WAYLAND_DISPLAY
 
+// Encode de vídeo por hardware no caminho WebRTC do Chromium (Linux/VAAPI):
+// switches têm que entrar antes do ready. Onde não há suporte, o Chromium
+// ignora e segue no software — sem efeito colateral conhecido.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-features', 'VaapiVideoEncoder,VaapiVideoDecoder')
+}
+
 const configPath = [
   process.env.APPIMAGE && path.join(path.dirname(process.env.APPIMAGE), 'config.json'),
   path.join(path.dirname(app.getPath('exe')), 'config.json'),
