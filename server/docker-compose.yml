@@ -1,64 +1,77 @@
 # Local:  docker compose up   → http://localhost:8180/
-# Externo: o agente playit lê o secret de ./playit-data/playit.toml
-#          (gerado uma vez com `playit claim generate/exchange`).
-# Passo a passo e as armadilhas: ../README.md
+# VPS:    este arquivo tem alteração local lá (IP público direto em vez de
+#         playit) — ver AGENTS.md antes de sobrescrever.
+#
+# Arquitetura: mediamtx é o motor de mídia (WHIP/WHEP/ICE); o live-api é a
+# única porta HTTP (sinalização, /api/status, /api/fixed/*, estáticos da ui/).
+# Portas públicas: 8180/tcp → live-api (HTTP) e 8180/udp → mediamtx (mídia),
+# exatamente como era com o broadcast-box.
+#
+# Os IPs de candidato ICE vêm de env com default da LAN:
+#   MTX_ADDITIONAL_HOSTS=192.3.176.195  (VPS)
+#   MTX_ADDITIONAL_HOSTS=127.0.0.1      (teste local)
+#
+# O playit saiu: sem ele, acesso externo à LAN não existe (o candidato
+# público do túnel era injetado no SDP pelo APPEND_CANDIDATE do
+# broadcast-box, que o mediamtx não tem). Pra acesso externo use a VPS.
 services:
-  broadcast-box:
-    # upstream + server/broadcast-box/viewer-identity.patch: /api/status
-    # informa quem está assistindo (nick no POST do WHEP via ?viewer=)
-    build: ./broadcast-box
-    image: fockytv/broadcast-box:viewer
-    container_name: fockytv
+  mediamtx:
+    image: bluenviron/mediamtx:1.21.1
+    container_name: fockytv-mtx
     restart: unless-stopped
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml
+    environment:
+      # IP que os clientes ICE alcançam (vira candidato no SDP junto com os
+      # IPs das interfaces — o 172.x da rede docker é o que o gravador do
+      # fixed-live usa, sem hairpin)
+      - MTX_WEBRTCADDITIONALHOSTS=${MTX_ADDITIONAL_HOSTS:-192.168.1.129}
+    ports:
+      - "8180:8180/udp"
+      # 8889 (WHIP/WHEP), 9997 (api) e 9998 (metrics) ficam internos: só o
+      # live-api fala com eles
+
+  live-api:
+    build: ./live-api
+    image: fockytv/live-api:latest
+    container_name: fockytv-api
+    restart: unless-stopped
+    depends_on:
+      - mediamtx
     ports:
       - "8180:8080/tcp"
-      - "8180:8180/udp"
     environment:
-      # Lista, não mapa: aqui "\r\n" vira CRLF de verdade. Em mapa com aspas
-      # duplas você precisaria escapar, e o SDP receberia os caracteres literais.
-      - HTTP_ADDRESS=:8080
-      - UDP_MUX_PORT=8180
-      - NAT_1_TO_1_IP=192.168.1.129
-      - NETWORK_TYPES=udp4|tcp4
-      # /api/fixed/* (busca/playlist das lives fixas) vira proxy pro sidecar
+      - MTX_WEBRTC=http://mediamtx:8889
+      - MTX_API=http://mediamtx:9997
+      - MTX_USER=liveapi
+      - MTX_PASS=fockytv-internal
       - FIXED_LIVE_URL=http://fixed-live:3000
-      # ponytail: self-test morre em hairpin NAT do container; cliente real via LAN funciona
-      - NETWORK_TEST_ON_START=FALSE
-      # ponytail: o playit alocou 3652, não 8180 — anuncia o par público direto no SDP.
-      # Contorna o gotcha da porta: NAT_1_TO_1_IP reescreve só o IP, nunca a porta.
-      - "APPEND_CANDIDATE=a=candidate:playit1 1 udp 1694498815 147.185.221.213 3652 typ host\r\n"
+      - STATIC_DIR=/srv/ui
+      - DOWNLOAD_DIR=/srv/download
     volumes:
-      - ../ui/index.html:/broadcast-box/web/build/index.html:ro
-      - ../ui/discord.js:/broadcast-box/web/build/discord.js:ro
-      - ../ui/jam.js:/broadcast-box/web/build/jam.js:ro
-      - ../ui/jam-worklet.js:/broadcast-box/web/build/jam-worklet.js:ro
-      - ../ui/shim.html:/broadcast-box/web/build/shim.html:ro
-      - ../ui/sw.js:/broadcast-box/web/build/sw.js:ro
-      - ../ui/manifest.json:/broadcast-box/web/build/manifest.json:ro
-      - ../ui/du-bist-gut-genug.mp3:/broadcast-box/web/build/du-bist-gut-genug.mp3:ro
-      - ../ui/assets:/broadcast-box/web/build/assets:ro
-      # instalador do app pra baixar do próprio site (dist/ não entra no git:
-      # o .exe é copiado pro servidor por scp). Sem a pasta, o mount cria
-      # vazia e o /download só devolve 404 — nada quebra.
-      - ../dist/win:/broadcast-box/web/build/download:ro
+      # diretório inteiro (não arquivo único): trocar asset não exige restart
+      - ../ui:/srv/ui:ro
+      # instalador do app (dist/ não entra no git: o .exe chega por scp).
+      # Sem a pasta, o mount cria vazia e o /download só devolve 404.
+      - ../dist/win:/srv/download:ro
 
-  # Lives fixas (TV e música): yt-dlp + ffmpeg + werift publicando no
-  # broadcast-box via WHIP nas chaves `tv` e `music`. Sem viewers por 60 s a
-  # stream desliga sozinha — a playlist de música sobrevive.
+  # Lives fixas (TV e música): yt-dlp + ffmpeg + werift publicando via WHIP
+  # nas chaves `tv` e `music`. Sem viewers por 60 s a stream desliga sozinha
+  # — a playlist de música sobrevive.
   fixed-live:
     build: ./fixed-live
     image: fockytv/fixed-live:latest
     container_name: fockytv-fixed
     restart: unless-stopped
     environment:
-      - BB_URL=http://broadcast-box:8080
+      - BB_URL=http://live-api:8080
       - IDLE_MS=60000
       # link usado nos anúncios do Discord ("fulano subiu ao ar")
-      - PUBLIC_URL=http://192.168.1.129:8180
-      # gravador: IP que o broadcast-box anuncia nos candidatos (NAT_1_TO_1_IP);
+      - PUBLIC_URL=${PUBLIC_URL:-http://192.168.1.129:8180}
+      # gravador: IP que o mediamtx anuncia nos candidatos (webrtcAdditionalHosts);
       # da rede docker trocamos pelo hostname, o hairpin UDP nem sempre volta
-      - BB_PUBLIC_IP=192.168.1.129
-      - BB_CANDIDATE_HOST=broadcast-box
+      - BB_PUBLIC_IP=${BB_PUBLIC_IP:-192.168.1.129}
+      - BB_CANDIDATE_HOST=mediamtx
       # pra anunciar num canal do Discord: crie um webhook lá
       # (Configurações do canal → Integrações → Webhooks) e descomente:
       # - DISCORD_WEBHOOK=https://discord.com/api/webhooks/…
@@ -68,14 +81,3 @@ services:
       - ./cookies.txt:/app/cookies.txt
       # SQLite (histórico de músicas, chat): sobrevive a recriação do container
       - ./fixed-live-data:/app/data
-
-  playit:
-    image: ghcr.io/playit-cloud/playit-agent:0.15
-    container_name: fockytv-playit
-    restart: unless-stopped
-    # host net pra alcançar 8180/udp direto, sem mapping
-    network_mode: host
-    # o entrypoint padrão exige SECRET_KEY no ambiente; este lê do toml montado
-    entrypoint: playit -s --platform_docker start
-    volumes:
-      - ./playit-data:/etc/playit

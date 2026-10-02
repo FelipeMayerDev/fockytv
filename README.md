@@ -3,16 +3,18 @@
 Low-latency, high-quality screen sharing you host yourself. Replaces OBS with a
 purpose-built client. Server and client are separate.
 
-The server is [broadcast-box](https://github.com/Glimesh/broadcast-box) (Pion,
-WHIP in / WHEP out) running in Docker — no fork. The client is Electron: UI and
-WebRTC only, with no embedded server.
+The server is [MediaMTX](https://github.com/bluenviron/mediamtx) (media engine:
+WHIP in / WHEP out, relay only — no transcode) behind a small Go adapter,
+`server/live-api`, which preserves the API surface the clients already speak
+(`/api/whip`, `/api/whep?viewer=`, `/api/status`, `/api/fixed/*`). The client is
+Electron: UI and WebRTC only, with no embedded server.
 
 ```
-┌─ CLIENT (win + linux) ────────┐        ┌─ SERVER (docker) ────────┐
-│  Share      ── WHIP ──────────────────▶  broadcast-box            │
-│  Live grid  ── WHEP ◀─────────────────   :8080 http + udp mux     │
-└───────────────────────────────┘        └──────────────────────────┘
-                                              ▲ (optional) playit.gg
+┌─ CLIENT (win + linux) ────────┐      ┌─ SERVER (docker) ─────────────────┐
+│  Share      ── WHIP ────────────────▶  live-api  :8080 (HTTP, sinalização)│
+│  Live grid  ── WHEP ◀───────────────   mediamtx :8180/udp (mídia ICE)     │
+└───────────────────────────────┘      └───────────────────────────────────┘
+        Signaling via live-api · media flows straight to the UDP mux
 ```
 
 ---
@@ -22,51 +24,27 @@ WebRTC only, with no embedded server.
 ```bash
 cd server
 docker compose up -d
-curl localhost:8080/api/status     # [] or null = up, nobody streaming
+curl localhost:8180/api/status     # [] = up, nobody streaming
 ```
 
-Listens on `localhost:8080`. The web interface lives at
-<http://localhost:8080/> — the same interface as the desktop app, including
+Listens on `localhost:8180`. The web interface lives at
+<http://localhost:8180/> — the same interface as the desktop app, including
 publishing and watching streams.
 
-### Exposing it publicly with playit.gg
+### Exposing it publicly
 
-The compose file ships with a `playit` agent alongside broadcast-box. It reads
-its secret from `server/playit-data/playit.toml`, which is gitignored — generate
-it once:
-
-```bash
-docker run --rm -it -v "$PWD/server/playit-data:/etc/playit" \
-  --entrypoint playit ghcr.io/playit-cloud/playit-agent:0.15 \
-  -s --platform_docker claim generate
-```
-
-Then create the tunnels in the playit.gg dashboard: a **UDP** one pointing at
-`127.0.0.1:8180` and a **TCP** one at `127.0.0.1:8180` for HTTP.
-
-playit rarely assigns the same public UDP port you listen on, and
-`NAT_1_TO_1_IP` rewrites only the **IP** in ICE candidates, never the port — so
-advertising `NAT_1_TO_1_IP` alone leaves the SDP announcing the wrong port and
-media never connects. `APPEND_CANDIDATE` sidesteps this by injecting the public
-`ip:port` pair straight into the SDP:
-
-```yaml
-- "APPEND_CANDIDATE=a=candidate:playit1 1 udp 1694498815 <public-ip> <public-port> typ host\r\n"
-```
-
-Set it to whatever the dashboard shows. Note the environment block uses **list**
-syntax: there `\r\n` becomes a real CRLF. In mapping syntax you would have to
-escape it, and broadcast-box would splice the literal characters into the SDP.
+Point `MTX_ADDITIONAL_HOSTS` (compose env) at the IP clients can actually
+reach — that is the ICE candidate MediaMTX advertises in the SDP. On the VPS
+that is the public IP (`192.3.176.195`); on the LAN, the host IP
+(`192.168.1.129`). Docker-bridge IPs are advertised too (`webrtcIPsFromInterfaces`)
+and that is by design: the `fixed-live` recorder reads the stream from inside
+the compose network through them, with no hairpin.
 
 Verify:
 
-- `curl http://<public-ip>:<tcp-port>/api/status` answers **from outside your network**
+- `curl http://<public-ip>:8180/api/status` answers **from outside your network**
 - Publish from another network (phone hotspot works) and watch
 - In the SDP's ICE candidates the IP must be the public one — not `172.x`, not `192.168.x`
-
-Measure the bitrate again here and compare it against the localhost number.
-playit relays traffic through their network; if it drops a lot, the tunnel is
-your ceiling and a VPS with a direct public IP is worth considering.
 
 ---
 
@@ -164,9 +142,9 @@ release`. electron-builder creates the tag, uploads both artifacts and the
 | Decision | Why |
 |---|---|
 | Electron, not Tauri | Tauri's Linux webview is the **system** WebKitGTK — `getDisplayMedia` varies by distro, and the whole app depends on it. Cost: ~104 MB of Chromium in the bundle. |
-| broadcast-box upstream + patch | The image is built by `server/broadcast-box/Dockerfile`: upstream at a pinned ref plus `viewer-identity.patch`, which is **additive only** — the WHEP POST accepts `?viewer=<nick>` and `/api/status` echoes it per session, so the host can list who's watching. A pure-delete fork still wouldn't be worth a rebase. |
+| MediaMTX + live-api, not a fork | The media engine is stock [MediaMTX](https://github.com/bluenviron/mediamtx) (pinned image) — relay only, no transcode, actively maintained. The FockyTV-specific layer lives in `server/live-api` (~500 lines of Go): it keeps the broadcast-box-shaped API (`/api/whip`, `/api/whep?viewer=`, `/api/status`), enforces the takeover rule (a new publisher on the same key is rejected while the current one is sending RTP; a ghost cedes), tracks viewer identities and proxies `/api/fixed/*`. Clients were written once against that API and survive server swaps. |
 | No TURN | The topology is client-server, not P2P. Peers behind NAT already work: the connection is outbound. |
-| TCP fallback, no toggle | With `NETWORK_TYPES=udp4\|tcp4`, ICE picks on its own. |
+| UDP only | The media mux is UDP (`8180/udp`). ICE-over-TCP (MediaMTX's `webrtcLocalTCPAddress`) adds progressive delay under congestion and was never reachable through the old port mapping anyway. |
 | shadcn without React | Uses shadcn's design tokens and component CSS (dark zinc; Button/Card/Dialog/Select/Switch/Skeleton). The real library would mean React + Tailwind + a bundler for a single-file renderer. |
 | Thumbnails over WHEP | The grid connects hidden, grabs the first frame, disconnects. No new server endpoint. Cheap for 1–5 streams, not for 50. |
 | NSIS over portable on Windows | `electron-updater` cannot update a `portable` .exe. Auto-update was worth more than copy-and-run. |
@@ -182,22 +160,19 @@ friends. If this ever opens up, separate key from name and sign it server-side.
 
 These cost real time. Read before debugging.
 
-**playit's port ≠ your local port.** `NAT_1_TO_1_IP` rewrites only the **IP** in
-ICE candidates, never the port. Symptom: signaling fine, ICE stuck in `checking`
-forever, black video. `APPEND_CANDIDATE` is the way out — see the server
-section.
-
-**`NETWORK_TEST_ON_START` must be off behind the tunnel.** The self-test dies on
-the container's hairpin NAT even though real clients over the LAN work fine.
-
-**`NETWORK_TYPES` is `|`-separated, not comma-separated.**
+**ICE candidates: advertise the IP clients reach.** `MTX_WEBRTCADDITIONALHOSTS`
+must be the IP a viewer actually dials (public IP on the VPS, host IP on the
+LAN). Symptom when wrong: signaling fine, ICE stuck in `checking` forever,
+black video. The docker-bridge IP is also advertised on purpose — that is the
+one the in-network recorder uses.
 
 **Call `setParameters` after `addTrack`.** Before that,
 `getParameters().encodings` is empty and your configuration is silently
 discarded. Symptom: bitrate pinned near 2.5 Mbps.
 
-**Non-trickle ICE.** broadcast-box wants the offer with candidates already in
-it. Always wait for `iceGatheringState === 'complete'` before sending the SDP.
+**Non-trickle ICE.** Send the offer with candidates already in it (the UI and
+the Rust client both wait for `iceGatheringState === 'complete'`). MediaMTX
+accepts trickle too, but every FockyTV client is non-trickle by design.
 
 **Secure context.** `getDisplayMedia` only runs on `https://`, `localhost` or
 `file://`. `http://192.168.x` does **not** work.

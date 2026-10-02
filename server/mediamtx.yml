@@ -1,0 +1,42 @@
+# MediaMTX do FockyTV: o motor de mídia (WHIP/WHEP/ICE) atrás do live-api.
+# Nenhuma porta HTTP dele é publicada — só o live-api fala com 8889/9997/9998;
+# o único caminho público é o mux UDP de mídia (8180/udp no compose).
+# Por deploy, o compose sobrescreve MTX_WEBRTCADDITIONALHOSTS com o IP que os
+# clientes alcançam (VPS: 192.3.176.195; LAN: 192.168.1.129; local: 127.0.0.1).
+
+logLevel: info
+
+api: yes
+apiAddress: :9997
+metrics: yes
+metricsAddress: :9998
+
+webrtc: yes
+webrtcAddress: :8889
+webrtcEncryption: no
+# mux UDP de mídia: a mesma porta pública que o broadcast-box usava (8180/udp)
+webrtcLocalUDPAddress: :8180
+webrtcIPsFromInterfaces: yes
+
+authMethod: internal
+authInternalUsers:
+  # único usuário: o live-api, que sinaliza (WHIP/WHEP) e lê API/metrics.
+  # O segredo é interno à rede do compose; a autenticação real (stream key =
+  # nick) acontece no live-api.
+  - user: liveapi
+    pass: fockytv-internal
+    permissions:
+      - action: publish
+      - action: read
+      - action: api
+      - action: metrics
+
+pathDefaults:
+  source: publisher
+  # publicador novo substitui o antigo. A POLÍTICA de takeover (só assumir
+  # publisher fantasma, 400 caso contrário) fica no live-api — quem chega até
+  # aqui já passou por ela.
+  overridePublisher: true
+
+paths:
+  all_others:

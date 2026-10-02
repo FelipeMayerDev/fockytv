@@ -9,9 +9,11 @@ Dois ambientes de deploy, só quando o usuário pedir explicitamente:
   servidor; a antiga `discordfy` foi mergeada e deletada do remote).
   `server/docker-compose.yml` tem
   alteração local no servidor: nunca sobrescrever. Deploy = `git pull` +
-  `docker compose build broadcast-box` (só quando `server/broadcast-box/`
-  mudar) + `docker compose up -d broadcast-box`. Entrada pública direta em
-  `:8180` (tcp+udp), caddy na frente do resto.
+  `docker compose build live-api` (só quando `server/live-api/` mudar;
+  mediamtx é imagem pinada, sem build) + `docker compose up -d`. Entrada
+  pública direta em `:8180` (tcp HTTP no live-api + udp mídia no mediamtx),
+  caddy na frente (aponta pra `host.docker.internal:8180` — não depende do
+  nome de container).
 - **LAN:** `ssh focky@192.168.1.129 /opt/docker/fockytv`: git pull +
   restart/rebuild dos containers.
 
@@ -21,9 +23,9 @@ não dependem disso.
 
 ### Armadilhas conhecidas
 
-- Os arquivos de `ui/` são bind-mounts de arquivo único no container
-  broadcast-box: depois de um `git pull` que os altere, é preciso
-  `docker compose restart broadcast-box` (mount segue o inode antigo).
+- A `ui/` é montada como DIRETÓRIO no live-api (`../ui:/srv/ui:ro`) — mudança
+  de asset vale sem restart (era bind de arquivo único no broadcast-box, que
+  exigia restart por causa do inode).
 - CSS/JS de `ui/assets/` é cacheado 4h pela Cloudflare e pelo navegador
   (a origem não manda Cache-Control): todo commit que alterar um asset
   DEVE bumpar o `?v=` do `<link>` correspondente em `ui/index.html`,
@@ -31,7 +33,13 @@ não dependem disso.
 - O fluxo de release assume os 5 assets (AppImage, Setup.exe, blockmap,
   latest-linux.yml, latest.yml); o Windows compila no GitHub Actions
   (`.github/workflows/release.yml`, dispara na tag).
-- WS da sala de músicos passa por `/api/fixed/ws/jam` (proxy do broadcast-box).
+- WS da sala de músicos passa por `/api/fixed/ws/jam` (proxy do live-api).
+- O `overridePublisher` do mediamtx substitui publicador VIVO; a regra de
+  takeover (400 se RTP < 10s) é do live-api — não mexer nos dois sem ler
+  `server/live-api/main.go`.
+- O id da sessão WHEP que o adapter entrega na `Location` NÃO é o id de
+  reader do `/v3` do mediamtx (namespaces distintos): a poda de viewers
+  fantasmas é por contagem de `readers` por path (mais antigo primeiro).
 
 ## Design
 
