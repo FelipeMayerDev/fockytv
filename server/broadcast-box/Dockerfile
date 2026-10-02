@@ -6,7 +6,10 @@
 # do antigo (nick repetido / reconexão pós-crash sem esperar o ICE cair).
 # Os dois primeiros são aditivos; o takeover troca um return por substituição.
 FROM alpine/git AS src
-ARG BROADCAST_BOX_REF=9f43de20e802ee8acc826c3999e021e736dd2a89
+# 2026-09-29: "Do not close on ice-disconnect" e "Preserve playback when SSE
+# disconnects" são fixes de robustez do viewer; NETWORK_TYPES conserta o mux
+# UDP quando UDP_MUX_PORT está setado (é o nosso caso no compose).
+ARG BROADCAST_BOX_REF=17812798c2922d6f03f12f17fda110d4d474d44d
 RUN git clone --depth 1 https://github.com/Glimesh/broadcast-box /src \
  && git -C /src fetch --depth 1 origin ${BROADCAST_BOX_REF} \
  && git -C /src checkout FETCH_HEAD
