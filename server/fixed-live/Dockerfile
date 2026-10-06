@@ -3,7 +3,13 @@
 # as deps são instaladas aqui dentro mesmo (werift é JS puro).
 FROM node:22-bookworm-slim
 
+# VAAPI (QuickSync): iHD (intel-media, Gen8+) + i965 (legado) cobrem os
+# Intel de desktop; vainfo é o diagnóstico. O pacote "-non-free" não existe
+# nos sources da imagem slim — o do main codifica H264 no Gen9.5 (KBL) bem.
+# Em máquina sem iGPU o apt instala e nada muda: a probe em runtime decide
+# o encoder (ver index.js).
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl \
+      intel-media-va-driver i965-va-driver vainfo \
  && rm -rf /var/lib/apt/lists/*
 
 # yt-dlp standalone (binário PyInstaller, sem Python na imagem): muda toda

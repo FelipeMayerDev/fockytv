@@ -19,6 +19,77 @@ import { recorder } from "./recorder.js"
 const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
 const PORT = +(process.env.PORT ?? 3000)
 const IDLE_MS = +(process.env.IDLE_MS ?? 60_000)
+
+// ── encoder de vídeo dos canais fixos: VAAPI (QuickSync) com queda pra x264 ──
+// O servidor LAN é um i5-7400 (4c/4t) com HD 630: encodar a TV em libx264
+// come um core inteiro que divide bolo com o resto do stack. VAAPI (que no
+// Intel É o QuickSync no Linux) tira isso do CPU. A VPS não tem iGPU de
+// verdade (o card0 lá é VGA ASpeed de BMC) — por isso a probe no primeiro
+// uso e a queda automática pro libx264: o mesmo compose roda nos dois.
+// FF_ENCODER=vaapi|x264 força; FF_QUALITY=hd|source; FF_VAAPI_DEVICE troca o nó.
+const FF_ENCODER = process.env.FF_ENCODER ?? "auto"
+const FF_QUALITY = process.env.FF_QUALITY ?? "hd"
+const FF_VAAPI_DEVICE = process.env.FF_VAAPI_DEVICE ?? "/dev/dri/renderD128"
+
+let vaapiResult
+const vaapiOk = async () => {
+  if (FF_ENCODER === "x264") return false
+  if (vaapiResult !== undefined) return vaapiResult
+  // encode de teste real: init do driver + upload + encode. vainfo não basta
+  // (driver pode carregar e o encode falhar por permissão/cgroup).
+  const probe = spawn("ffmpeg", [
+    "-hide_banner", "-loglevel", "error",
+    "-init_hw_device", `vaapi=va:${FF_VAAPI_DEVICE}`,
+    "-f", "lavfi", "-i", "testsrc=size=640x360:rate=30:duration=0.2",
+    "-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi", "-async_depth", "1",
+    "-f", "null", "-",
+  ], { stdio: ["ignore", "ignore", "pipe"] })
+  let err = ""
+  probe.stderr.on("data", d => { err += d })
+  vaapiResult = await new Promise(res => {
+    const t = setTimeout(() => { try { probe.kill("SIGKILL") } catch {} }, 8000)
+    probe.once("exit", c => { clearTimeout(t); res(c === 0) })
+    probe.once("error", () => { clearTimeout(t); res(false) })
+  })
+  if (!vaapiResult)
+    log("[fixed-live] VAAPI indisponível, canal fixo no libx264:", err.trim().split("\n").pop() || "probe falhou")
+  return vaapiResult
+}
+
+// argumentos de vídeo da TV: qualidade `hd` é o comportamento histórico
+// (1280 de largura, baseline — máxima compatibilidade); `source` vai da
+// resolução nativa da fonte, perfil high e qp mais fino — o "Source" do
+// Fluxer. Nos dois, VAAPI quando existe, x264 quando não.
+//
+// Modo de rate: CQP fixo. Medido no i5-7400 (Gen9.5, iHD 23.1.1 do
+// bookworm): o entrypoint H264 disponível é o low-power (VDENC), que só
+// expõe CQP — CBR/VBR são recusados ("supported modes: CQP"). CQP segue
+// sendo encode por hardware (o objetivo é o CPU livre); o bitrate flutua
+// conforme o conteúdo, então source usa qp 24 e hd qp 26. Driver mais novo
+// ou h264_qsv devolveriam CBR/VBR — revisitar se precisar de teto de bitrate.
+const videoArgs = async () => {
+  const source = FF_QUALITY === "source"
+  const vaapi = await vaapiOk()
+  if (videoArgs.logged !== FF_QUALITY + vaapi) {
+    videoArgs.logged = FF_QUALITY + vaapi
+    log(`[fixed-live] encoder de vídeo: ${vaapi ? `h264_vaapi CQP (${FF_VAAPI_DEVICE})` : "libx264"} · qualidade: ${FF_QUALITY}`)
+  }
+  if (vaapi) return {
+    global: ["-init_hw_device", `vaapi=va:${FF_VAAPI_DEVICE}`, "-filter_hw_device", "va"],
+    codec: ["-c:v", "h264_vaapi", "-profile:v", source ? "high" : "main",
+            "-rc_mode", "CQP", "-qp", source ? "24" : "26", "-async_depth", "1", "-g", "60",
+            "-vf", source ? "setsar=1,format=nv12,hwupload"
+                          : "scale='min(1280,iw)':-2,setsar=1,format=nv12,hwupload"],
+  }
+  return {
+    global: [],
+    codec: ["-c:v", "libx264", "-profile:v", source ? "high" : "baseline",
+            "-level", source ? "4.1" : "3.1", "-pix_fmt", "yuv420p",
+            "-preset", "veryfast", "-tune", "zerolatency",
+            "-b:v", source ? "6000k" : "2500k", "-g", "60",
+            "-vf", source ? "setsar=1" : "scale='min(1280,iw)':-2,setsar=1"],
+  }
+}
 // anúncio de "subiu ao ar": webhook de um canal do Discord (opcional). O link
 // do anúncio usa PUBLIC_URL (o endereço que a galera usa pra abrir o app).
 const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK ?? ""
@@ -499,16 +570,17 @@ class Runner {
     // bounds: com capa em loop o vídeo não teria fim sem isso
     const left = Math.max(1, meta.duration - offset)
     const aenc = ["-c:a", "libopus", "-b:a", "128k", "-ar", "48000", "-ac", "2"]
+    // encoder de vídeo decidido na hora (VAAPI com queda pro x264); os args
+    // globais do hw device têm que vir ANTES dos inputs
+    const vid = video ? await videoArgs() : null
 
     const ff = spawn("ffmpeg", [
       ...args,
+      ...(vid?.global ?? []),
       "-map", videoIn,
-      ...(video
-        ? ["-c:v", "libx264", "-profile:v", "baseline", "-level", "3.1", "-pix_fmt", "yuv420p",
-           "-preset", "veryfast", "-tune", "zerolatency", "-b:v", "2500k", "-g", "60",
-           "-vf", "scale='min(1280,iw)':-2,setsar=1"]
-        : ["-c:v", "libx264", "-profile:v", "baseline", "-level", "3.1", "-pix_fmt", "yuv420p",
-           "-preset", "veryfast", "-tune", "zerolatency", "-b:v", "200k", "-g", "120", "-r", "2"]),
+      ...(vid?.codec ?? ["-c:v", "libx264", "-profile:v", "baseline", "-level", "3.1",
+                         "-pix_fmt", "yuv420p", "-preset", "veryfast", "-tune", "zerolatency",
+                         "-b:v", "200k", "-g", "120", "-r", "2"]),
       "-t", left, "-f", "rtp", `rtp://127.0.0.1:${this.ports.v}`,
       "-map", audioIn, ...aenc, "-t", left, "-f", "rtp", `rtp://127.0.0.1:${this.ports.a}`,
       // posição real da mídia no stdout: é ela que sincroniza a letra
