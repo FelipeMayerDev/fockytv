@@ -645,7 +645,7 @@
     <div>
       <label style="color:hsl(var(--foreground))" id="audio-label">Compartilhar som</label>
       <p class="desc" style="margin:2px 0 0" id="audio-desc">áudio do sistema junto com o vídeo</p>
-      <p class="desc" style="margin:4px 0 0;color:hsl(var(--warning))" id="audio-note">No seletor do navegador, marque também "compartilhar áudio" — sem isso o som não entra.</p>
+      <p class="desc" style="margin:4px 0 0" id="audio-note" hidden></p>
     </div>
     <label class="switch"><input type="checkbox" id="audio"><span></span></label>
   </div>
@@ -2350,6 +2350,7 @@ async function openShareDialog (isSwap, cam) {
     $('#portal-note').hidden = true
     $('#faudio-row').hidden = true
     $('#yt-row').hidden = true
+    $('#audio-note').hidden = true   // câmera não usa sink; a nota é da tela
     $('#dlg-share').dataset.swap = ''
     $('#dlg-share').showModal()
     return
@@ -2367,6 +2368,7 @@ async function openShareDialog (isSwap, cam) {
     return fig
   }))
   $('#dlg-share').showModal()
+  updateSinkNote()   // estado do sink FockyTV na cara do diálogo, antes de tentar
 
   let sources
   try {
@@ -2423,6 +2425,33 @@ document.querySelectorAll('#share-src button').forEach(b => b.onclick = () => {
     x.classList.toggle('on', x === b))
   updateShareSrcUI()
 })
+// ── nota de áudio do diálogo: honesta com o ambiente ─────────────────────
+// No Wayland o seletor do sistema NÃO TEM checkbox de áudio (o portal não
+// entrega). No navegador o som vem do sink FockyTV (tools/fockytv-sink.js),
+// então a nota diz em qual dos três estados a pessoa está ANTES de tentar —
+// em vez de mandar procurar um checkbox que não existe.
+async function updateSinkNote () {
+  const note = $('#audio-note')
+  if (window.focky) { note.hidden = true; return }   // Electron: filtro por app
+  note.hidden = false
+  let devs = []
+  try { devs = await navigator.mediaDevices.enumerateDevices() } catch { return }
+  const temSink = devs.some(d => d.kind === 'audioinput' && /fockytv/i.test(d.label))
+  // sem permissão, Firefox nem lista entrada e Chrome lista sem label: em
+  // ambos "não há nenhum input rotulado" = não dá pra saber se o sink existe
+  const semPermissao = !devs.some(d => d.kind === 'audioinput' && d.label)
+  if (temSink) {
+    note.textContent = 'som: o sink FockyTV tá de pé — o áudio entra por ele, sem Discord.'
+    note.style.color = 'hsl(var(--success))'
+  } else if (semPermissao) {
+    note.textContent = 'som: vem pelo sink FockyTV — aceite o microfone quando o navegador pedir; é assim que eu encontro o sink.'
+    note.style.color = 'hsl(var(--muted-foreground))'
+  } else {
+    note.textContent = 'som: sem sink não há áudio no Wayland — rode `node tools/fockytv-sink.js`, aceite o microfone e compartilhe de novo.'
+    note.style.color = 'hsl(var(--warning))'
+  }
+}
+
 function updateShareSrcUI () {
   const yt = shareSrc !== 'screen'
   $('#yt-row').hidden = !yt
@@ -2435,6 +2464,7 @@ function updateShareSrcUI () {
   } else {
     $('#audio-row').hidden = false
     $('#cursor-row').hidden = !!$('#dlg-share').dataset.swap
+    updateSinkNote()
   }
 }
 
