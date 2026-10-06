@@ -231,5 +231,31 @@ const newGate = (cfg = {}) => {
     'threshold baixo deixa a mesma fala passar')
 }
 
+// ── PTT: force manda acima do detector ──────────────────────────────────
+// Push-to-talk (estilo Fluxer): 'close' cala mesmo com fala alta que abriria
+// o portão; 'open' solta fala baixinha que nunca abriria; 'null' devolve a
+// decisão ao detector. O estado do portão segue rodando — o medidor da UI
+// continua real nos dois modos.
+{
+  const g = newGate({ force: 'close' })
+  const out = through(g, cat(silence(ms(100)), speech(400)))
+  ok(peak(out) < 0.005, 'PTT fechado cala fala alta (que abriria no VAD)')
+}
+{
+  const g = newGate({ force: 'close' })
+  g.port.onmessage({ data: { type: 'config', force: 'open' } })
+  const baixo = speech(400, 0.01)   // nem de longe abre o detector
+  const out = through(g, cat(silence(ms(100)), baixo))
+  ok(rms(out.subarray(ms(100))) > rms(baixo) * 0.5,
+    'PTT aberto solta fala baixa (que o VAD barraria)')
+}
+{
+  const g = newGate({ force: 'open', openDb: -30 })
+  g.port.onmessage({ data: { type: 'config', force: null } })
+  const baixo = speech(400, 0.01)   // ~-46 dB: bem abaixo do -30 do detector
+  ok(peak(through(g, cat(silence(ms(100)), baixo))) < 0.005,
+    'force:null devolve a decisão ao detector (VAD normal)')
+}
+
 console.log(failures ? `\n${failures} falha(s)` : '\ntudo PASS')
 process.exit(failures ? 1 : 0)

@@ -17,7 +17,7 @@
      e CSS velho (componente novo aparece sem estilo até a cache expirar).
      Suba o número junto com qualquer mudança em assets/. -->
 <link rel="stylesheet" href="assets/theme.css?v=1">
-<link rel="stylesheet" href="assets/app.css?v=10">
+<link rel="stylesheet" href="assets/app.css?v=11">
 
 <!-- gif do "du bist gut genug": cobre a tela enquanto toca a abertura -->
 <div id="intro-gif"></div>
@@ -126,6 +126,27 @@
           <label for="dock-dev">Microfone</label>
           <select id="dock-dev"></select>
         </div>
+        <div class="field" id="ingain-row">
+          <label for="dock-ingain">Volume da entrada</label>
+          <div class="pop-slider">
+            <input type="range" id="dock-ingain" min="0.5" max="8" step="0.1" value="1">
+            <output id="dock-ingain-val">1.0×</output>
+          </div>
+        </div>
+        <div class="field" id="mode-row">
+          <label for="dock-mode">Modo de entrada</label>
+          <select id="dock-mode">
+            <option value="vad">Atividade de voz</option>
+            <option value="ptt">Apertar pra falar</option>
+          </select>
+        </div>
+        <div class="field" id="ptt-row" hidden>
+          <label for="dock-ptt-key">Tecla do PTT</label>
+          <div class="pop-slider">
+            <button type="button" class="outline" id="dock-ptt-key">V</button>
+            <span class="desc" style="margin:0">segure pra falar</span>
+          </div>
+        </div>
         <!-- eco + supressão + corte de graves/agudos num controle só: são três
              faces do mesmo "limpar o microfone", e ninguém liga uma sem a outra -->
         <label class="pop-row"><span>Limpar microfone</span>
@@ -133,17 +154,32 @@
         <p class="desc" style="margin:0 0 4px">Cancelamento de eco, supressão de ruído e corte de graves/agudos.</p>
         <label class="pop-row"><span>Ganho automático</span>
           <span class="switch"><input type="checkbox" id="dock-agc"><span></span></span></label>
-        <label class="pop-row"><span>Portão de ruído</span>
-          <span class="switch"><input type="checkbox" id="dock-gate"><span></span></span></label>
-        <!-- o medidor é o que torna o threshold ajustável: a barra é o nível da
-             banda de voz agora, o traço é onde o portão abre. Fique em silêncio,
-             suba até a barra parar de cruzar o traço. -->
-        <div class="gate-tune" id="gate-tune" hidden>
-          <div class="gate-meter" id="gate-meter"><i id="gate-bar"></i><b id="gate-thr"></b></div>
-          <label class="gate-knob">Abre acima de <output id="gate-thr-val">−45 dB</output>
-            <input type="range" id="dock-gate-thr" min="-70" max="-15" step="1" value="-45"></label>
-          <label class="gate-knob">Ignora transiente até <output id="gate-cf-val">12 ms</output>
-            <input type="range" id="dock-gate-cf" min="0" max="40" step="2" value="12"></label>
+        <div id="gate-row">
+          <label class="pop-row"><span>Portão de ruído</span>
+            <span class="switch"><input type="checkbox" id="dock-gate"><span></span></span></label>
+          <!-- o medidor é o que torna o threshold ajustável: a barra é o nível da
+               banda de voz agora, o traço é onde o portão abre. Fique em silêncio,
+               suba até a barra parar de cruzar o traço. -->
+          <div class="gate-tune" id="gate-tune" hidden>
+            <div class="gate-meter" id="gate-meter"><i id="gate-bar"></i><b id="gate-thr"></b></div>
+            <label class="gate-knob">Abre acima de <output id="gate-thr-val">−45 dB</output>
+              <input type="range" id="dock-gate-thr" min="-70" max="-15" step="1" value="-45"></label>
+            <label class="gate-knob">Ignora transiente até <output id="gate-cf-val">12 ms</output>
+              <input type="range" id="dock-gate-cf" min="0" max="40" step="2" value="12"></label>
+          </div>
+        </div>
+        <div id="out-row">
+          <div class="field" style="margin-top:10px">
+            <label for="dock-out">Saída</label>
+            <select id="dock-out"></select>
+          </div>
+          <div class="field">
+            <label for="dock-outvol">Volume da saída</label>
+            <div class="pop-slider">
+              <input type="range" id="dock-outvol" min="0" max="2" step="0.05" value="1">
+              <output id="dock-outvol-val">100%</output>
+            </div>
+          </div>
         </div>
         <p class="desc" id="mic-pop-desc">Nos canais de voz os filtros já começam ligados (modo conversa).
           Pra instrumento use o Estúdio — entrada crua, sem processamento.</p>
@@ -1212,14 +1248,13 @@ async function watchdog (key) {
 async function fockySinkTrack () {
   try {
     let devs = await navigator.mediaDevices.enumerateDevices()
-    // Firefox (#7): os labels só aparecem depois de uma permissão de
-    // microfone — sem esta probe o monitor do sink nunca é encontrado e a
-    // transmissão sai muda (o getDisplayMedia do Firefox não entrega áudio).
-    // A probe pede microfone UMA vez; daí em diante a permissão persiste.
-    // Só no Firefox: no Chrome o seletor já entrega o som do sistema, e o
-    // pedido extra de microfone seria só atrapalhar.
-    if (!devs.some(x => x.kind === 'audioinput' && x.label) &&
-        navigator.userAgent.includes('Firefox')) {
+    // Sem permissão de microfone, os labels vêm vazios em QUALQUER navegador
+    // e o monitor do sink nunca é encontrado — a transmissão sai muda. A
+    // probe pede microfone UMA vez; daí em diante a permissão persiste.
+    // No Chrome/X11 o seletor entrega o som do sistema sozinho, mas no
+    // Wayland o portal não dá áudio nenhum — o sink é o caminho, então a
+    // probe vale em todo navegador.
+    if (!devs.some(x => x.kind === 'audioinput' && x.label)) {
       const probe = await navigator.mediaDevices.getUserMedia({ audio: true })
       probe.getTracks().forEach(t => t.stop())
       devs = await navigator.mediaDevices.enumerateDevices()
@@ -2580,7 +2615,7 @@ $('#share-go').onclick = async () => {
       if (!cam) toast(semAudioCapturado
         ? (navigator.userAgent.includes('Firefox')
           ? 'Saiu sem som: o Firefox não captura o áudio da tela. No Linux, rode `node tools/fockytv-sink.js` (e aceite o microfone) e compartilhe de novo — ou use o compartilhamento de Áudio/Vídeo do YouTube.'
-          : 'Foi no ar só o vídeo: marque o áudio no SELETOR do navegador (checkbox "compartilhar áudio da aba/sistema") — o toggle daqui não força ele.')
+          : 'Saiu sem som: se o seletor do navegador não mostrou o checkbox de áudio (comum no Wayland), rode `node tools/fockytv-sink.js`, aceite o microfone e compartilhe de novo.')
         : audioFail
         ? 'FILTRO DE ÁUDIO FALHOU (' + audioFail + ') — foi o som do sistema, Discord incluso'
         : audioOpts
@@ -3955,7 +3990,12 @@ const jamFor = async mode => {
   // max-age de 4h no domínio, mais o cache do navegador) e sem subir o
   // número o index.html novo carrega o motor velho — foi o que deixou
   // "jam.setGate is not a function" barrar a entrada no canal de voz.
-  const j = await import('./jam.js?v=19').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+  const j = await import('./jam.js?v=20').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+  // saída de voz estilo Fluxer: volume geral e dispositivo valem pra qualquer
+  // engine (voice e music têm AudioContext próprio)
+  j.setOutVolume?.(+localStorage.getItem('jam-outvol') || 1)
+  if (localStorage.getItem('jam-outdevice'))
+    j.setOutput?.(localStorage.getItem('jam-outdevice')).catch(() => {})
   j.onChat(m => {
     if (m.type === 'yt') return jamYtEvent(m)
     jamChatLog.push(m); jamChatRender()
@@ -4394,8 +4434,15 @@ const jamNumPref = (k, mode, def) => {
 // Padrões: a conversa liga portão e cortes; o Estúdio nunca — o portão comeria
 // o sustain do instrumento e o corte em 8k, o brilho do prato. `jamMicPref`
 // já devolve false por padrão em 'music', então não há caso especial aqui.
+// PTT (estilo Fluxer): no modo "apertar pra falar" o portão fica FORÇADO
+// fechado e a tecla segura abre (force:'open' via keydown). Só no modo voz —
+// Estúdio é entrada crua, PTT ali não tem sentido.
+const jamInputMode = () => localStorage.getItem('jam-inputmode') ?? 'vad'
+const jamPttKey = () => localStorage.getItem('jam-ptt-key') ?? 'KeyV'
+const pttKeyLabel = code => code.replace(/^Key|^Digit/, '')
 const jamGateCfg = (mode = jamMode) => ({
-  on: jamMicPref('gate', mode),
+  on: mode === 'voice' && jamInputMode() === 'ptt' ? true : jamMicPref('gate', mode),
+  force: mode === 'voice' && jamInputMode() === 'ptt' ? 'close' : null,
   cut: jamMicPref('cut', mode),
   openDb: jamNumPref('gatethr', mode, -45),
   confirmMs: jamNumPref('gatecf', mode, 12),
@@ -4431,6 +4478,27 @@ function micPopPaint () {
   $('#dock-gate-thr').value = g.openDb
   $('#dock-gate-cf').value = g.confirmMs
   gateKnobPaint()
+  // entrada/saída estilo Fluxer: só no modo conversa — no Estúdio a entrada
+  // é crua (tem painel próprio com ganho) e PTT/portão não se aplicam
+  const conversa = mode === 'voice'
+  const ptt = conversa && jamInputMode() === 'ptt'
+  $('#ingain-row').hidden = !conversa
+  $('#mode-row').hidden = !conversa
+  $('#ptt-row').hidden = !ptt
+  $('#gate-row').hidden = ptt         // no PTT quem decide é a tecla, não o nível
+  // engine do modo conversa (pré-aquecido no boot) responde por canSetOutput
+  // mesmo antes do primeiro join
+  $('#out-row').hidden = !conversa || !(jam ?? jams.voice)?.canSetOutput
+  if (conversa) {
+    $('#dock-mode').value = jamInputMode()
+    $('#dock-ptt-key').textContent = pttKeyLabel(jamPttKey())
+    const gi = +localStorage.getItem('jam-micgain') || 1
+    $('#dock-ingain').value = gi
+    $('#dock-ingain-val').textContent = gi.toFixed(1) + '×'
+    const go = +localStorage.getItem('jam-outvol') || 1
+    $('#dock-outvol').value = go
+    $('#dock-outvol-val').textContent = Math.round(go * 100) + '%'
+  }
   // no Estúdio o aviso do rodapé (que fala do modo conversa) não se aplica
   $('#mic-pop-desc').hidden = mode === 'music'
   $('#mic-pop-desc-raw').hidden = mode !== 'music'
@@ -4496,7 +4564,7 @@ $('#vs-mic-cfg').onclick = e => {
   e.stopPropagation()
   const pop = $('#mic-pop')
   pop.hidden = !pop.hidden
-  if (!pop.hidden) { micPopPaint(); jamListMics($('#dock-dev'), jamPopMode()) }
+  if (!pop.hidden) { micPopPaint(); jamListMics($('#dock-dev'), jamPopMode()); jamListOuts($('#dock-out')) }
 }
 $('#mic-pop').onclick = e => e.stopPropagation()   // clique dentro não fecha
 document.addEventListener('click', e => { $('#mic-pop').hidden = true })
@@ -4534,6 +4602,82 @@ $('#dock-dev').addEventListener('change', () => {
   if (mode === 'music' && [...$('#jam-dev').options].some(o => o.value === $('#dock-dev').value))
     $('#jam-dev').value = $('#dock-dev').value
   applyMicSettings()
+})
+
+// ── entrada/saída estilo Fluxer: ganho, modo e dispositivo de saída ──────
+// ganho da entrada: o mesmo 'jam-micgain' do Estúdio (um valor só de ganho
+// por pessoa), aplicado na hora no tap — o join também lê essa chave.
+$('#dock-ingain').addEventListener('input', () => {
+  const v = +$('#dock-ingain').value
+  $('#dock-ingain-val').textContent = v.toFixed(1) + '×'
+  localStorage.setItem('jam-micgain', v)
+  jam?.setMicGain(dockMuted ? 0 : v)
+})
+// modo de entrada: VAD decide pelo nível; PTT força o portão fechado e a
+// tecla segura abre (ver pttKeys)
+$('#dock-mode').onchange = () => {
+  localStorage.setItem('jam-inputmode', $('#dock-mode').value)
+  micPopPaint()
+  applyGateSettings()
+}
+// captura da tecla do PTT: capture phase pra tecla não vazar pros atalhos
+// da página. Esc cancela; clicar de novo desarma.
+$('#dock-ptt-key').onclick = () => {
+  const b = $('#dock-ptt-key')
+  if (b.dataset.armed) { delete b.dataset.armed; b.textContent = pttKeyLabel(jamPttKey()); return }
+  b.dataset.armed = '1'
+  b.textContent = 'pressione…'
+  const cap = e => {
+    e.preventDefault(); e.stopPropagation()
+    if (e.code !== 'Escape') {
+      localStorage.setItem('jam-ptt-key', e.code)
+      b.textContent = pttKeyLabel(e.code)
+    } else b.textContent = pttKeyLabel(jamPttKey())
+    delete b.dataset.armed
+    window.removeEventListener('keydown', cap, true)
+  }
+  window.addEventListener('keydown', cap, true)
+}
+// saída: dispositivo (setSinkId no AudioContext do motor) e volume geral —
+// o ganho por pessoa continua no hover da lista de membros
+$('#dock-out').onchange = () => {
+  localStorage.setItem('jam-outdevice', $('#dock-out').value)
+  jam?.setOutput?.($('#dock-out').value).catch(e => toast('Saída de áudio: ' + e.message))
+}
+$('#dock-outvol').addEventListener('input', () => {
+  const v = +$('#dock-outvol').value
+  $('#dock-outvol-val').textContent = Math.round(v * 100) + '%'
+  localStorage.setItem('jam-outvol', v)
+  jam?.setOutVolume?.(v)
+})
+async function jamListOuts (sel = $('#dock-out')) {
+  if (!(jam ?? jams.voice)?.canSetOutput) return   // Firefox: sem setSinkId, fora
+  const devices = await navigator.mediaDevices.enumerateDevices()
+  const outs = devices.filter(d => d.kind === 'audiooutput')
+  sel.replaceChildren(
+    Object.assign(document.createElement('option'), { value: '', textContent: 'Padrão do sistema' }),
+    ...outs.map((d, i) => Object.assign(document.createElement('option'),
+      { value: d.deviceId, textContent: d.label || `Saída ${i + 1}` })))
+  const saved = localStorage.getItem('jam-outdevice')
+  if (saved && [...sel.options].some(o => o.value === saved)) sel.value = saved
+}
+// a tecla do PTT: keydown abre, keyup fecha. Campo de texto focado é
+// conversa escrita, não fala — ignora. Perda de foco com a tecla presa
+// deixaria o mic aberto pra sempre: blur fecha.
+const pttKeys = e => {
+  if (jamInputMode() !== 'ptt' || !jamJoined || jamMode !== 'voice' ||
+      e.code !== jamPttKey()) return
+  if (e.target.closest?.('input, textarea, select, [contenteditable]')) return
+  if (e.type === 'keydown') {
+    if (e.repeat) return
+    e.preventDefault()
+    jam?.setGate?.({ force: 'open' })
+  } else jam?.setGate?.({ force: 'close' })
+}
+window.addEventListener('keydown', pttKeys)
+window.addEventListener('keyup', pttKeys)
+window.addEventListener('blur', () => {
+  if (jamInputMode() === 'ptt') jam?.setGate?.({ force: 'close' })
 })
 
 // ── barra do host: controles do compartilhamento de YouTube ──────────────

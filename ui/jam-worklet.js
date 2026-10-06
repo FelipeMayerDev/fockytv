@@ -73,6 +73,7 @@ class JamGate extends AudioWorkletProcessor {
     super()
     this.on = false          // desligado = passa-reto (Estúdio)
     this.cut = true          // corte de graves/agudos no sinal
+    this.force = null        // push-to-talk: 'open' fala, 'close' cala, null = decide o nível
     this.openDb = -45        // abre acima disso (sidechain, não sinal)
     this.hystDb = 8          // fecha `hystDb` abaixo: evita tremular na borda
     this.tiltDb = 0          // banda de voz tem que estar `tiltDb` acima da aguda
@@ -104,7 +105,7 @@ class JamGate extends AudioWorkletProcessor {
     this.port.onmessage = e => {
       const m = e.data
       if (m.type !== 'config') return
-      for (const k of ['on', 'cut', 'openDb', 'hystDb', 'tiltDb', 'confirmMs', 'holdMs', 'attackMs', 'releaseMs'])
+      for (const k of ['on', 'cut', 'force', 'openDb', 'hystDb', 'tiltDb', 'confirmMs', 'holdMs', 'attackMs', 'releaseMs'])
         if (m[k] !== undefined) this[k] = m[k]
       if (m.hpHz !== undefined || m.lpHz !== undefined)
         this.setCut(m.hpHz ?? this.hpHz, m.lpHz ?? this.lpHz)
@@ -182,8 +183,14 @@ class JamGate extends AudioWorkletProcessor {
         else if (--this.hold <= 0) { this.open = false; this.confirm = 0 }
       }
 
-      // 4. ganho suave até o alvo e saída atrasada do lookahead
-      const target = gating ? (this.open ? 1 : 0) : 1
+      // 4. ganho suave até o alvo e saída atrasada do lookahead.
+      // force (push-to-talk) manda acima do detector: 'open' solta o áudio
+      // mesmo abaixo do threshold, 'close' cala mesmo gritando — o estado
+      // do portão segue rodando por baixo, então o medidor continua real.
+      const target = !gating ? 1
+        : this.force === 'open' ? 1
+        : this.force === 'close' ? 0
+        : this.open ? 1 : 0
       const k = target > this.gain ? atk : rel
       this.gain = target + (this.gain - target) * k
       const r = (this.w - delaySamples + DELAY_CAP) % DELAY_CAP
