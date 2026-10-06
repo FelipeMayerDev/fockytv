@@ -11,7 +11,8 @@ import { join } from "node:path"
 import { WebSocketServer } from "ws"
 import express from "express"
 import { MediaStreamTrackFactory, RTCPeerConnection, useH264, useOPUS } from "werift"
-import { logTrackPlayed, mediaHistory, addChatMsg, chatPage, chatLatest,
+import { logTrackPlayed, mediaHistory, addChatMsg, chatGet, chatPage, chatLatest,
+         editChatMsg, deleteChatMsg, toggleChatReaction,
          addClip, getClip, listClips, updateClipFile, delClip } from "./db.js"
 import { recorder } from "./recorder.js"
 
@@ -713,6 +714,9 @@ const stalledSince = { tv: null, music: null }
 // povoa o conjunto sem anunciar — container reiniciando não é "subiu ao ar".
 const announced = new Set()
 let firstScan = true
+// estado anterior de TODAS as streams (fixas incluídas) pro evento do chat;
+// `announced` só cobre streams de pessoa (anúncio no Discord)
+const wasLive = new Set()
 const announceWebhook = key => {
   const body = {
     embeds: [{
@@ -747,6 +751,15 @@ setInterval(async () => {
     if (!firstScan && isNew && DISCORD_WEBHOOK) announceWebhook(k)
   }
   for (const k of announced) if (!liveKeys.has(k)) announced.delete(k)
+  // eventos no chat da sala: "subiu/saiu do ar" entra no histórico da
+  // stream, com a mesma semântica do anúncio do Discord — a 1ª varredura
+  // pós-boot só povoa o conjunto, ninguém quer 20 linhas de boot no chat.
+  if (!firstScan) {
+    for (const k of liveKeys) if (!wasLive.has(k)) chatSystemEvent(k, "subiu ao ar")
+    for (const k of wasLive) if (!liveKeys.has(k)) chatSystemEvent(k, "saiu do ar")
+  }
+  wasLive.clear()
+  for (const k of liveKeys) wasLive.add(k)
   firstScan = false
 
   // gravação saiu: o gravador mantém só o buffer rotativo pros clips de live
@@ -1142,14 +1155,32 @@ httpServer.on("upgrade", (req, sock, head) => {
 // ── chat por transmissão: uma sala por streamKey ─────────────────────────
 // Relay + persistência (SQLite): o histórico sobrevive a restart e a UI
 // pagina pra trás com ?before=&room=. Mensagem vai também pro remetente —
-// o cliente renderiza a dele pelo eco, nunca localmente (uma fonte só de verdade).
+// o cliente renderiza a dele localmente pelo eco, nunca otimista (uma fonte
+// só de verdade). Protocolo v2 (estilo Fluxer/Discord): além de `chat`,
+// edit/delete da própria mensagem, reações (toggle por nick) e "digitando".
 const chatWss = new WebSocketServer({ noServer: true })
 const chatRooms = new Map()   // room -> Set(ws)
+
+// conjunto fechado no servidor: reação não é campo livre (spam e glyph
+// quebrado não entram). A UI replica esta lista no seletor dela.
+const CHAT_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🎉", "👏", "🤔",
+                     "👀", "🤝", "💯", "🥳", "🙌", "😅", "🫡", "🎧", "🎸", "📺", "⚡"]
+const CHAT_MAX_TEXT = 1000
 
 const chatSend = (ws, obj) => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj)) }
 const chatBroadcast = (room, obj) => {
   const data = JSON.stringify(obj)
   for (const ws of chatRooms.get(room) ?? []) if (ws.readyState === ws.OPEN) ws.send(data)
+}
+
+// linha de evento ("subiu ao ar"): persiste como msg sys (autor não é gente)
+// e vai pro ar da sala. Chama o poll de viewers quando uma stream muda de
+// estado — sala vazia persiste pro histórico de quem abrir depois.
+const chatSystemEvent = (room, text) => {
+  const at = Date.now()
+  let id
+  try { ({ lastInsertRowid: id } = addChatMsg("", text, at, room, { sys: 1 })) } catch (e) { return log("[chat] db:", e.message) }
+  chatBroadcast(room, { type: "chat", id, from: "", text, at, sys: 1 })
 }
 
 chatWss.on("error", e => log("[chat] wss error:", e.message))
@@ -1163,6 +1194,8 @@ chatWss.on("connection", (ws, req) => {
 
   ws.room = room
   ws.lastMsg = 0
+  ws.lastReact = 0
+  ws.lastTyping = 0
   const members = chatRooms.get(room) ?? new Set()
   members.add(ws)
   chatRooms.set(room, members)
@@ -1174,16 +1207,58 @@ chatWss.on("connection", (ws, req) => {
     let msg
     try { msg = JSON.parse(data) } catch { return }
     if (msg.type === "ping") return chatSend(ws, { type: "pong", t: msg.t })
-    if (msg.type !== "chat" || typeof msg.text !== "string") return
-    const text = msg.text.trim().slice(0, 500)
-    if (!text) return
-    // spam mínimo: 3 mensagens por segundo vira silêncio (sem erro, só ignora)
-    if (Date.now() - ws.lastMsg < 300) return
-    ws.lastMsg = Date.now()
-    const at = Date.now()
-    let id
-    try { ({ lastInsertRowid: id } = addChatMsg(nick, text, at, room)) } catch (e) { log("[chat] db:", e.message); return }
-    chatBroadcast(room, { type: "chat", id, from: nick, text, at })
+
+    // digitando: puro relay, não persiste. Sem isso o cliente manda um
+    // evento por tecla; com o gate de 1,5s vira no máximo 1/s por pessoa.
+    if (msg.type === "typing") {
+      if (Date.now() - ws.lastTyping < 1500) return
+      ws.lastTyping = Date.now()
+      return chatBroadcast(room, { type: "typing", from: nick, on: !!msg.on })
+    }
+
+    if (msg.type === "chat") {
+      const text = String(msg.text ?? "").trim().slice(0, CHAT_MAX_TEXT)
+      if (!text) return
+      // spam mínimo: 3 mensagens por segundo vira silêncio (sem erro, só ignora)
+      if (Date.now() - ws.lastMsg < 300) return
+      ws.lastMsg = Date.now()
+      // reply: o pai tem que existir na mesma sala (e a resposta de resposta
+      // não aninha — a UI cita o pai direto)
+      let replyTo = null
+      if (Number.isInteger(msg.replyTo) && msg.replyTo > 0) {
+        const parent = chatGet(room, msg.replyTo)
+        if (parent && !parent.sys) replyTo = parent.replyTo ?? parent.id
+      }
+      const at = Date.now()
+      let id
+      try { ({ lastInsertRowid: id } = addChatMsg(nick, text, at, room, { replyTo })) } catch (e) { log("[chat] db:", e.message); return }
+      // a linha do banco já sai enriquecida (reply, reações); só carimba o tipo
+      return chatBroadcast(room, { type: "chat", ...chatGet(room, id) })
+    }
+
+    if (msg.type === "edit") {
+      const text = String(msg.text ?? "").trim().slice(0, CHAT_MAX_TEXT)
+      if (!text || !Number.isInteger(msg.id)) return
+      const editedAt = Date.now()
+      if (!editChatMsg(room, msg.id, nick, text, editedAt)) return
+      return chatBroadcast(room, { type: "edit", id: msg.id, text, editedAt })
+    }
+
+    if (msg.type === "delete") {
+      if (!Number.isInteger(msg.id)) return
+      if (!deleteChatMsg(room, msg.id, nick)) return
+      return chatBroadcast(room, { type: "delete", id: msg.id })
+    }
+
+    if (msg.type === "react") {
+      if (!Number.isInteger(msg.id) || !CHAT_EMOJIS.includes(msg.emoji)) return
+      // reação também é spam de clique: 3/s por pessoa
+      if (Date.now() - ws.lastReact < 300) return
+      ws.lastReact = Date.now()
+      const list = toggleChatReaction(room, msg.id, msg.emoji, nick, Date.now())
+      if (list === null) return
+      return chatBroadcast(room, { type: "reactions", id: msg.id, list })
+    }
   })
 
   ws.on("close", () => {

@@ -40,6 +40,12 @@ não dependem disso.
 - O id da sessão WHEP que o adapter entrega na `Location` NÃO é o id de
   reader do `/v3` do mediamtx (namespaces distintos): a poda de viewers
   fantasmas é por contagem de `readers` por path (mais antigo primeiro).
+- O chat por transmissão (`/api/fixed/ws/chat`, código em
+  `server/fixed-live/index.js`) tem protocolo v2 estilo Fluxer/Discord:
+  echo pro remetente (render nunca é otimista), edit/delete só do dono,
+  reação toggle com conjunto FECHADO de emoji (`CHAT_EMOJIS` no servidor) —
+  o seletor da UI espelha a lista à mão; adicionar emoji é nos dois lugares.
+  Testes: `cd server/fixed-live && npm test` (presença + chat).
 
 ## Design
 

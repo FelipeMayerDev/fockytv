@@ -17,7 +17,7 @@
      e CSS velho (componente novo aparece sem estilo até a cache expirar).
      Suba o número junto com qualquer mudança em assets/. -->
 <link rel="stylesheet" href="assets/theme.css?v=1">
-<link rel="stylesheet" href="assets/app.css?v=9">
+<link rel="stylesheet" href="assets/app.css?v=10">
 
 <!-- gif do "du bist gut genug": cobre a tela enquanto toca a abertura -->
 <div id="intro-gif"></div>
@@ -391,10 +391,20 @@
     <h3>Chat</h3>
     <p class="desc" id="chat-online"></p>
     <div class="chat-msgs" id="chat-msgs"></div>
+    <div class="chat-typing" id="chat-typing" hidden></div>
+    <div class="chat-replybar" id="chat-replybar" hidden>
+      <span class="chat-reply-arrow">↳</span>
+      <span id="chat-reply-ctx"></span>
+      <button type="button" class="ghost icon" id="chat-reply-x" title="Cancelar resposta" aria-label="Cancelar resposta">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
     <form class="chat-form" id="chat-form">
-      <input id="chat-input" maxlength="500" placeholder="fala com a galera…" autocomplete="off">
+      <textarea id="chat-input" maxlength="1000" rows="1" placeholder="fala com a galera…" autocomplete="off"></textarea>
       <button>Enviar</button>
+      <span class="chat-count" id="chat-count" hidden></span>
     </form>
+    <div id="chat-emoji-pop" class="glass" hidden></div>
   </aside>
   <!-- canais fixos: chat abre por botão flutuante sobre o vídeo -->
   <button class="ghost icon" id="chat-fab" hidden title="Chat" aria-label="Chat">
@@ -1654,7 +1664,8 @@ $('#cfg-close').onclick = () => $('#dlg-cfg').close()
 // painel próprio (#chat-panel, mesmo visual). A mensagem própria renderiza
 // pelo eco do servidor — uma fonte só de verdade, e o id do banco viabiliza
 // o scrollback.
-const chat = { ws: null, room: null, oldest: null, timer: null, unread: 0, fab: false }
+const chat = { ws: null, room: null, oldest: null, timer: null, unread: 0, fab: false,
+               last: null, byId: new Map(), reply: null, typings: new Map() }
 
 const chatEls = () => ({ msgs: $('#chat-msgs'), online: $('#chat-online'), input: $('#chat-input') })
 
@@ -1663,29 +1674,278 @@ const chatFabBadge = () => {
   $('#chat-fab-badge').textContent = chat.unread > 99 ? '99+' : chat.unread || ''
 }
 
+// ── render estilo Fluxer/Discord ─────────────────────────────────────────
+// Markdown enxuto montado em DOM nodes: texto do usuário nunca vira HTML,
+// então não existe injeção. Emoji do seletor espelha CHAT_EMOJIS do
+// server/fixed-live/index.js (o servidor recusa o que não está lá).
+const CHAT_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🎉", "👏", "🤔",
+                     "👀", "🤝", "💯", "🥳", "🙌", "😅", "🫡", "🎧", "🎸", "📺", "⚡"]
+
+const chatEl = (tag, cls, text) => {
+  const n = document.createElement(tag)
+  if (cls) n.className = cls
+  if (text !== undefined) n.textContent = text
+  return n
+}
+
+// cor do nick: hash → matiz. Cor de conteúdo (como o Discord faz), não de
+// tema — o design system segue valendo pra superfícies e controles.
+const chatHue = nick => {
+  let h = 0
+  for (const c of nick) h = (h * 31 + c.codePointAt(0)) % 360
+  return h
+}
+const chatNick = n => {
+  const b = chatEl('b', null, n)
+  b.style.color = `hsl(${chatHue(n)} 45% 70%)`
+  return b
+}
+
+const chatInlineRe = /(`([^`]+)`)|(https?:\/\/[^\s<]+)|(@[\w.]{1,32})|(\*\*([^*]+)\*\*)|(\*([^*\n]+)\*)|(~~([^~]+)~~)|(__([^_]+)__)/g
+
+function chatInline (text, out) {
+  const re = new RegExp(chatInlineRe.source, 'g')
+  let last = 0, m
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.append(text.slice(last, m.index))
+    if (m[2] !== undefined) out.append(chatEl('code', 'chat-code', m[2]))
+    else if (m[3]) {
+      const a = chatEl('a', null, m[3])
+      a.href = m[3]
+      a.target = '_blank'
+      a.rel = 'noopener noreferrer'
+      out.append(a)
+    } else if (m[4]) {
+      const me = m[4].toLowerCase() === '@' + nick.toLowerCase()
+      out.append(chatEl('span', me ? 'chat-mention me' : 'chat-mention', m[4]))
+    } else if (m[6] !== undefined) out.append(chatEl('strong', null, m[6]))
+    else if (m[8] !== undefined) out.append(chatEl('em', null, m[8]))
+    else if (m[10] !== undefined) out.append(chatEl('s', null, m[10]))
+    else if (m[12] !== undefined) out.append(chatEl('u', null, m[12]))
+    last = re.lastIndex
+  }
+  if (last < text.length) out.append(text.slice(last))
+}
+
+function chatBody (m) {
+  const body = chatEl('div', 'chat-body')
+  if (m.deleted) {
+    body.append(chatEl('span', 'chat-deleted', 'mensagem apagada'))
+    return body
+  }
+  // blocos ``` fecham/abrem por índice: ímpar é conteúdo de bloco
+  const parts = String(m.text).split('```')
+  parts.forEach((part, i) => {
+    if (i % 2) {
+      const pre = chatEl('pre', 'chat-pre')
+      pre.textContent = part.replace(/^[\w-]{0,12}\n/, '')
+      body.append(pre)
+    } else if (part) chatInline(part, body)
+  })
+  if (m.editedAt) body.append(chatEl('span', 'chat-edited', ' (editada)'))
+  return body
+}
+
+function chatReactionsEl (m) {
+  const wrap = chatEl('div', 'chat-reactions')
+  for (const r of m.reactions ?? []) {
+    const chip = chatEl('button', 'chip-reaction' + (r.nicks.includes(nick) ? ' mine' : ''))
+    chip.type = 'button'
+    chip.dataset.emoji = r.emoji
+    chip.title = r.nicks.join(', ')
+    chip.append(chatEl('span', null, r.emoji), chatEl('span', null, String(r.nicks.length)))
+    wrap.append(chip)
+  }
+  return wrap
+}
+
+function chatMsgEl (id) { return $('#chat-msgs').querySelector(`[data-id="${id}"]`) }
+
+// barra de ação no hover: reagir, responder; dono também edita/apaga
+const CHAT_ACT_ICONS = {
+  react: '<circle cx="12" cy="12" r="9"/><path d="M8.5 14a4.5 4.5 0 0 0 7 0"/><line x1="9" y1="9.5" x2="9.01" y2="9.5"/><line x1="15" y1="9.5" x2="15.01" y2="9.5"/>',
+  reply: '<path d="M9 17l-6-6 6-6"/><path d="M3 11h11a6 6 0 0 1 6 6v3"/>',
+  edit: '<path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/>',
+  del: '<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>',
+}
+function chatActionsEl (m) {
+  const bar = chatEl('div', 'chat-actions')
+  for (const act of ['react', 'reply', ...(m.from === nick ? ['edit', 'del'] : [])]) {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.dataset.act = act
+    const label = { react: 'Reagir', reply: 'Responder', edit: 'Editar', del: 'Apagar' }[act]
+    b.title = label
+    b.setAttribute('aria-label', label)
+    b.innerHTML = `<svg viewBox="0 0 24 24">${CHAT_ACT_ICONS[act]}</svg>`
+    bar.append(b)
+  }
+  return bar
+}
+
 function chatRender (m, append = true) {
   if (!chat.room) return
   const box = chatEls().msgs
   const stick = append && box.scrollHeight - box.scrollTop - box.clientHeight < 40
+  chat.byId.set(m.id, m)
+  const time = new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
   const el = document.createElement('div')
   el.className = 'chat-msg'
   el.dataset.id = m.id
-  el.title = new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  const who = document.createElement('b')
-  who.textContent = m.from
-  const txt = document.createElement('span')
-  txt.textContent = m.text
-  el.append(who, txt)
+  el.title = new Date(m.at).toLocaleString()
+
+  if (m.sys) {
+    el.classList.add('sys', m.text === 'subiu ao ar' ? 'up' : 'down')
+    el.append(chatEl('span', 'dot'), chatEl('span', null, m.text), chatEl('span', 'at', time))
+  } else {
+    // agrupamento: mesma pessoa em sequência (≤ 5 min) vira mensagem compacta
+    const group = append && chat.last && !chat.last.sys &&
+                  chat.last.from === m.from && m.at - chat.last.at < 5 * 60_000
+    if (!group) {
+      const head = chatEl('div', 'chat-head')
+      head.append(chatNick(m.from), chatEl('span', 'at', time))
+      el.append(head)
+    } else el.classList.add('cont')
+
+    if (m.replyTo) {
+      const q = chatEl('div', 'chat-reply')
+      q.append(chatEl('span', 'chat-reply-arrow', '↳'), chatNick(m.replyFrom ?? '?'),
+               chatEl('span', null, m.replyDeleted ? 'mensagem apagada' : (m.replyText ?? '')))
+      q.onclick = () => {
+        const target = chatMsgEl(m.replyTo)
+        if (target) {
+          target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+          target.classList.add('flash')
+          setTimeout(() => target.classList.remove('flash'), 1200)
+        }
+      }
+      el.append(q)
+    }
+    el.append(chatBody(m))
+    if (!m.deleted) {
+      const react = chatReactionsEl(m)
+      if (react.childElementCount) el.append(react)
+      el.append(chatActionsEl(m))
+    }
+  }
+
   if (append) {
     box.append(el)
     if (stick) box.scrollTop = box.scrollHeight
     chat.oldest ??= m.id
     // TV: painel só abre pelo FAB — enquanto fechado, conta não-lidas
-    if (chat.fab && $('#chat-panel').hidden) { chat.unread++; chatFabBadge() }
+    // (linha de sistema não é conversa, não conta)
+    if (!m.sys && chat.fab && $('#chat-panel').hidden) { chat.unread++; chatFabBadge() }
+    chat.last = { from: m.from, at: m.at, sys: !!m.sys }
   } else {
+    // página do scrollback: entra no topo sem reagrupar (a mensagem seguinte
+    // já está renderizada; recalcular ela valeria outro passe)
     box.prepend(el)
     chat.oldest = m.id
   }
+}
+
+// ── ações por delegação: sobrevive a re-render de mensagem ──────────────
+let chatEmojiFor = 0
+const chatEmojiHide = () => { $('#chat-emoji-pop').hidden = true; chatEmojiFor = 0 }
+function chatEmojiPop (msgEl) {
+  const pop = $('#chat-emoji-pop')
+  if (!pop.hidden && chatEmojiFor === +msgEl.dataset.id) return chatEmojiHide()
+  chatEmojiFor = +msgEl.dataset.id
+  if (!pop.childElementCount)
+    for (const em of CHAT_EMOJIS) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.textContent = em
+      b.onclick = () => { chatSendMsg({ type: 'react', id: chatEmojiFor, emoji: em }); chatEmojiHide() }
+      pop.append(b)
+    }
+  pop.hidden = false
+}
+
+const chatSendMsg = o => { if (chat.ws?.readyState === WebSocket.OPEN) chat.ws.send(JSON.stringify(o)) }
+
+function chatReplySet (m) {
+  chat.reply = { id: m.id, from: m.from }
+  $('#chat-reply-ctx').textContent = `${m.from}: ${(m.text ?? '').slice(0, 60)}`
+  $('#chat-replybar').hidden = false
+  chatEls().input.focus()
+}
+function chatReplyClear () {
+  chat.reply = null
+  $('#chat-replybar').hidden = true
+}
+$('#chat-reply-x').onclick = chatReplyClear
+
+function chatEditStart (msgEl, m) {
+  if (msgEl.querySelector('.chat-edit')) return
+  const body = msgEl.querySelector('.chat-body')
+  const ta = document.createElement('textarea')
+  ta.className = 'chat-edit'
+  ta.value = m.text
+  ta.rows = 1
+  body.replaceChildren(ta)
+  ta.focus()
+  ta.setSelectionRange(ta.value.length, ta.value.length)
+  let fin = false
+  const done = save => {
+    if (fin) return
+    fin = true
+    if (save) {
+      const text = ta.value.trim()
+      if (text && text !== m.text) chatSendMsg({ type: 'edit', id: m.id, text })
+    }
+    const fresh = chatBody(m)
+    body.replaceChildren(...fresh.childNodes)
+  }
+  ta.onkeydown = e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); done(true) }
+    else if (e.key === 'Escape') done(false)
+  }
+  ta.onblur = () => done(false)
+}
+
+$('#chat-msgs').addEventListener('click', e => {
+  const chip = e.target.closest('.chip-reaction')
+  if (chip) return chatSendMsg({ type: 'react', id: +chip.closest('.chat-msg').dataset.id, emoji: chip.dataset.emoji })
+  const btn = e.target.closest('.chat-actions [data-act]')
+  if (!btn) return
+  const msgEl = btn.closest('.chat-msg')
+  const m = chat.byId.get(+msgEl.dataset.id)
+  if (!m) return
+  if (btn.dataset.act === 'react') return chatEmojiPop(msgEl)
+  if (btn.dataset.act === 'reply') return chatReplySet(m)
+  if (btn.dataset.act === 'edit') return chatEditStart(msgEl, m)
+  if (btn.dataset.act === 'del') {
+    // apagar é de dois cliques: o lixeiro acende e vira "confirmar" por 3s
+    if (btn.classList.contains('confirm')) return chatSendMsg({ type: 'delete', id: m.id })
+    btn.classList.add('confirm')
+    btn.title = 'Confirmar'
+    setTimeout(() => { btn.classList.remove('confirm'); btn.title = 'Apagar' }, 3000)
+  }
+})
+
+// clique fora fecha o seletor de emoji
+document.addEventListener('click', e => {
+  if ($('#chat-emoji-pop').hidden) return
+  if (e.target.closest('#chat-emoji-pop') || e.target.closest('.chat-actions [data-act="react"]')) return
+  chatEmojiHide()
+})
+
+// ── "digitando…" ─────────────────────────────────────────────────────────
+const chatTypingSend = on => {
+  if (!on) return chatSendMsg({ type: 'typing', on: false })
+  chatSendMsg({ type: 'typing', on: true })   // o servidor limita a 1/s
+}
+function chatTypingRender () {
+  const who = [...chat.typings.keys()]
+  const el = $('#chat-typing')
+  el.hidden = !who.length
+  if (!who.length) return
+  el.textContent = who.length === 1 ? `${who[0]} está digitando…`
+    : who.length === 2 ? `${who[0]} e ${who[1]} estão digitando…`
+    : 'várias pessoas estão digitando…'
 }
 
 // Ping de aplicação em todo WS nosso. Os três (jam, presença, chat) ficam
@@ -1721,11 +1981,55 @@ function chatConnect () {
       const box = chatEls().msgs
       box.replaceChildren()
       chat.oldest = null
+      chat.last = null
+      chat.byId.clear()
+      for (const t of chat.typings.values()) clearTimeout(t)
+      chat.typings.clear()
+      chatTypingRender()
       for (const c of m.msgs) chatRender(c)
       box.scrollTop = box.scrollHeight
     } else if (m.type === 'count') {
       chatEls().online.textContent = m.n > 1 ? `${m.n} pessoas aqui` : 'só você por enquanto'
     } else if (m.type === 'chat') chatRender(m)
+    else if (m.type === 'edit') {
+      const prev = chat.byId.get(m.id)
+      if (prev) { prev.text = m.text; prev.editedAt = m.editedAt }
+      const body = chatMsgEl(m.id)?.querySelector('.chat-body')
+      if (body) {
+        const fresh = chatBody(chat.byId.get(m.id) ?? m)
+        body.replaceChildren(...fresh.childNodes)
+      }
+    } else if (m.type === 'delete') {
+      const prev = chat.byId.get(m.id)
+      if (prev) { prev.deleted = 1 }
+      const el = chatMsgEl(m.id)
+      if (el) {
+        const body = el.querySelector('.chat-body')
+        if (body) body.replaceChildren(chatEl('span', 'chat-deleted', 'mensagem apagada'))
+        el.querySelector('.chat-actions')?.remove()
+        el.querySelector('.chat-reactions')?.remove()
+      }
+    } else if (m.type === 'reactions') {
+      const prev = chat.byId.get(m.id)
+      if (prev) prev.reactions = m.list
+      const el = chatMsgEl(m.id)
+      if (el) {
+        const react = chatReactionsEl(chat.byId.get(m.id) ?? { reactions: m.list })
+        const old = el.querySelector('.chat-reactions')
+        if (old) old.replaceWith(react)
+        else el.querySelector('.chat-body')?.after(react)
+      }
+    } else if (m.type === 'typing') {
+      clearTimeout(chat.typings.get(m.from))
+      if (m.on && m.from !== nick) {
+        // o relay chega 1×/s; o stickiness local segura o rótulo por 4,5s
+        chat.typings.set(m.from, setTimeout(() => {
+          chat.typings.delete(m.from)
+          chatTypingRender()
+        }, 4500))
+      } else chat.typings.delete(m.from)
+      chatTypingRender()
+    }
   }
   ws.onclose = () => {
     if (chat.ws === ws) chat.ws = null
@@ -1743,6 +2047,10 @@ function chatOpen (room) {
   chatClose(true)
   chat.room = room
   chat.unread = 0
+  chat.last = null
+  chat.byId.clear()
+  chatReplyClear()
+  chatEmojiHide()
   $('#chat-fab').hidden = false
   $('#chat-panel').hidden = true
   chatFabBadge()
@@ -1756,6 +2064,11 @@ function chatClose (keepRoom = false) {
   $('#chat-fab').hidden = true
   chat.fab = false
   chat.unread = 0
+  chatReplyClear()
+  chatEmojiHide()
+  for (const t of chat.typings.values()) clearTimeout(t)
+  chat.typings.clear()
+  chatTypingRender()
   if (!keepRoom) chat.room = null
 }
 
@@ -1857,13 +2170,38 @@ $('#clip-save').onclick = () => {
     .finally(() => { $('#clip-save').disabled = false })
 }
 
+// composer: textarea de 1 a 5 linhas, Enter envia / Shift+Enter quebra linha,
+// contador perto do teto, "digitando" throttled — e a resposta pendente viaja
+// junto da mensagem.
+const chatInput = $('#chat-input')
+chatInput.addEventListener('input', () => {
+  chatInput.style.height = 'auto'
+  chatInput.style.height = Math.min(chatInput.scrollHeight, 110) + 'px'
+  const n = chatInput.value.length
+  const c = $('#chat-count')
+  c.hidden = n < 800
+  if (!c.hidden) c.textContent = `${n}/1000`
+  if (chatInput.value.trim()) chatTypingSend(true)
+})
+chatInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault()
+    $('#chat-form').requestSubmit()
+  }
+})
+
 for (const [form, input] of [['#chat-form', '#chat-input']])
   $(form).onsubmit = e => {
     e.preventDefault()
     const text = $(input).value.trim()
     if (!text || !chat.ws || chat.ws.readyState !== WebSocket.OPEN) return
-    chat.ws.send(JSON.stringify({ type: 'chat', text }))
+    chat.ws.send(JSON.stringify({ type: 'chat', text, replyTo: chat.reply?.id }))
     $(input).value = ''
+    $(input).style.height = 'auto'
+    $('#chat-count').hidden = true
+    chatReplyClear()
+    chatTypingSend(false)
+    $(input).focus()
   }
 
 // ── resumo diário: "você perdeu" ─────────────────────────────────────────

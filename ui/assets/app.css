@@ -972,7 +972,9 @@ body.intro #intro-gif { opacity:.35 }
 
 
 /* ── chat por transmissão: seção no painel fixo + painel próprio pra ──────
-   streams de pessoas (mesmo encaixe/visual do #fixed-panel) ────────────── */
+   streams de pessoas (mesmo encaixe/visual do #fixed-panel). Render estilo
+   Fluxer/Discord: agrupamento de mensagens, markdown leve, reações em chip,
+   ações no hover, linha de "digitando" — tudo em token, zero cor nova. ── */
 #chat-panel {
   position:absolute; top:0; right:0; bottom:0; width:min(360px, 92vw);
   background:hsl(var(--surface-2)); border-left:1px solid hsl(var(--border));
@@ -984,13 +986,98 @@ body.intro #intro-gif { opacity:.35 }
                  letter-spacing:-.02em; margin-bottom:2px }
 #chat-panel .desc { font-size:12px }
 .chat-msgs { flex:1; min-height:120px; overflow:auto; display:flex;
-             flex-direction:column; gap:6px; padding:6px 0 }
+             flex-direction:column; gap:2px; padding:16px 0 4px }
 #chat-panel .chat-msgs { flex:1 }
-.chat-msg { font-size:13px; line-height:1.45; overflow-wrap:anywhere }
+.chat-msg { position:relative; font-size:13px; line-height:1.45;
+            overflow-wrap:anywhere; padding:2px 8px; margin-top:10px;
+            border-radius:var(--radius) }
+.chat-msgs .chat-msg:first-child { margin-top:0 }
+.chat-msg.cont { margin-top:0 }
+.chat-msg:hover { background:hsl(var(--muted)) }
 .chat-msg b { margin-right:6px; color:hsl(var(--foreground)) }
-.chat-form { display:flex; gap:8px; padding-top:8px }
-.chat-form input { flex:1; min-width:0 }
+.chat-head { display:flex; align-items:baseline; gap:6px }
+.chat-msg .at { font-size:10px; color:hsl(var(--muted-foreground)) }
+.chat-body { white-space:pre-wrap }
+.chat-msg a { color:hsl(var(--accent)) }
+.chat-code { background:hsl(var(--muted)); padding:1px 5px;
+             border-radius:var(--radius); font-size:12px;
+             font-family:ui-monospace, monospace }
+.chat-pre { background:hsl(var(--muted)); border:1px solid hsl(var(--border));
+            border-radius:var(--radius); padding:8px; margin:4px 0;
+            overflow:auto; white-space:pre; font-size:12px;
+            font-family:ui-monospace, monospace }
+.chat-mention { color:hsl(var(--accent)); background:hsl(var(--accent) / .12);
+                border-radius:var(--radius-pill); padding:0 6px; font-weight:600 }
+.chat-mention.me { background:hsl(var(--accent) / .22) }
+.chat-edited { color:hsl(var(--muted-foreground)); font-size:11px }
+.chat-deleted { color:hsl(var(--muted-foreground)); font-style:italic; font-size:12px }
+.chat-reply { display:flex; align-items:center; gap:5px; min-width:0;
+              font-size:11px; color:hsl(var(--muted-foreground));
+              cursor:pointer; margin-bottom:1px }
+.chat-reply b { margin-right:0; font-size:11px }
+.chat-reply > span:last-child { white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+.chat-reply:hover { color:hsl(var(--foreground)) }
+.chat-msg.flash { background:hsl(var(--accent) / .12) }
+.chat-actions { position:absolute; top:-14px; right:8px; display:flex; gap:2px;
+                padding:2px; background:hsl(var(--card));
+                border:1px solid hsl(var(--border)); border-radius:var(--radius);
+                box-shadow:var(--glass-shadow); opacity:0; pointer-events:none;
+                transition:opacity .12s }
+.chat-msg:hover .chat-actions, .chat-actions:focus-within { opacity:1; pointer-events:auto }
+.chat-actions button { width:26px; height:26px; padding:0; border:none;
+                       display:grid; place-items:center; background:transparent;
+                       color:hsl(var(--muted-foreground)) }
+.chat-actions button:hover { background:hsl(var(--muted)); color:hsl(var(--foreground)); opacity:1 }
+.chat-actions button.confirm { color:hsl(var(--destructive)) }
+.chat-reactions { display:flex; flex-wrap:wrap; gap:4px; margin-top:4px }
+.chip-reaction { height:22px; padding:0 8px; display:inline-flex; align-items:center;
+                 gap:4px; border-radius:var(--radius-pill); font-size:12px;
+                 border:1px solid hsl(var(--border)); background:hsl(var(--muted));
+                 color:hsl(var(--foreground)) }
+.chip-reaction:hover { border-color:hsl(var(--muted-foreground)) }
+.chip-reaction.mine { border-color:hsl(var(--accent)); background:hsl(var(--accent) / .12) }
+/* linha de evento do sistema ("subiu/saiu do ar"): pílula centrada, discreta */
+.chat-msg.sys { display:flex; align-items:center; justify-content:center; gap:6px;
+                margin-top:6px; color:hsl(var(--muted-foreground)); font-size:12px }
+.chat-msg.sys .dot { width:6px; height:6px; border-radius:var(--radius-pill);
+                     background:hsl(var(--muted-foreground)); flex:none }
+.chat-msg.sys.up .dot { background:hsl(var(--destructive)) }
+.chat-typing { min-height:14px; font-size:11px; padding:0 8px;
+               color:hsl(var(--muted-foreground)) }
+.chat-replybar { display:flex; align-items:center; gap:6px; min-width:0;
+                 padding:4px 6px 4px 10px; margin-bottom:6px;
+                 background:hsl(var(--muted)); border-radius:var(--radius);
+                 font-size:12px }
+.chat-replybar .chat-reply-arrow { color:hsl(var(--muted-foreground)) }
+#chat-reply-ctx { flex:1; min-width:0; white-space:nowrap; overflow:hidden;
+                  text-overflow:ellipsis; color:hsl(var(--muted-foreground)) }
+.chat-replybar .ghost.icon { width:26px; height:26px; flex:none }
+.chat-replybar .ghost.icon svg { width:14px; height:14px }
+.chat-form { position:relative; display:flex; gap:8px; padding-top:8px;
+             align-items:flex-end }
+.chat-form textarea { flex:1; min-width:0; resize:none; min-height:36px;
+                      max-height:110px; padding:8px 10px; font:inherit;
+                      font-size:13px; line-height:1.4; border-radius:var(--radius);
+                      background:hsl(var(--background)); color:hsl(var(--foreground));
+                      border:1px solid hsl(var(--border)) }
+.chat-form textarea:focus { outline:2px solid hsl(var(--ring)); outline-offset:-1px }
 .chat-form button { flex:none }
+.chat-count { position:absolute; top:-16px; right:8px; font-size:10px;
+              color:hsl(var(--muted-foreground)) }
+.chat-edit { width:100%; resize:none; font:inherit; font-size:13px; line-height:1.45;
+             background:hsl(var(--background)); color:hsl(var(--foreground));
+             border:1px solid hsl(var(--border)); border-radius:var(--radius);
+             padding:4px 8px }
+.chat-edit:focus { outline:2px solid hsl(var(--ring)); outline-offset:-1px }
+/* seletor de emoji: vidro pronto (.glass), âncora fixa acima do composer */
+#chat-emoji-pop { position:absolute; right:12px; bottom:56px; z-index:5;
+                  display:grid; grid-template-columns:repeat(5, 34px); gap:2px;
+                  padding:8px }
+#chat-emoji-pop[hidden] { display:none }
+#chat-emoji-pop button { width:34px; height:34px; padding:0; font-size:18px;
+                         background:transparent; border:none;
+                         display:grid; place-items:center }
+#chat-emoji-pop button:hover { background:hsl(var(--muted)); opacity:1 }
 /* TV: FAB do chat sobre o vídeo (acompanha o recolher do painel fixo) */
 #chat-fab { position:absolute; bottom:16px; right:16px; z-index:6;
   background:var(--scrim); border:1px solid hsl(var(--border)) }
