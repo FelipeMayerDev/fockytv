@@ -627,6 +627,15 @@
          obrigatório (e o do Discord excluído na tela toda), sobrava só
          "lista de janelas + 60 fps", que não justifica um modo. Se voltar,
          era uma row com #game filtrando sources por hwndOf() e fps=60. -->
+    <div class="field" id="qual-row">
+      <label for="qual">Resolução</label>
+      <select id="qual">
+        <option value="fonte" selected>Fonte (nativa)</option>
+        <option value="1440">1440p</option>
+        <option value="1080">1080p</option>
+        <option value="720">720p</option>
+      </select>
+    </div>
     <div class="field">
       <label for="fps">Taxa de quadros</label>
       <select id="fps">
@@ -781,12 +790,20 @@ function tuneSender (s, fps) {
 }
 
 async function capture (fps, withAudio, withCursor) {
+  // resolução: o constraint é TETO, não força — "fonte" não passa cap e o
+  // portal entrega a tela nativa (o mesmo "Source" do Fluxer). Antes era
+  // 1080 fixo: monitor 1440p/4K ia no ar reescalado, macio demais.
+  const caps = {
+    1440: { width: 2560, height: 1440 },
+    1080: { width: 1920, height: 1080 },
+    720: { width: 1280, height: 720 },
+  }[$('#qual')?.value]
   return navigator.mediaDevices.getDisplayMedia({
     // ponytail: o Blink ignora `cursor` (nem aparece em getSupportedConstraints),
     // então hoje quem manda é a camada de captura: no Wayland o portal embute o
     // cursor na tela e não na janela, no Windows o Chromium sempre compõe. Fica
     // pedido do jeito certo pra valer sozinho quando o Chromium implementar.
-    video: { frameRate: fps, width: 1920, height: 1080, cursor: withCursor ? 'always' : 'never' },
+    video: { frameRate: fps, ...(caps ?? {}), cursor: withCursor ? 'always' : 'never' },
     // systemAudio 'include': sem isso o seletor do Chrome nem mostra o
     // checkbox de "áudio do sistema" no Windows — e o som sai de fora
     audio: withAudio
@@ -799,7 +816,11 @@ async function capture (fps, withAudio, withCursor) {
 }
 
 async function publish (key, st, fps, codec) {
-  st.getVideoTracks()[0].contentHint = 'motion'
+  // hint decide ONDE o encoder gasta bits: 60fps = movimento (jogo, vídeo);
+  // 30/15 = detalhe (texto, código) — com 'motion' numa tela de texto ele
+  // troca nitidez por framerate e a live parece lavada. Medido: o automatismo
+  // antigo era 'motion' fixo.
+  st.getVideoTracks()[0].contentHint = fps >= 60 ? 'motion' : 'detail'
 
   const pc = new RTCPeerConnection()
   st.getTracks().forEach(t => pc.addTrack(t, st))
@@ -817,12 +838,13 @@ async function publish (key, st, fps, codec) {
       .filter(c => c.mimeType.toLowerCase() === codec)
     if (list.length) pc.getTransceivers().find(t => t.sender === sender)
       .setCodecPreferences(list)
-  } else if (/Windows|Mac/.test(navigator.userAgent)) {
-    // Sem escolha explícita: H264 primeiro — é o que sai por hardware em
-    // qualquer GPU de desktop (D3D11/VideoToolbox) — e AV1 em seguida
-    // (hardware nas GPUs novas). O "Automático" do Chrome costuma cair em
-    // VP8 de software, o caminho do "não passa de 40 fps". No Linux o auto
-    // fica: H264 de software (openh264) é pior que o VP8 de software dele.
+  } else {
+    // Sem escolha explícita: H264 primeiro — sai por hardware em qualquer GPU
+    // de desktop com VAAPI/D3D11/VideoToolbox — e AV1 em seguida (hardware nas
+    // GPUs novas). O "Automático" sem preferência cai em VP8 DE SOFTWARE: em
+    // 1080p60 medimos ~35fps e ~5Mbps com qualityLimitationReason "cpu" — é o
+    // encoder secando, não a rede. O openh264 (H264 sw do Linux) aguenta o
+    // tranco; quando há VAAPI, sai de graça. Medição guiou este corte.
     const caps = RTCRtpSender.getCapabilities('video').codecs
     const prio = [
       ...caps.filter(c => /^video\/h264/i.test(c.mimeType)),
@@ -2350,6 +2372,7 @@ async function openShareDialog (isSwap, cam) {
     $('#portal-note').hidden = true
     $('#faudio-row').hidden = true
     $('#yt-row').hidden = true
+    $('#qual-row').hidden = true   // câmera é 720p fixo; resolução é da tela
     $('#audio-note').hidden = true   // câmera não usa sink; a nota é da tela
     $('#dlg-share').dataset.swap = ''
     $('#dlg-share').showModal()
@@ -2361,6 +2384,7 @@ async function openShareDialog (isSwap, cam) {
   // lugar da lista — e se a enumeração falhar, fecha de novo e deixa o toast.
   $('#dlg-share').dataset.swap = isSwap ? '1' : ''
   $('#portal-note').hidden = true
+  $('#qual-row').hidden = false   // abertura anterior pode ter sido câmera
   $('#sources').replaceChildren(...Array.from({ length: 4 }, () => {
     const fig = document.createElement('figure')
     fig.className = 'loading'
@@ -2463,6 +2487,7 @@ function updateShareSrcUI () {
     $('#cursor-row').hidden = true
   } else {
     $('#audio-row').hidden = false
+    $('#qual-row').hidden = false
     $('#cursor-row').hidden = !!$('#dlg-share').dataset.swap
     updateSinkNote()
   }
