@@ -630,10 +630,12 @@
     <div class="field" id="qual-row">
       <label for="qual">Resolução</label>
       <select id="qual">
-        <option value="fonte" selected>Fonte (nativa)</option>
+        <option value="fonte" selected>Fonte (até 4K)</option>
         <option value="1440">1440p</option>
         <option value="1080">1080p</option>
         <option value="720">720p</option>
+        <option value="480">480p</option>
+        <option value="240">240p</option>
       </select>
     </div>
     <div class="field">
@@ -777,33 +779,100 @@ function release (pc) {
   pc.close()
 }
 
-function tuneSender (s, fps) {
+// ── qualidade do publish: sistema portado do Fluxer ─────────────────────
+// Fonte: fluxer_app/src/features/voice/utils/ScreenShareOptions.ts e
+// ScreenShareCodecSelection.ts (fork FelipeMayerDev/fluxer). A qualidade
+// deles não vem de bitrate alto — vem de capturar na resolução do preset,
+// hint 'text' pra tela, degradation dinâmico, codec de hardware primeiro e
+// teto de 9 Mbps com piso por tier (0.02 bit por pixel por frame).
+const FLUXER_DIMENSIONS = {
+  240: [426, 240], 480: [854, 480], 720: [1280, 720],
+  1080: [1920, 1080], 1440: [2560, 1440], fonte: [3840, 2160],
+}
+// piso de bitrate por tier/fps em kbps (BITRATE_KBPS deles, sem os 90/120fps)
+const FLUXER_FLOOR_KBPS = {
+  240: { 15: 300, 30: 500, 60: 700 },
+  480: { 15: 1200, 30: 2000, 60: 3000 },
+  720: { 15: 2000, 30: 3000, 60: 4500 },
+  1080: { 15: 3000, 30: 4500, 60: 6000 },
+  1440: { 15: 4000, 30: 5500, 60: 6000 },
+  fonte: { 15: 4500, 30: 6000, 60: 6000 },
+}
+const FLUXER_MAX_BPS = 9_000_000
+const FLUXER_RUNGS = ['240', '480', '720', '1080', '1440', 'fonte']
+
+// bitrate Fluxer: min(teto 9M, max(piso do tier, 0.02 × pixels × fps)).
+// Captura menor que o teto do tier usa os pixels reais e o piso do tier dela
+// (resolveEffectiveScreenShareDimensions + resolveBitrateRungForPixels).
+function fluxerBitrate (w, h, fps) {
+  const f = fps >= 60 ? 60 : fps >= 30 ? 30 : 15
+  const pixels = w * h
+  const rung = FLUXER_RUNGS.filter(r => FLUXER_DIMENSIONS[r][0] * FLUXER_DIMENSIONS[r][1] <= pixels).pop() ?? '240'
+  const floor = (FLUXER_FLOOR_KBPS[rung]?.[f] ?? 300) * 1000
+  return { maxBps: Math.min(FLUXER_MAX_BPS, Math.max(floor, Math.round(0.02 * pixels * f))), rung }
+}
+
+// probe de hardware via mediaCapabilities (o mesmo caminho do
+// GpuEncoderCapabilities deles: encodingInfo + powerEfficient). Cacheado.
+let hwEncCache = null
+async function hwEncoders () {
+  if (hwEncCache) return hwEncCache
+  const probe = async (contentType, w, h) => {
+    try {
+      const r = await navigator.mediaCapabilities.encodingInfo({
+        type: 'webrtc', video: { contentType, width: w, height: h, framerate: 60 } })
+      return !!r.supported && !!r.powerEfficient
+    } catch { return false }
+  }
+  const [av1, h264b, h264h, vp9, vp8] = await Promise.all([
+    probe('video/AV1', 1920, 1080),
+    probe('video/H264;profile-level-id=42e01f', 1920, 1080),
+    probe('video/H264;profile-level-id=640028', 1920, 1080),
+    probe('video/VP9', 1920, 1080),
+    probe('video/VP8', 1920, 1080),
+  ])
+  return (hwEncCache = { av1, h264: h264b || h264h, vp9, vp8 })
+}
+
+// ordem do Fluxer (rankScreenShareCodecs): hardware primeiro, software depois.
+// Firefox (Gecko) só tem vp8/h264 confiáveis no WebRTC — ordem deles
+// (GECKO_CODEC_PREFERENCE). h265 fica de fora — player WHEP decodificar
+// h265 é raro. swH264Clamp = o codec escolhido é h264 SEM hardware: igual ao
+// SOFTWARE_H264_MAX deles (720p/30), openh264 não sustenta mais que isso.
+// Os nomes são mimeTypes completos: é o que o filtro de codecs compara.
+function pickShareCodec (hw) {
+  const rank = /firefox/i.test(navigator.userAgent)
+    ? ['video/vp8', 'video/h264'] : ['video/av1', 'video/h264', 'video/vp9', 'video/vp8']
+  const isHw = m => hw[m.replace('video/', '')]
+  const order = [...rank.filter(isHw), ...rank.filter(m => !isHw(m))]
+  return { order, first: order[0], swH264Clamp: order[0] === 'video/h264' && !hw.h264 }
+}
+
+function tuneSender (s, fps, maxBps, degradation) {
   const p = s.getParameters()
   if (!p.encodings?.length) p.encodings = [{}]
-  // 32M = mesmo teto do client nativo (1080p60 com movimento). O Chrome só
-  // usa o que o encoder dele aguentar — em software costuma capar antes.
-  p.encodings[0].maxBitrate = 32_000_000
+  p.encodings[0].maxBitrate = maxBps
   p.encodings[0].maxFramerate = fps
   p.encodings[0].scaleResolutionDownBy = 1
-  p.degradationPreference = 'maintain-resolution'
+  // a track de vídeo é a que importa: prioridade alta na rede e no encoder
+  p.encodings[0].priority = 'high'
+  p.encodings[0].networkPriority = 'high'
+  p.degradationPreference = degradation
   return s.setParameters(p)          // só depois de addTrack, senão some em silêncio
 }
 
-async function capture (fps, withAudio, withCursor) {
-  // resolução: o constraint é TETO, não força — "fonte" não passa cap e o
-  // portal entrega a tela nativa (o mesmo "Source" do Fluxer). Antes era
-  // 1080 fixo: monitor 1440p/4K ia no ar reescalado, macio demais.
-  const caps = {
-    1440: { width: 2560, height: 1440 },
-    1080: { width: 1920, height: 1080 },
-    720: { width: 1280, height: 720 },
-  }[$('#qual')?.value]
+async function capture (fps, withAudio, withCursor, qual = 'fonte') {
+  // resolução: preset do seletor com os DIMENSIONS do Fluxer ("fonte" é teto
+  // 3840x2160, não infinito). O constraint é o alvo: o compositor do sistema
+  // escala a captura pra ele, e o encoder codifica exatamente esse tamanho —
+  // é assim que o Fluxer chega no bitrate/qualidade previsto pela tabela.
+  const [w, h] = FLUXER_DIMENSIONS[qual] ?? FLUXER_DIMENSIONS.fonte
   return navigator.mediaDevices.getDisplayMedia({
     // ponytail: o Blink ignora `cursor` (nem aparece em getSupportedConstraints),
     // então hoje quem manda é a camada de captura: no Wayland o portal embute o
     // cursor na tela e não na janela, no Windows o Chromium sempre compõe. Fica
     // pedido do jeito certo pra valer sozinho quando o Chromium implementar.
-    video: { frameRate: fps, ...(caps ?? {}), cursor: withCursor ? 'always' : 'never' },
+    video: { frameRate: fps, width: w, height: h, cursor: withCursor ? 'always' : 'never' },
     // systemAudio 'include': sem isso o seletor do Chrome nem mostra o
     // checkbox de "áudio do sistema" no Windows — e o som sai de fora
     audio: withAudio
@@ -816,11 +885,11 @@ async function capture (fps, withAudio, withCursor) {
 }
 
 async function publish (key, st, fps, codec) {
-  // hint decide ONDE o encoder gasta bits: 60fps = movimento (jogo, vídeo);
-  // 30/15 = detalhe (texto, código) — com 'motion' numa tela de texto ele
-  // troca nitidez por framerate e a live parece lavada. Medido: o automatismo
-  // antigo era 'motion' fixo.
-  st.getVideoTracks()[0].contentHint = fps >= 60 ? 'motion' : 'detail'
+  // hint: <60fps é tela de texto/código → 'text' (o modo "screenshare" do
+  // Fluxer); 60fps fica SEM hint — o navegador auto-detecta conteúdo, que é
+  // o que o Fluxer faz com 'motion' no desktop (converte pra indefinido)
+  const track = st.getVideoTracks()[0]
+  if (fps < 60) track.contentHint = 'text'
 
   const pc = new RTCPeerConnection()
   st.getTracks().forEach(t => pc.addTrack(t, st))
@@ -834,30 +903,37 @@ async function publish (key, st, fps, codec) {
     ?? pc.addTransceiver('audio', { direction: 'sendonly' }).sender
 
   if (codec) {
+    // o value do #codec vem com a caixa original do mimeType ('video/H264') —
+    // sem o toLowerCase aqui o filtro nunca casava e o codec manual era
+    // ignorado silenciosamente
+    codec = codec.toLowerCase()
     const list = RTCRtpSender.getCapabilities('video').codecs
       .filter(c => c.mimeType.toLowerCase() === codec)
     if (list.length) pc.getTransceivers().find(t => t.sender === sender)
       .setCodecPreferences(list)
   } else {
-    // Sem escolha explícita: H264 primeiro — sai por hardware em qualquer GPU
-    // de desktop com VAAPI/D3D11/VideoToolbox — e AV1 em seguida (hardware nas
-    // GPUs novas). O "Automático" sem preferência cai em VP8 DE SOFTWARE: em
-    // 1080p60 medimos ~35fps e ~5Mbps com qualityLimitationReason "cpu" — é o
-    // encoder secando, não a rede. O openh264 (H264 sw do Linux) aguenta o
-    // tranco; quando há VAAPI, sai de graça. Medição guiou este corte.
+    // Um codec SÓ, na escolha do Fluxer (rankScreenShareCodecs: hardware
+    // primeiro via probe mediaCapabilities). Detalhe decisivo descoberto na
+    // medição: o mediamtx escolhe o codec do answer pela PRÓPRIA ordem de
+    // preferência dele (VP8 primeiro) e ignora a ordem do offer — oferecer
+    // todos os codecs ordenados nunca aplicou H264/AV1. LiveKit publica um
+    // codec por track, e é isso que o offer precisa ser.
+    const hw = await hwEncoders()
+    const { first } = pickShareCodec(hw)
     const caps = RTCRtpSender.getCapabilities('video').codecs
-    const prio = [
-      ...caps.filter(c => /^video\/h264/i.test(c.mimeType)),
-      ...caps.filter(c => /^video\/av1/i.test(c.mimeType)),
-    ]
-    if (prio.length) {
-      const rest = caps.filter(c => !prio.includes(c))
-      pc.getTransceivers().find(t => t.sender === sender)
-        .setCodecPreferences([...prio, ...rest])
-    }
+    const list = caps.filter(c => c.mimeType.toLowerCase() === first)
+    if (list.length) pc.getTransceivers().find(t => t.sender === sender)
+      .setCodecPreferences(list)
   }
 
-  await tuneSender(sender, fps)
+  // bitrate pela tabela do Fluxer (piso por tier, 0.02bpp/frame, teto 9M) e
+  // degradation dinâmico: source/texto preserva resolução; movimento em
+  // resolução abaixo de source preserva framerate
+  // (resolveScreenShareDegradationPreference deles)
+  const src = track.getSettings()
+  const { maxBps, rung } = fluxerBitrate(src.width, src.height, fps)
+  const degradation = rung === 'fonte' || fps < 60 ? 'maintain-resolution' : 'maintain-framerate'
+  await tuneSender(sender, fps, maxBps, degradation)
   st.getVideoTracks()[0].addEventListener('ended', () => { if (!swapping) stop() })
 
   await signal('/api/whip', key, pc)
@@ -2612,7 +2688,15 @@ $('#share-go').onclick = async () => {
       ytBarOpen()
       toast(`Transmitindo do YouTube: ${ytShare.title}`, null, 'info')
     } else {
-      const fps = +$('#fps').value
+      // codec e clamp decididos ANTES da captura (igual ao Fluxer: o alvo de
+      // qualidade depende do codec): h264 de software clampa a 720p30 —
+      // openh264 não sustenta mais que isso com qualidade (SOFTWARE_H264_MAX)
+      const hw = await hwEncoders()
+      const auto = pickShareCodec(hw)
+      const codec = $('#codec').value || auto.first
+      const clamp = !$('#codec').value && auto.swH264Clamp
+      const fps = clamp ? 30 : +$('#fps').value
+      const qual = clamp ? '720' : $('#qual').value
       if (cam) {
         stream = await navigator.mediaDevices.getUserMedia({
           // facingMode é preferência, não exigência: no celular pega a frontal
@@ -2640,7 +2724,7 @@ $('#share-go').onclick = async () => {
         // navegador (sem filtro por app do Electron): o monitor do sink
         // FockyTV, se o tools/fockytv-sink.js estiver de pé, já vem sem Discord
         const sinkTrack = !audioOpts && $('#audio').checked ? await fockySinkTrack() : null
-        stream = await capture(fps, $('#audio').checked && !audioOpts && !sinkTrack, $('#cursor').checked)
+        stream = await capture(fps, $('#audio').checked && !audioOpts && !sinkTrack, $('#cursor').checked, qual)
         if (sinkTrack) { stream.addTrack(sinkTrack); sinkUsed = true }
         // o portal pode aceitar o pedido de áudio e devolver só vídeo (Wayland
         // sem PipeWire, por exemplo) — sem erro nenhum. Detecta e avisa:
@@ -2657,11 +2741,11 @@ $('#share-go').onclick = async () => {
             audioFail = e.message
             audioOpts = null
             stream.getTracks().forEach(t => t.stop())
-            stream = await capture(fps, true, $('#cursor').checked)
+            stream = await capture(fps, true, $('#cursor').checked, qual)
           }
         }
       }
-      pc = await publish(nick, stream, fps, $('#codec').value)
+      pc = await publish(nick, stream, fps, codec)
       camOnly = !!cam         // só a câmera no ar: não há tela pra sobrepor
       setLive(true)
       sfx.live()
