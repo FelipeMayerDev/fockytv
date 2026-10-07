@@ -11,13 +11,85 @@ import { join } from "node:path"
 import { WebSocketServer } from "ws"
 import express from "express"
 import { MediaStreamTrackFactory, RTCPeerConnection, useH264, useOPUS } from "werift"
-import { logTrackPlayed, mediaHistory, addChatMsg, chatPage, chatLatest,
+import { logTrackPlayed, mediaHistory, addChatMsg, chatGet, chatPage, chatLatest,
+         editChatMsg, deleteChatMsg, toggleChatReaction,
          addClip, getClip, listClips, updateClipFile, delClip } from "./db.js"
 import { recorder } from "./recorder.js"
 
 const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
 const PORT = +(process.env.PORT ?? 3000)
 const IDLE_MS = +(process.env.IDLE_MS ?? 60_000)
+
+// ── encoder de vídeo dos canais fixos: VAAPI (QuickSync) com queda pra x264 ──
+// O servidor LAN é um i5-7400 (4c/4t) com HD 630: encodar a TV em libx264
+// come um core inteiro que divide bolo com o resto do stack. VAAPI (que no
+// Intel É o QuickSync no Linux) tira isso do CPU. A VPS não tem iGPU de
+// verdade (o card0 lá é VGA ASpeed de BMC) — por isso a probe no primeiro
+// uso e a queda automática pro libx264: o mesmo compose roda nos dois.
+// FF_ENCODER=vaapi|x264 força; FF_QUALITY=hd|source; FF_VAAPI_DEVICE troca o nó.
+const FF_ENCODER = process.env.FF_ENCODER ?? "auto"
+const FF_QUALITY = process.env.FF_QUALITY ?? "hd"
+const FF_VAAPI_DEVICE = process.env.FF_VAAPI_DEVICE ?? "/dev/dri/renderD128"
+
+let vaapiResult
+const vaapiOk = async () => {
+  if (FF_ENCODER === "x264") return false
+  if (vaapiResult !== undefined) return vaapiResult
+  // encode de teste real: init do driver + upload + encode. vainfo não basta
+  // (driver pode carregar e o encode falhar por permissão/cgroup).
+  const probe = spawn("ffmpeg", [
+    "-hide_banner", "-loglevel", "error",
+    "-init_hw_device", `vaapi=va:${FF_VAAPI_DEVICE}`,
+    "-f", "lavfi", "-i", "testsrc=size=640x360:rate=30:duration=0.2",
+    "-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi", "-async_depth", "1",
+    "-f", "null", "-",
+  ], { stdio: ["ignore", "ignore", "pipe"] })
+  let err = ""
+  probe.stderr.on("data", d => { err += d })
+  vaapiResult = await new Promise(res => {
+    const t = setTimeout(() => { try { probe.kill("SIGKILL") } catch {} }, 8000)
+    probe.once("exit", c => { clearTimeout(t); res(c === 0) })
+    probe.once("error", () => { clearTimeout(t); res(false) })
+  })
+  if (!vaapiResult)
+    log("[fixed-live] VAAPI indisponível, canal fixo no libx264:", err.trim().split("\n").pop() || "probe falhou")
+  return vaapiResult
+}
+
+// argumentos de vídeo da TV: qualidade `hd` é o comportamento histórico
+// (1280 de largura, baseline — máxima compatibilidade); `source` vai da
+// resolução nativa da fonte, perfil high e qp mais fino — o "Source" do
+// Fluxer. Nos dois, VAAPI quando existe, x264 quando não.
+//
+// Modo de rate: CQP fixo. Medido no i5-7400 (Gen9.5, iHD 23.1.1 do
+// bookworm): o entrypoint H264 disponível é o low-power (VDENC), que só
+// expõe CQP — CBR/VBR são recusados ("supported modes: CQP"). CQP segue
+// sendo encode por hardware (o objetivo é o CPU livre); o bitrate flutua
+// conforme o conteúdo, então source usa qp 24 e hd qp 26. Driver mais novo
+// ou h264_qsv devolveriam CBR/VBR — revisitar se precisar de teto de bitrate.
+const videoArgs = async () => {
+  const source = FF_QUALITY === "source"
+  const vaapi = await vaapiOk()
+  if (videoArgs.logged !== FF_QUALITY + vaapi) {
+    videoArgs.logged = FF_QUALITY + vaapi
+    log(`[fixed-live] encoder de vídeo: ${vaapi ? `h264_vaapi CQP (${FF_VAAPI_DEVICE})` : "libx264"} · qualidade: ${FF_QUALITY}`)
+  }
+  if (vaapi) return {
+    global: ["-init_hw_device", `vaapi=va:${FF_VAAPI_DEVICE}`, "-filter_hw_device", "va"],
+    codec: ["-c:v", "h264_vaapi", "-profile:v", source ? "high" : "main",
+            "-rc_mode", "CQP", "-qp", source ? "24" : "26", "-async_depth", "1", "-g", "60",
+            "-vf", source ? "setsar=1,format=nv12,hwupload"
+                          : "scale='min(1280,iw)':-2,setsar=1,format=nv12,hwupload"],
+  }
+  return {
+    global: [],
+    codec: ["-c:v", "libx264", "-profile:v", source ? "high" : "baseline",
+            "-level", source ? "4.1" : "3.1", "-pix_fmt", "yuv420p",
+            "-preset", "veryfast", "-tune", "zerolatency",
+            "-b:v", source ? "6000k" : "2500k", "-g", "60",
+            "-vf", source ? "setsar=1" : "scale='min(1280,iw)':-2,setsar=1"],
+  }
+}
 // anúncio de "subiu ao ar": webhook de um canal do Discord (opcional). O link
 // do anúncio usa PUBLIC_URL (o endereço que a galera usa pra abrir o app).
 const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK ?? ""
@@ -498,16 +570,17 @@ class Runner {
     // bounds: com capa em loop o vídeo não teria fim sem isso
     const left = Math.max(1, meta.duration - offset)
     const aenc = ["-c:a", "libopus", "-b:a", "128k", "-ar", "48000", "-ac", "2"]
+    // encoder de vídeo decidido na hora (VAAPI com queda pro x264); os args
+    // globais do hw device têm que vir ANTES dos inputs
+    const vid = video ? await videoArgs() : null
 
     const ff = spawn("ffmpeg", [
       ...args,
+      ...(vid?.global ?? []),
       "-map", videoIn,
-      ...(video
-        ? ["-c:v", "libx264", "-profile:v", "baseline", "-level", "3.1", "-pix_fmt", "yuv420p",
-           "-preset", "veryfast", "-tune", "zerolatency", "-b:v", "2500k", "-g", "60",
-           "-vf", "scale='min(1280,iw)':-2,setsar=1"]
-        : ["-c:v", "libx264", "-profile:v", "baseline", "-level", "3.1", "-pix_fmt", "yuv420p",
-           "-preset", "veryfast", "-tune", "zerolatency", "-b:v", "200k", "-g", "120", "-r", "2"]),
+      ...(vid?.codec ?? ["-c:v", "libx264", "-profile:v", "baseline", "-level", "3.1",
+                         "-pix_fmt", "yuv420p", "-preset", "veryfast", "-tune", "zerolatency",
+                         "-b:v", "200k", "-g", "120", "-r", "2"]),
       "-t", left, "-f", "rtp", `rtp://127.0.0.1:${this.ports.v}`,
       "-map", audioIn, ...aenc, "-t", left, "-f", "rtp", `rtp://127.0.0.1:${this.ports.a}`,
       // posição real da mídia no stdout: é ela que sincroniza a letra
@@ -713,6 +786,9 @@ const stalledSince = { tv: null, music: null }
 // povoa o conjunto sem anunciar — container reiniciando não é "subiu ao ar".
 const announced = new Set()
 let firstScan = true
+// estado anterior de TODAS as streams (fixas incluídas) pro evento do chat;
+// `announced` só cobre streams de pessoa (anúncio no Discord)
+const wasLive = new Set()
 const announceWebhook = key => {
   const body = {
     embeds: [{
@@ -747,6 +823,15 @@ setInterval(async () => {
     if (!firstScan && isNew && DISCORD_WEBHOOK) announceWebhook(k)
   }
   for (const k of announced) if (!liveKeys.has(k)) announced.delete(k)
+  // eventos no chat da sala: "subiu/saiu do ar" entra no histórico da
+  // stream, com a mesma semântica do anúncio do Discord — a 1ª varredura
+  // pós-boot só povoa o conjunto, ninguém quer 20 linhas de boot no chat.
+  if (!firstScan) {
+    for (const k of liveKeys) if (!wasLive.has(k)) chatSystemEvent(k, "subiu ao ar")
+    for (const k of wasLive) if (!liveKeys.has(k)) chatSystemEvent(k, "saiu do ar")
+  }
+  wasLive.clear()
+  for (const k of liveKeys) wasLive.add(k)
   firstScan = false
 
   // gravação saiu: o gravador mantém só o buffer rotativo pros clips de live
@@ -1142,14 +1227,32 @@ httpServer.on("upgrade", (req, sock, head) => {
 // ── chat por transmissão: uma sala por streamKey ─────────────────────────
 // Relay + persistência (SQLite): o histórico sobrevive a restart e a UI
 // pagina pra trás com ?before=&room=. Mensagem vai também pro remetente —
-// o cliente renderiza a dele pelo eco, nunca localmente (uma fonte só de verdade).
+// o cliente renderiza a dele localmente pelo eco, nunca otimista (uma fonte
+// só de verdade). Protocolo v2 (estilo Fluxer/Discord): além de `chat`,
+// edit/delete da própria mensagem, reações (toggle por nick) e "digitando".
 const chatWss = new WebSocketServer({ noServer: true })
 const chatRooms = new Map()   // room -> Set(ws)
+
+// conjunto fechado no servidor: reação não é campo livre (spam e glyph
+// quebrado não entram). A UI replica esta lista no seletor dela.
+const CHAT_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🎉", "👏", "🤔",
+                     "👀", "🤝", "💯", "🥳", "🙌", "😅", "🫡", "🎧", "🎸", "📺", "⚡"]
+const CHAT_MAX_TEXT = 1000
 
 const chatSend = (ws, obj) => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj)) }
 const chatBroadcast = (room, obj) => {
   const data = JSON.stringify(obj)
   for (const ws of chatRooms.get(room) ?? []) if (ws.readyState === ws.OPEN) ws.send(data)
+}
+
+// linha de evento ("subiu ao ar"): persiste como msg sys (autor não é gente)
+// e vai pro ar da sala. Chama o poll de viewers quando uma stream muda de
+// estado — sala vazia persiste pro histórico de quem abrir depois.
+const chatSystemEvent = (room, text) => {
+  const at = Date.now()
+  let id
+  try { ({ lastInsertRowid: id } = addChatMsg("", text, at, room, { sys: 1 })) } catch (e) { return log("[chat] db:", e.message) }
+  chatBroadcast(room, { type: "chat", id, from: "", text, at, sys: 1 })
 }
 
 chatWss.on("error", e => log("[chat] wss error:", e.message))
@@ -1163,6 +1266,8 @@ chatWss.on("connection", (ws, req) => {
 
   ws.room = room
   ws.lastMsg = 0
+  ws.lastReact = 0
+  ws.lastTyping = 0
   const members = chatRooms.get(room) ?? new Set()
   members.add(ws)
   chatRooms.set(room, members)
@@ -1174,16 +1279,58 @@ chatWss.on("connection", (ws, req) => {
     let msg
     try { msg = JSON.parse(data) } catch { return }
     if (msg.type === "ping") return chatSend(ws, { type: "pong", t: msg.t })
-    if (msg.type !== "chat" || typeof msg.text !== "string") return
-    const text = msg.text.trim().slice(0, 500)
-    if (!text) return
-    // spam mínimo: 3 mensagens por segundo vira silêncio (sem erro, só ignora)
-    if (Date.now() - ws.lastMsg < 300) return
-    ws.lastMsg = Date.now()
-    const at = Date.now()
-    let id
-    try { ({ lastInsertRowid: id } = addChatMsg(nick, text, at, room)) } catch (e) { log("[chat] db:", e.message); return }
-    chatBroadcast(room, { type: "chat", id, from: nick, text, at })
+
+    // digitando: puro relay, não persiste. Sem isso o cliente manda um
+    // evento por tecla; com o gate de 1,5s vira no máximo 1/s por pessoa.
+    if (msg.type === "typing") {
+      if (Date.now() - ws.lastTyping < 1500) return
+      ws.lastTyping = Date.now()
+      return chatBroadcast(room, { type: "typing", from: nick, on: !!msg.on })
+    }
+
+    if (msg.type === "chat") {
+      const text = String(msg.text ?? "").trim().slice(0, CHAT_MAX_TEXT)
+      if (!text) return
+      // spam mínimo: 3 mensagens por segundo vira silêncio (sem erro, só ignora)
+      if (Date.now() - ws.lastMsg < 300) return
+      ws.lastMsg = Date.now()
+      // reply: o pai tem que existir na mesma sala (e a resposta de resposta
+      // não aninha — a UI cita o pai direto)
+      let replyTo = null
+      if (Number.isInteger(msg.replyTo) && msg.replyTo > 0) {
+        const parent = chatGet(room, msg.replyTo)
+        if (parent && !parent.sys) replyTo = parent.replyTo ?? parent.id
+      }
+      const at = Date.now()
+      let id
+      try { ({ lastInsertRowid: id } = addChatMsg(nick, text, at, room, { replyTo })) } catch (e) { log("[chat] db:", e.message); return }
+      // a linha do banco já sai enriquecida (reply, reações); só carimba o tipo
+      return chatBroadcast(room, { type: "chat", ...chatGet(room, id) })
+    }
+
+    if (msg.type === "edit") {
+      const text = String(msg.text ?? "").trim().slice(0, CHAT_MAX_TEXT)
+      if (!text || !Number.isInteger(msg.id)) return
+      const editedAt = Date.now()
+      if (!editChatMsg(room, msg.id, nick, text, editedAt)) return
+      return chatBroadcast(room, { type: "edit", id: msg.id, text, editedAt })
+    }
+
+    if (msg.type === "delete") {
+      if (!Number.isInteger(msg.id)) return
+      if (!deleteChatMsg(room, msg.id, nick)) return
+      return chatBroadcast(room, { type: "delete", id: msg.id })
+    }
+
+    if (msg.type === "react") {
+      if (!Number.isInteger(msg.id) || !CHAT_EMOJIS.includes(msg.emoji)) return
+      // reação também é spam de clique: 3/s por pessoa
+      if (Date.now() - ws.lastReact < 300) return
+      ws.lastReact = Date.now()
+      const list = toggleChatReaction(room, msg.id, msg.emoji, nick, Date.now())
+      if (list === null) return
+      return chatBroadcast(room, { type: "reactions", id: msg.id, list })
+    }
   })
 
   ws.on("close", () => {

@@ -113,3 +113,28 @@ a vidro (uma camada por borda da tela).
 - **Dock de chamada**: pílula flutuante de vidro centrada no rodapé da área
   central; botões circulares 44px, desconectar em `--destructive`. Só existe
   conectado a um canal de voz.
+
+## Padrões do chat (painel 360px)
+
+Render estilo Discord/Fluxer sobre os mesmos tokens:
+
+- **Mensagem**: fundo transparente; no hover, `--muted` e a barra de ações
+  (reagir/responder, e editar/apagar pra o dono) flutua no topo direito.
+  Mensagens consecutivas da mesma pessoa em ≤ 5 min agrupam (sem cabeçalho).
+- **Nick**: cor de *conteúdo*, não de tema — matiz derivada do hash do nick
+  (`hsl(H 45% 70%)` inline, como o Discord faz). Timestamps em
+  `--muted-foreground` 10px só no cabeçalho.
+- **Markdown leve**: `**bold**`, `*itálico*`, `~~risco~~`, `__sub__`,
+  `` `código` ``, bloco ``` e link em `--accent`. Menção com fundo
+  `hsl(var(--accent) / .12)`; menção a mim, `.22`. Nunca `innerHTML` com
+  texto de usuário — o render é por DOM nodes.
+- **Reação**: chip pílula com contagem; o meu voto ganha borda âmbar + fundo
+  `hsl(var(--accent) / .12)` (mesmo padrão de "marcação de agora").
+- **Linha de sistema** ("subiu/saiu do ar"): pílula centrada em
+  `--muted-foreground` com ponto — vermelho (`--destructive`) quando entra
+  no ar, cinza quando sai.
+- **Seletor de emoji**: `.glass` ancorado acima do composer (grid de 5
+  colunas). O `display:grid` vence o `[hidden]` do UA — todo componente
+  desse tipo precisa do par `#id[hidden] { display:none }`.
+- **Composer**: textarea que cresce até 5 linhas (36px em repouso), Enter
+  envia / Shift+Enter quebra linha, contador aparece perto do teto.

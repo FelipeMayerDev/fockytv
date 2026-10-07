@@ -41,10 +41,14 @@ export async function initJam ({ serverUrl }) {
   let selfLevel = 0
 
   const ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 })
-  await ctx.audioWorklet.addModule(new URL('./jam-worklet.js?v=8', import.meta.url))
+  await ctx.audioWorklet.addModule(new URL('./jam-worklet.js?v=9', import.meta.url))
 
   const mixNode = new AudioWorkletNode(ctx, 'jam-mix', { outputChannelCount: [2] })
-  mixNode.connect(ctx.destination)                    // monitor local
+  // volume geral da voz de saída: fica entre o mixer e o destino — o ganho
+  // por pessoa continua no worklet, este é o "volume dos alto-falantes"
+  const outGain = ctx.createGain()
+  mixNode.connect(outGain)
+  outGain.connect(ctx.destination)                    // monitor local
   const meters = new Map()                            // id -> último meter
   mixNode.port.onmessage = e => {
     if (e.data.type !== 'meters') return
@@ -541,6 +545,19 @@ export async function initJam ({ serverUrl }) {
     onLevels (cb) { onLevels = cb },
     setGain (id, v) { mixNode.port.postMessage({ type: 'gain', id, v }) },
     setTargetMs (ms) { mixNode.port.postMessage({ type: 'target', ms }) },
+
+    // volume geral da saída (voz remota toda): 0–2, suave pra não estalar
+    setOutVolume (v) {
+      const g = Math.max(0, Math.min(2, +v || 0))
+      outGain.gain.setTargetAtTime(g, ctx.currentTime, 0.02)
+    },
+    // dispositivo de saída: AudioContext.setSinkId — Chrome/Edge 110+.
+    // Sem suporte (Firefox), rejeita; a UI esconde o controle.
+    async setOutput (deviceId) {
+      if (!ctx.setSinkId) throw new Error('este navegador não troca a saída de áudio')
+      await ctx.setSinkId(deviceId || '')   // '' volta pro padrão do sistema
+    },
+    get canSetOutput () { return !!ctx.setSinkId },
 
     async leave () {
       room = null

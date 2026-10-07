@@ -58,14 +58,26 @@ services:
   # Lives fixas (TV e música): yt-dlp + ffmpeg + werift publicando via WHIP
   # nas chaves `tv` e `music`. Sem viewers por 60 s a stream desliga sozinha
   # — a playlist de música sobrevive.
+  #
+  # Encoder de vídeo: VAAPI (QuickSync do Intel) com queda automática pro
+  # libx264 quando a máquina não tem iGPU que codifique (probe no primeiro
+  # uso — na VPS o /dev/dri existe, mas é a VGA ASpeed do BMC, que não serve).
+  # O Gen9.5 do i5-7400 só expõe CQP no driver (medido), então o bitrate
+  # flutua: FF_QUALITY=source = qp 24 na resolução nativa da fonte (o
+  # "Source" do Fluxer); hd = qp 26 em 1280w, o comportamento de sempre.
   fixed-live:
     build: ./fixed-live
     image: fockytv/fixed-live:latest
     container_name: fockytv-fixed
     restart: unless-stopped
+    devices:
+      # QuickSync: render node do iGPU. Em máquina SEM /dev/dri comente este
+      # bloco (sem mount a probe cai no libx264 do mesmo jeito).
+      - /dev/dri:/dev/dri
     environment:
       - BB_URL=http://live-api:8080
       - IDLE_MS=60000
+      - FF_QUALITY=${FF_QUALITY:-source}
       # link usado nos anúncios do Discord ("fulano subiu ao ar")
       - PUBLIC_URL=${PUBLIC_URL:-http://192.168.1.129:8180}
       # gravador: IP que o mediamtx anuncia nos candidatos (webrtcAdditionalHosts);

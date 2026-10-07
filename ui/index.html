@@ -17,7 +17,7 @@
      e CSS velho (componente novo aparece sem estilo até a cache expirar).
      Suba o número junto com qualquer mudança em assets/. -->
 <link rel="stylesheet" href="assets/theme.css?v=1">
-<link rel="stylesheet" href="assets/app.css?v=9">
+<link rel="stylesheet" href="assets/app.css?v=11">
 
 <!-- gif do "du bist gut genug": cobre a tela enquanto toca a abertura -->
 <div id="intro-gif"></div>
@@ -126,6 +126,27 @@
           <label for="dock-dev">Microfone</label>
           <select id="dock-dev"></select>
         </div>
+        <div class="field" id="ingain-row">
+          <label for="dock-ingain">Volume da entrada</label>
+          <div class="pop-slider">
+            <input type="range" id="dock-ingain" min="0.5" max="8" step="0.1" value="1">
+            <output id="dock-ingain-val">1.0×</output>
+          </div>
+        </div>
+        <div class="field" id="mode-row">
+          <label for="dock-mode">Modo de entrada</label>
+          <select id="dock-mode">
+            <option value="vad">Atividade de voz</option>
+            <option value="ptt">Apertar pra falar</option>
+          </select>
+        </div>
+        <div class="field" id="ptt-row" hidden>
+          <label for="dock-ptt-key">Tecla do PTT</label>
+          <div class="pop-slider">
+            <button type="button" class="outline" id="dock-ptt-key">V</button>
+            <span class="desc" style="margin:0">segure pra falar</span>
+          </div>
+        </div>
         <!-- eco + supressão + corte de graves/agudos num controle só: são três
              faces do mesmo "limpar o microfone", e ninguém liga uma sem a outra -->
         <label class="pop-row"><span>Limpar microfone</span>
@@ -133,17 +154,32 @@
         <p class="desc" style="margin:0 0 4px">Cancelamento de eco, supressão de ruído e corte de graves/agudos.</p>
         <label class="pop-row"><span>Ganho automático</span>
           <span class="switch"><input type="checkbox" id="dock-agc"><span></span></span></label>
-        <label class="pop-row"><span>Portão de ruído</span>
-          <span class="switch"><input type="checkbox" id="dock-gate"><span></span></span></label>
-        <!-- o medidor é o que torna o threshold ajustável: a barra é o nível da
-             banda de voz agora, o traço é onde o portão abre. Fique em silêncio,
-             suba até a barra parar de cruzar o traço. -->
-        <div class="gate-tune" id="gate-tune" hidden>
-          <div class="gate-meter" id="gate-meter"><i id="gate-bar"></i><b id="gate-thr"></b></div>
-          <label class="gate-knob">Abre acima de <output id="gate-thr-val">−45 dB</output>
-            <input type="range" id="dock-gate-thr" min="-70" max="-15" step="1" value="-45"></label>
-          <label class="gate-knob">Ignora transiente até <output id="gate-cf-val">12 ms</output>
-            <input type="range" id="dock-gate-cf" min="0" max="40" step="2" value="12"></label>
+        <div id="gate-row">
+          <label class="pop-row"><span>Portão de ruído</span>
+            <span class="switch"><input type="checkbox" id="dock-gate"><span></span></span></label>
+          <!-- o medidor é o que torna o threshold ajustável: a barra é o nível da
+               banda de voz agora, o traço é onde o portão abre. Fique em silêncio,
+               suba até a barra parar de cruzar o traço. -->
+          <div class="gate-tune" id="gate-tune" hidden>
+            <div class="gate-meter" id="gate-meter"><i id="gate-bar"></i><b id="gate-thr"></b></div>
+            <label class="gate-knob">Abre acima de <output id="gate-thr-val">−45 dB</output>
+              <input type="range" id="dock-gate-thr" min="-70" max="-15" step="1" value="-45"></label>
+            <label class="gate-knob">Ignora transiente até <output id="gate-cf-val">12 ms</output>
+              <input type="range" id="dock-gate-cf" min="0" max="40" step="2" value="12"></label>
+          </div>
+        </div>
+        <div id="out-row">
+          <div class="field" style="margin-top:10px">
+            <label for="dock-out">Saída</label>
+            <select id="dock-out"></select>
+          </div>
+          <div class="field">
+            <label for="dock-outvol">Volume da saída</label>
+            <div class="pop-slider">
+              <input type="range" id="dock-outvol" min="0" max="2" step="0.05" value="1">
+              <output id="dock-outvol-val">100%</output>
+            </div>
+          </div>
         </div>
         <p class="desc" id="mic-pop-desc">Nos canais de voz os filtros já começam ligados (modo conversa).
           Pra instrumento use o Estúdio — entrada crua, sem processamento.</p>
@@ -391,10 +427,20 @@
     <h3>Chat</h3>
     <p class="desc" id="chat-online"></p>
     <div class="chat-msgs" id="chat-msgs"></div>
+    <div class="chat-typing" id="chat-typing" hidden></div>
+    <div class="chat-replybar" id="chat-replybar" hidden>
+      <span class="chat-reply-arrow">↳</span>
+      <span id="chat-reply-ctx"></span>
+      <button type="button" class="ghost icon" id="chat-reply-x" title="Cancelar resposta" aria-label="Cancelar resposta">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
     <form class="chat-form" id="chat-form">
-      <input id="chat-input" maxlength="500" placeholder="fala com a galera…" autocomplete="off">
+      <textarea id="chat-input" maxlength="1000" rows="1" placeholder="fala com a galera…" autocomplete="off"></textarea>
       <button>Enviar</button>
+      <span class="chat-count" id="chat-count" hidden></span>
     </form>
+    <div id="chat-emoji-pop" class="glass" hidden></div>
   </aside>
   <!-- canais fixos: chat abre por botão flutuante sobre o vídeo -->
   <button class="ghost icon" id="chat-fab" hidden title="Chat" aria-label="Chat">
@@ -581,6 +627,17 @@
          obrigatório (e o do Discord excluído na tela toda), sobrava só
          "lista de janelas + 60 fps", que não justifica um modo. Se voltar,
          era uma row com #game filtrando sources por hwndOf() e fps=60. -->
+    <div class="field" id="qual-row">
+      <label for="qual">Resolução</label>
+      <select id="qual">
+        <option value="fonte" selected>Fonte (até 4K)</option>
+        <option value="1440">1440p</option>
+        <option value="1080">1080p</option>
+        <option value="720">720p</option>
+        <option value="480">480p</option>
+        <option value="240">240p</option>
+      </select>
+    </div>
     <div class="field">
       <label for="fps">Taxa de quadros</label>
       <select id="fps">
@@ -599,7 +656,7 @@
     <div>
       <label style="color:hsl(var(--foreground))" id="audio-label">Compartilhar som</label>
       <p class="desc" style="margin:2px 0 0" id="audio-desc">áudio do sistema junto com o vídeo</p>
-      <p class="desc" style="margin:4px 0 0;color:hsl(var(--warning))" id="audio-note">No seletor do navegador, marque também "compartilhar áudio" — sem isso o som não entra.</p>
+      <p class="desc" style="margin:4px 0 0" id="audio-note" hidden></p>
     </div>
     <label class="switch"><input type="checkbox" id="audio"><span></span></label>
   </div>
@@ -722,25 +779,100 @@ function release (pc) {
   pc.close()
 }
 
-function tuneSender (s, fps) {
+// ── qualidade do publish: sistema portado do Fluxer ─────────────────────
+// Fonte: fluxer_app/src/features/voice/utils/ScreenShareOptions.ts e
+// ScreenShareCodecSelection.ts (fork FelipeMayerDev/fluxer). A qualidade
+// deles não vem de bitrate alto — vem de capturar na resolução do preset,
+// hint 'text' pra tela, degradation dinâmico, codec de hardware primeiro e
+// teto de 9 Mbps com piso por tier (0.02 bit por pixel por frame).
+const FLUXER_DIMENSIONS = {
+  240: [426, 240], 480: [854, 480], 720: [1280, 720],
+  1080: [1920, 1080], 1440: [2560, 1440], fonte: [3840, 2160],
+}
+// piso de bitrate por tier/fps em kbps (BITRATE_KBPS deles, sem os 90/120fps)
+const FLUXER_FLOOR_KBPS = {
+  240: { 15: 300, 30: 500, 60: 700 },
+  480: { 15: 1200, 30: 2000, 60: 3000 },
+  720: { 15: 2000, 30: 3000, 60: 4500 },
+  1080: { 15: 3000, 30: 4500, 60: 6000 },
+  1440: { 15: 4000, 30: 5500, 60: 6000 },
+  fonte: { 15: 4500, 30: 6000, 60: 6000 },
+}
+const FLUXER_MAX_BPS = 9_000_000
+const FLUXER_RUNGS = ['240', '480', '720', '1080', '1440', 'fonte']
+
+// bitrate Fluxer: min(teto 9M, max(piso do tier, 0.02 × pixels × fps)).
+// Captura menor que o teto do tier usa os pixels reais e o piso do tier dela
+// (resolveEffectiveScreenShareDimensions + resolveBitrateRungForPixels).
+function fluxerBitrate (w, h, fps) {
+  const f = fps >= 60 ? 60 : fps >= 30 ? 30 : 15
+  const pixels = w * h
+  const rung = FLUXER_RUNGS.filter(r => FLUXER_DIMENSIONS[r][0] * FLUXER_DIMENSIONS[r][1] <= pixels).pop() ?? '240'
+  const floor = (FLUXER_FLOOR_KBPS[rung]?.[f] ?? 300) * 1000
+  return { maxBps: Math.min(FLUXER_MAX_BPS, Math.max(floor, Math.round(0.02 * pixels * f))), rung }
+}
+
+// probe de hardware via mediaCapabilities (o mesmo caminho do
+// GpuEncoderCapabilities deles: encodingInfo + powerEfficient). Cacheado.
+let hwEncCache = null
+async function hwEncoders () {
+  if (hwEncCache) return hwEncCache
+  const probe = async (contentType, w, h) => {
+    try {
+      const r = await navigator.mediaCapabilities.encodingInfo({
+        type: 'webrtc', video: { contentType, width: w, height: h, framerate: 60 } })
+      return !!r.supported && !!r.powerEfficient
+    } catch { return false }
+  }
+  const [av1, h264b, h264h, vp9, vp8] = await Promise.all([
+    probe('video/AV1', 1920, 1080),
+    probe('video/H264;profile-level-id=42e01f', 1920, 1080),
+    probe('video/H264;profile-level-id=640028', 1920, 1080),
+    probe('video/VP9', 1920, 1080),
+    probe('video/VP8', 1920, 1080),
+  ])
+  return (hwEncCache = { av1, h264: h264b || h264h, vp9, vp8 })
+}
+
+// ordem do Fluxer (rankScreenShareCodecs): hardware primeiro, software depois.
+// Firefox (Gecko) só tem vp8/h264 confiáveis no WebRTC — ordem deles
+// (GECKO_CODEC_PREFERENCE). h265 fica de fora — player WHEP decodificar
+// h265 é raro. swH264Clamp = o codec escolhido é h264 SEM hardware: igual ao
+// SOFTWARE_H264_MAX deles (720p/30), openh264 não sustenta mais que isso.
+// Os nomes são mimeTypes completos: é o que o filtro de codecs compara.
+function pickShareCodec (hw) {
+  const rank = /firefox/i.test(navigator.userAgent)
+    ? ['video/vp8', 'video/h264'] : ['video/av1', 'video/h264', 'video/vp9', 'video/vp8']
+  const isHw = m => hw[m.replace('video/', '')]
+  const order = [...rank.filter(isHw), ...rank.filter(m => !isHw(m))]
+  return { order, first: order[0], swH264Clamp: order[0] === 'video/h264' && !hw.h264 }
+}
+
+function tuneSender (s, fps, maxBps, degradation) {
   const p = s.getParameters()
   if (!p.encodings?.length) p.encodings = [{}]
-  // 32M = mesmo teto do client nativo (1080p60 com movimento). O Chrome só
-  // usa o que o encoder dele aguentar — em software costuma capar antes.
-  p.encodings[0].maxBitrate = 32_000_000
+  p.encodings[0].maxBitrate = maxBps
   p.encodings[0].maxFramerate = fps
   p.encodings[0].scaleResolutionDownBy = 1
-  p.degradationPreference = 'maintain-resolution'
+  // a track de vídeo é a que importa: prioridade alta na rede e no encoder
+  p.encodings[0].priority = 'high'
+  p.encodings[0].networkPriority = 'high'
+  p.degradationPreference = degradation
   return s.setParameters(p)          // só depois de addTrack, senão some em silêncio
 }
 
-async function capture (fps, withAudio, withCursor) {
+async function capture (fps, withAudio, withCursor, qual = 'fonte') {
+  // resolução: preset do seletor com os DIMENSIONS do Fluxer ("fonte" é teto
+  // 3840x2160, não infinito). O constraint é o alvo: o compositor do sistema
+  // escala a captura pra ele, e o encoder codifica exatamente esse tamanho —
+  // é assim que o Fluxer chega no bitrate/qualidade previsto pela tabela.
+  const [w, h] = FLUXER_DIMENSIONS[qual] ?? FLUXER_DIMENSIONS.fonte
   return navigator.mediaDevices.getDisplayMedia({
     // ponytail: o Blink ignora `cursor` (nem aparece em getSupportedConstraints),
     // então hoje quem manda é a camada de captura: no Wayland o portal embute o
     // cursor na tela e não na janela, no Windows o Chromium sempre compõe. Fica
     // pedido do jeito certo pra valer sozinho quando o Chromium implementar.
-    video: { frameRate: fps, width: 1920, height: 1080, cursor: withCursor ? 'always' : 'never' },
+    video: { frameRate: fps, width: w, height: h, cursor: withCursor ? 'always' : 'never' },
     // systemAudio 'include': sem isso o seletor do Chrome nem mostra o
     // checkbox de "áudio do sistema" no Windows — e o som sai de fora
     audio: withAudio
@@ -753,7 +885,11 @@ async function capture (fps, withAudio, withCursor) {
 }
 
 async function publish (key, st, fps, codec) {
-  st.getVideoTracks()[0].contentHint = 'motion'
+  // hint: <60fps é tela de texto/código → 'text' (o modo "screenshare" do
+  // Fluxer); 60fps fica SEM hint — o navegador auto-detecta conteúdo, que é
+  // o que o Fluxer faz com 'motion' no desktop (converte pra indefinido)
+  const track = st.getVideoTracks()[0]
+  if (fps < 60) track.contentHint = 'text'
 
   const pc = new RTCPeerConnection()
   st.getTracks().forEach(t => pc.addTrack(t, st))
@@ -767,29 +903,37 @@ async function publish (key, st, fps, codec) {
     ?? pc.addTransceiver('audio', { direction: 'sendonly' }).sender
 
   if (codec) {
+    // o value do #codec vem com a caixa original do mimeType ('video/H264') —
+    // sem o toLowerCase aqui o filtro nunca casava e o codec manual era
+    // ignorado silenciosamente
+    codec = codec.toLowerCase()
     const list = RTCRtpSender.getCapabilities('video').codecs
       .filter(c => c.mimeType.toLowerCase() === codec)
     if (list.length) pc.getTransceivers().find(t => t.sender === sender)
       .setCodecPreferences(list)
-  } else if (/Windows|Mac/.test(navigator.userAgent)) {
-    // Sem escolha explícita: H264 primeiro — é o que sai por hardware em
-    // qualquer GPU de desktop (D3D11/VideoToolbox) — e AV1 em seguida
-    // (hardware nas GPUs novas). O "Automático" do Chrome costuma cair em
-    // VP8 de software, o caminho do "não passa de 40 fps". No Linux o auto
-    // fica: H264 de software (openh264) é pior que o VP8 de software dele.
+  } else {
+    // Um codec SÓ, na escolha do Fluxer (rankScreenShareCodecs: hardware
+    // primeiro via probe mediaCapabilities). Detalhe decisivo descoberto na
+    // medição: o mediamtx escolhe o codec do answer pela PRÓPRIA ordem de
+    // preferência dele (VP8 primeiro) e ignora a ordem do offer — oferecer
+    // todos os codecs ordenados nunca aplicou H264/AV1. LiveKit publica um
+    // codec por track, e é isso que o offer precisa ser.
+    const hw = await hwEncoders()
+    const { first } = pickShareCodec(hw)
     const caps = RTCRtpSender.getCapabilities('video').codecs
-    const prio = [
-      ...caps.filter(c => /^video\/h264/i.test(c.mimeType)),
-      ...caps.filter(c => /^video\/av1/i.test(c.mimeType)),
-    ]
-    if (prio.length) {
-      const rest = caps.filter(c => !prio.includes(c))
-      pc.getTransceivers().find(t => t.sender === sender)
-        .setCodecPreferences([...prio, ...rest])
-    }
+    const list = caps.filter(c => c.mimeType.toLowerCase() === first)
+    if (list.length) pc.getTransceivers().find(t => t.sender === sender)
+      .setCodecPreferences(list)
   }
 
-  await tuneSender(sender, fps)
+  // bitrate pela tabela do Fluxer (piso por tier, 0.02bpp/frame, teto 9M) e
+  // degradation dinâmico: source/texto preserva resolução; movimento em
+  // resolução abaixo de source preserva framerate
+  // (resolveScreenShareDegradationPreference deles)
+  const src = track.getSettings()
+  const { maxBps, rung } = fluxerBitrate(src.width, src.height, fps)
+  const degradation = rung === 'fonte' || fps < 60 ? 'maintain-resolution' : 'maintain-framerate'
+  await tuneSender(sender, fps, maxBps, degradation)
   st.getVideoTracks()[0].addEventListener('ended', () => { if (!swapping) stop() })
 
   await signal('/api/whip', key, pc)
@@ -1202,14 +1346,13 @@ async function watchdog (key) {
 async function fockySinkTrack () {
   try {
     let devs = await navigator.mediaDevices.enumerateDevices()
-    // Firefox (#7): os labels só aparecem depois de uma permissão de
-    // microfone — sem esta probe o monitor do sink nunca é encontrado e a
-    // transmissão sai muda (o getDisplayMedia do Firefox não entrega áudio).
-    // A probe pede microfone UMA vez; daí em diante a permissão persiste.
-    // Só no Firefox: no Chrome o seletor já entrega o som do sistema, e o
-    // pedido extra de microfone seria só atrapalhar.
-    if (!devs.some(x => x.kind === 'audioinput' && x.label) &&
-        navigator.userAgent.includes('Firefox')) {
+    // Sem permissão de microfone, os labels vêm vazios em QUALQUER navegador
+    // e o monitor do sink nunca é encontrado — a transmissão sai muda. A
+    // probe pede microfone UMA vez; daí em diante a permissão persiste.
+    // No Chrome/X11 o seletor entrega o som do sistema sozinho, mas no
+    // Wayland o portal não dá áudio nenhum — o sink é o caminho, então a
+    // probe vale em todo navegador.
+    if (!devs.some(x => x.kind === 'audioinput' && x.label)) {
       const probe = await navigator.mediaDevices.getUserMedia({ audio: true })
       probe.getTracks().forEach(t => t.stop())
       devs = await navigator.mediaDevices.enumerateDevices()
@@ -1654,7 +1797,8 @@ $('#cfg-close').onclick = () => $('#dlg-cfg').close()
 // painel próprio (#chat-panel, mesmo visual). A mensagem própria renderiza
 // pelo eco do servidor — uma fonte só de verdade, e o id do banco viabiliza
 // o scrollback.
-const chat = { ws: null, room: null, oldest: null, timer: null, unread: 0, fab: false }
+const chat = { ws: null, room: null, oldest: null, timer: null, unread: 0, fab: false,
+               last: null, byId: new Map(), reply: null, typings: new Map() }
 
 const chatEls = () => ({ msgs: $('#chat-msgs'), online: $('#chat-online'), input: $('#chat-input') })
 
@@ -1663,29 +1807,278 @@ const chatFabBadge = () => {
   $('#chat-fab-badge').textContent = chat.unread > 99 ? '99+' : chat.unread || ''
 }
 
+// ── render estilo Fluxer/Discord ─────────────────────────────────────────
+// Markdown enxuto montado em DOM nodes: texto do usuário nunca vira HTML,
+// então não existe injeção. Emoji do seletor espelha CHAT_EMOJIS do
+// server/fixed-live/index.js (o servidor recusa o que não está lá).
+const CHAT_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🎉", "👏", "🤔",
+                     "👀", "🤝", "💯", "🥳", "🙌", "😅", "🫡", "🎧", "🎸", "📺", "⚡"]
+
+const chatEl = (tag, cls, text) => {
+  const n = document.createElement(tag)
+  if (cls) n.className = cls
+  if (text !== undefined) n.textContent = text
+  return n
+}
+
+// cor do nick: hash → matiz. Cor de conteúdo (como o Discord faz), não de
+// tema — o design system segue valendo pra superfícies e controles.
+const chatHue = nick => {
+  let h = 0
+  for (const c of nick) h = (h * 31 + c.codePointAt(0)) % 360
+  return h
+}
+const chatNick = n => {
+  const b = chatEl('b', null, n)
+  b.style.color = `hsl(${chatHue(n)} 45% 70%)`
+  return b
+}
+
+const chatInlineRe = /(`([^`]+)`)|(https?:\/\/[^\s<]+)|(@[\w.]{1,32})|(\*\*([^*]+)\*\*)|(\*([^*\n]+)\*)|(~~([^~]+)~~)|(__([^_]+)__)/g
+
+function chatInline (text, out) {
+  const re = new RegExp(chatInlineRe.source, 'g')
+  let last = 0, m
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.append(text.slice(last, m.index))
+    if (m[2] !== undefined) out.append(chatEl('code', 'chat-code', m[2]))
+    else if (m[3]) {
+      const a = chatEl('a', null, m[3])
+      a.href = m[3]
+      a.target = '_blank'
+      a.rel = 'noopener noreferrer'
+      out.append(a)
+    } else if (m[4]) {
+      const me = m[4].toLowerCase() === '@' + nick.toLowerCase()
+      out.append(chatEl('span', me ? 'chat-mention me' : 'chat-mention', m[4]))
+    } else if (m[6] !== undefined) out.append(chatEl('strong', null, m[6]))
+    else if (m[8] !== undefined) out.append(chatEl('em', null, m[8]))
+    else if (m[10] !== undefined) out.append(chatEl('s', null, m[10]))
+    else if (m[12] !== undefined) out.append(chatEl('u', null, m[12]))
+    last = re.lastIndex
+  }
+  if (last < text.length) out.append(text.slice(last))
+}
+
+function chatBody (m) {
+  const body = chatEl('div', 'chat-body')
+  if (m.deleted) {
+    body.append(chatEl('span', 'chat-deleted', 'mensagem apagada'))
+    return body
+  }
+  // blocos ``` fecham/abrem por índice: ímpar é conteúdo de bloco
+  const parts = String(m.text).split('```')
+  parts.forEach((part, i) => {
+    if (i % 2) {
+      const pre = chatEl('pre', 'chat-pre')
+      pre.textContent = part.replace(/^[\w-]{0,12}\n/, '')
+      body.append(pre)
+    } else if (part) chatInline(part, body)
+  })
+  if (m.editedAt) body.append(chatEl('span', 'chat-edited', ' (editada)'))
+  return body
+}
+
+function chatReactionsEl (m) {
+  const wrap = chatEl('div', 'chat-reactions')
+  for (const r of m.reactions ?? []) {
+    const chip = chatEl('button', 'chip-reaction' + (r.nicks.includes(nick) ? ' mine' : ''))
+    chip.type = 'button'
+    chip.dataset.emoji = r.emoji
+    chip.title = r.nicks.join(', ')
+    chip.append(chatEl('span', null, r.emoji), chatEl('span', null, String(r.nicks.length)))
+    wrap.append(chip)
+  }
+  return wrap
+}
+
+function chatMsgEl (id) { return $('#chat-msgs').querySelector(`[data-id="${id}"]`) }
+
+// barra de ação no hover: reagir, responder; dono também edita/apaga
+const CHAT_ACT_ICONS = {
+  react: '<circle cx="12" cy="12" r="9"/><path d="M8.5 14a4.5 4.5 0 0 0 7 0"/><line x1="9" y1="9.5" x2="9.01" y2="9.5"/><line x1="15" y1="9.5" x2="15.01" y2="9.5"/>',
+  reply: '<path d="M9 17l-6-6 6-6"/><path d="M3 11h11a6 6 0 0 1 6 6v3"/>',
+  edit: '<path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/>',
+  del: '<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>',
+}
+function chatActionsEl (m) {
+  const bar = chatEl('div', 'chat-actions')
+  for (const act of ['react', 'reply', ...(m.from === nick ? ['edit', 'del'] : [])]) {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.dataset.act = act
+    const label = { react: 'Reagir', reply: 'Responder', edit: 'Editar', del: 'Apagar' }[act]
+    b.title = label
+    b.setAttribute('aria-label', label)
+    b.innerHTML = `<svg viewBox="0 0 24 24">${CHAT_ACT_ICONS[act]}</svg>`
+    bar.append(b)
+  }
+  return bar
+}
+
 function chatRender (m, append = true) {
   if (!chat.room) return
   const box = chatEls().msgs
   const stick = append && box.scrollHeight - box.scrollTop - box.clientHeight < 40
+  chat.byId.set(m.id, m)
+  const time = new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
   const el = document.createElement('div')
   el.className = 'chat-msg'
   el.dataset.id = m.id
-  el.title = new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  const who = document.createElement('b')
-  who.textContent = m.from
-  const txt = document.createElement('span')
-  txt.textContent = m.text
-  el.append(who, txt)
+  el.title = new Date(m.at).toLocaleString()
+
+  if (m.sys) {
+    el.classList.add('sys', m.text === 'subiu ao ar' ? 'up' : 'down')
+    el.append(chatEl('span', 'dot'), chatEl('span', null, m.text), chatEl('span', 'at', time))
+  } else {
+    // agrupamento: mesma pessoa em sequência (≤ 5 min) vira mensagem compacta
+    const group = append && chat.last && !chat.last.sys &&
+                  chat.last.from === m.from && m.at - chat.last.at < 5 * 60_000
+    if (!group) {
+      const head = chatEl('div', 'chat-head')
+      head.append(chatNick(m.from), chatEl('span', 'at', time))
+      el.append(head)
+    } else el.classList.add('cont')
+
+    if (m.replyTo) {
+      const q = chatEl('div', 'chat-reply')
+      q.append(chatEl('span', 'chat-reply-arrow', '↳'), chatNick(m.replyFrom ?? '?'),
+               chatEl('span', null, m.replyDeleted ? 'mensagem apagada' : (m.replyText ?? '')))
+      q.onclick = () => {
+        const target = chatMsgEl(m.replyTo)
+        if (target) {
+          target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+          target.classList.add('flash')
+          setTimeout(() => target.classList.remove('flash'), 1200)
+        }
+      }
+      el.append(q)
+    }
+    el.append(chatBody(m))
+    if (!m.deleted) {
+      const react = chatReactionsEl(m)
+      if (react.childElementCount) el.append(react)
+      el.append(chatActionsEl(m))
+    }
+  }
+
   if (append) {
     box.append(el)
     if (stick) box.scrollTop = box.scrollHeight
     chat.oldest ??= m.id
     // TV: painel só abre pelo FAB — enquanto fechado, conta não-lidas
-    if (chat.fab && $('#chat-panel').hidden) { chat.unread++; chatFabBadge() }
+    // (linha de sistema não é conversa, não conta)
+    if (!m.sys && chat.fab && $('#chat-panel').hidden) { chat.unread++; chatFabBadge() }
+    chat.last = { from: m.from, at: m.at, sys: !!m.sys }
   } else {
+    // página do scrollback: entra no topo sem reagrupar (a mensagem seguinte
+    // já está renderizada; recalcular ela valeria outro passe)
     box.prepend(el)
     chat.oldest = m.id
   }
+}
+
+// ── ações por delegação: sobrevive a re-render de mensagem ──────────────
+let chatEmojiFor = 0
+const chatEmojiHide = () => { $('#chat-emoji-pop').hidden = true; chatEmojiFor = 0 }
+function chatEmojiPop (msgEl) {
+  const pop = $('#chat-emoji-pop')
+  if (!pop.hidden && chatEmojiFor === +msgEl.dataset.id) return chatEmojiHide()
+  chatEmojiFor = +msgEl.dataset.id
+  if (!pop.childElementCount)
+    for (const em of CHAT_EMOJIS) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.textContent = em
+      b.onclick = () => { chatSendMsg({ type: 'react', id: chatEmojiFor, emoji: em }); chatEmojiHide() }
+      pop.append(b)
+    }
+  pop.hidden = false
+}
+
+const chatSendMsg = o => { if (chat.ws?.readyState === WebSocket.OPEN) chat.ws.send(JSON.stringify(o)) }
+
+function chatReplySet (m) {
+  chat.reply = { id: m.id, from: m.from }
+  $('#chat-reply-ctx').textContent = `${m.from}: ${(m.text ?? '').slice(0, 60)}`
+  $('#chat-replybar').hidden = false
+  chatEls().input.focus()
+}
+function chatReplyClear () {
+  chat.reply = null
+  $('#chat-replybar').hidden = true
+}
+$('#chat-reply-x').onclick = chatReplyClear
+
+function chatEditStart (msgEl, m) {
+  if (msgEl.querySelector('.chat-edit')) return
+  const body = msgEl.querySelector('.chat-body')
+  const ta = document.createElement('textarea')
+  ta.className = 'chat-edit'
+  ta.value = m.text
+  ta.rows = 1
+  body.replaceChildren(ta)
+  ta.focus()
+  ta.setSelectionRange(ta.value.length, ta.value.length)
+  let fin = false
+  const done = save => {
+    if (fin) return
+    fin = true
+    if (save) {
+      const text = ta.value.trim()
+      if (text && text !== m.text) chatSendMsg({ type: 'edit', id: m.id, text })
+    }
+    const fresh = chatBody(m)
+    body.replaceChildren(...fresh.childNodes)
+  }
+  ta.onkeydown = e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); done(true) }
+    else if (e.key === 'Escape') done(false)
+  }
+  ta.onblur = () => done(false)
+}
+
+$('#chat-msgs').addEventListener('click', e => {
+  const chip = e.target.closest('.chip-reaction')
+  if (chip) return chatSendMsg({ type: 'react', id: +chip.closest('.chat-msg').dataset.id, emoji: chip.dataset.emoji })
+  const btn = e.target.closest('.chat-actions [data-act]')
+  if (!btn) return
+  const msgEl = btn.closest('.chat-msg')
+  const m = chat.byId.get(+msgEl.dataset.id)
+  if (!m) return
+  if (btn.dataset.act === 'react') return chatEmojiPop(msgEl)
+  if (btn.dataset.act === 'reply') return chatReplySet(m)
+  if (btn.dataset.act === 'edit') return chatEditStart(msgEl, m)
+  if (btn.dataset.act === 'del') {
+    // apagar é de dois cliques: o lixeiro acende e vira "confirmar" por 3s
+    if (btn.classList.contains('confirm')) return chatSendMsg({ type: 'delete', id: m.id })
+    btn.classList.add('confirm')
+    btn.title = 'Confirmar'
+    setTimeout(() => { btn.classList.remove('confirm'); btn.title = 'Apagar' }, 3000)
+  }
+})
+
+// clique fora fecha o seletor de emoji
+document.addEventListener('click', e => {
+  if ($('#chat-emoji-pop').hidden) return
+  if (e.target.closest('#chat-emoji-pop') || e.target.closest('.chat-actions [data-act="react"]')) return
+  chatEmojiHide()
+})
+
+// ── "digitando…" ─────────────────────────────────────────────────────────
+const chatTypingSend = on => {
+  if (!on) return chatSendMsg({ type: 'typing', on: false })
+  chatSendMsg({ type: 'typing', on: true })   // o servidor limita a 1/s
+}
+function chatTypingRender () {
+  const who = [...chat.typings.keys()]
+  const el = $('#chat-typing')
+  el.hidden = !who.length
+  if (!who.length) return
+  el.textContent = who.length === 1 ? `${who[0]} está digitando…`
+    : who.length === 2 ? `${who[0]} e ${who[1]} estão digitando…`
+    : 'várias pessoas estão digitando…'
 }
 
 // Ping de aplicação em todo WS nosso. Os três (jam, presença, chat) ficam
@@ -1721,11 +2114,55 @@ function chatConnect () {
       const box = chatEls().msgs
       box.replaceChildren()
       chat.oldest = null
+      chat.last = null
+      chat.byId.clear()
+      for (const t of chat.typings.values()) clearTimeout(t)
+      chat.typings.clear()
+      chatTypingRender()
       for (const c of m.msgs) chatRender(c)
       box.scrollTop = box.scrollHeight
     } else if (m.type === 'count') {
       chatEls().online.textContent = m.n > 1 ? `${m.n} pessoas aqui` : 'só você por enquanto'
     } else if (m.type === 'chat') chatRender(m)
+    else if (m.type === 'edit') {
+      const prev = chat.byId.get(m.id)
+      if (prev) { prev.text = m.text; prev.editedAt = m.editedAt }
+      const body = chatMsgEl(m.id)?.querySelector('.chat-body')
+      if (body) {
+        const fresh = chatBody(chat.byId.get(m.id) ?? m)
+        body.replaceChildren(...fresh.childNodes)
+      }
+    } else if (m.type === 'delete') {
+      const prev = chat.byId.get(m.id)
+      if (prev) { prev.deleted = 1 }
+      const el = chatMsgEl(m.id)
+      if (el) {
+        const body = el.querySelector('.chat-body')
+        if (body) body.replaceChildren(chatEl('span', 'chat-deleted', 'mensagem apagada'))
+        el.querySelector('.chat-actions')?.remove()
+        el.querySelector('.chat-reactions')?.remove()
+      }
+    } else if (m.type === 'reactions') {
+      const prev = chat.byId.get(m.id)
+      if (prev) prev.reactions = m.list
+      const el = chatMsgEl(m.id)
+      if (el) {
+        const react = chatReactionsEl(chat.byId.get(m.id) ?? { reactions: m.list })
+        const old = el.querySelector('.chat-reactions')
+        if (old) old.replaceWith(react)
+        else el.querySelector('.chat-body')?.after(react)
+      }
+    } else if (m.type === 'typing') {
+      clearTimeout(chat.typings.get(m.from))
+      if (m.on && m.from !== nick) {
+        // o relay chega 1×/s; o stickiness local segura o rótulo por 4,5s
+        chat.typings.set(m.from, setTimeout(() => {
+          chat.typings.delete(m.from)
+          chatTypingRender()
+        }, 4500))
+      } else chat.typings.delete(m.from)
+      chatTypingRender()
+    }
   }
   ws.onclose = () => {
     if (chat.ws === ws) chat.ws = null
@@ -1743,6 +2180,10 @@ function chatOpen (room) {
   chatClose(true)
   chat.room = room
   chat.unread = 0
+  chat.last = null
+  chat.byId.clear()
+  chatReplyClear()
+  chatEmojiHide()
   $('#chat-fab').hidden = false
   $('#chat-panel').hidden = true
   chatFabBadge()
@@ -1756,6 +2197,11 @@ function chatClose (keepRoom = false) {
   $('#chat-fab').hidden = true
   chat.fab = false
   chat.unread = 0
+  chatReplyClear()
+  chatEmojiHide()
+  for (const t of chat.typings.values()) clearTimeout(t)
+  chat.typings.clear()
+  chatTypingRender()
   if (!keepRoom) chat.room = null
 }
 
@@ -1857,13 +2303,38 @@ $('#clip-save').onclick = () => {
     .finally(() => { $('#clip-save').disabled = false })
 }
 
+// composer: textarea de 1 a 5 linhas, Enter envia / Shift+Enter quebra linha,
+// contador perto do teto, "digitando" throttled — e a resposta pendente viaja
+// junto da mensagem.
+const chatInput = $('#chat-input')
+chatInput.addEventListener('input', () => {
+  chatInput.style.height = 'auto'
+  chatInput.style.height = Math.min(chatInput.scrollHeight, 110) + 'px'
+  const n = chatInput.value.length
+  const c = $('#chat-count')
+  c.hidden = n < 800
+  if (!c.hidden) c.textContent = `${n}/1000`
+  if (chatInput.value.trim()) chatTypingSend(true)
+})
+chatInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault()
+    $('#chat-form').requestSubmit()
+  }
+})
+
 for (const [form, input] of [['#chat-form', '#chat-input']])
   $(form).onsubmit = e => {
     e.preventDefault()
     const text = $(input).value.trim()
     if (!text || !chat.ws || chat.ws.readyState !== WebSocket.OPEN) return
-    chat.ws.send(JSON.stringify({ type: 'chat', text }))
+    chat.ws.send(JSON.stringify({ type: 'chat', text, replyTo: chat.reply?.id }))
     $(input).value = ''
+    $(input).style.height = 'auto'
+    $('#chat-count').hidden = true
+    chatReplyClear()
+    chatTypingSend(false)
+    $(input).focus()
   }
 
 // ── resumo diário: "você perdeu" ─────────────────────────────────────────
@@ -1977,6 +2448,8 @@ async function openShareDialog (isSwap, cam) {
     $('#portal-note').hidden = true
     $('#faudio-row').hidden = true
     $('#yt-row').hidden = true
+    $('#qual-row').hidden = true   // câmera é 720p fixo; resolução é da tela
+    $('#audio-note').hidden = true   // câmera não usa sink; a nota é da tela
     $('#dlg-share').dataset.swap = ''
     $('#dlg-share').showModal()
     return
@@ -1987,6 +2460,7 @@ async function openShareDialog (isSwap, cam) {
   // lugar da lista — e se a enumeração falhar, fecha de novo e deixa o toast.
   $('#dlg-share').dataset.swap = isSwap ? '1' : ''
   $('#portal-note').hidden = true
+  $('#qual-row').hidden = false   // abertura anterior pode ter sido câmera
   $('#sources').replaceChildren(...Array.from({ length: 4 }, () => {
     const fig = document.createElement('figure')
     fig.className = 'loading'
@@ -1994,6 +2468,7 @@ async function openShareDialog (isSwap, cam) {
     return fig
   }))
   $('#dlg-share').showModal()
+  updateSinkNote()   // estado do sink FockyTV na cara do diálogo, antes de tentar
 
   let sources
   try {
@@ -2050,6 +2525,33 @@ document.querySelectorAll('#share-src button').forEach(b => b.onclick = () => {
     x.classList.toggle('on', x === b))
   updateShareSrcUI()
 })
+// ── nota de áudio do diálogo: honesta com o ambiente ─────────────────────
+// No Wayland o seletor do sistema NÃO TEM checkbox de áudio (o portal não
+// entrega). No navegador o som vem do sink FockyTV (tools/fockytv-sink.js),
+// então a nota diz em qual dos três estados a pessoa está ANTES de tentar —
+// em vez de mandar procurar um checkbox que não existe.
+async function updateSinkNote () {
+  const note = $('#audio-note')
+  if (window.focky) { note.hidden = true; return }   // Electron: filtro por app
+  note.hidden = false
+  let devs = []
+  try { devs = await navigator.mediaDevices.enumerateDevices() } catch { return }
+  const temSink = devs.some(d => d.kind === 'audioinput' && /fockytv/i.test(d.label))
+  // sem permissão, Firefox nem lista entrada e Chrome lista sem label: em
+  // ambos "não há nenhum input rotulado" = não dá pra saber se o sink existe
+  const semPermissao = !devs.some(d => d.kind === 'audioinput' && d.label)
+  if (temSink) {
+    note.textContent = 'som: o sink FockyTV tá de pé — o áudio entra por ele, sem Discord.'
+    note.style.color = 'hsl(var(--success))'
+  } else if (semPermissao) {
+    note.textContent = 'som: vem pelo sink FockyTV — aceite o microfone quando o navegador pedir; é assim que eu encontro o sink.'
+    note.style.color = 'hsl(var(--muted-foreground))'
+  } else {
+    note.textContent = 'som: sem sink não há áudio no Wayland — rode `node tools/fockytv-sink.js`, aceite o microfone e compartilhe de novo.'
+    note.style.color = 'hsl(var(--warning))'
+  }
+}
+
 function updateShareSrcUI () {
   const yt = shareSrc !== 'screen'
   $('#yt-row').hidden = !yt
@@ -2061,7 +2563,9 @@ function updateShareSrcUI () {
     $('#cursor-row').hidden = true
   } else {
     $('#audio-row').hidden = false
+    $('#qual-row').hidden = false
     $('#cursor-row').hidden = !!$('#dlg-share').dataset.swap
+    updateSinkNote()
   }
 }
 
@@ -2184,7 +2688,15 @@ $('#share-go').onclick = async () => {
       ytBarOpen()
       toast(`Transmitindo do YouTube: ${ytShare.title}`, null, 'info')
     } else {
-      const fps = +$('#fps').value
+      // codec e clamp decididos ANTES da captura (igual ao Fluxer: o alvo de
+      // qualidade depende do codec): h264 de software clampa a 720p30 —
+      // openh264 não sustenta mais que isso com qualidade (SOFTWARE_H264_MAX)
+      const hw = await hwEncoders()
+      const auto = pickShareCodec(hw)
+      const codec = $('#codec').value || auto.first
+      const clamp = !$('#codec').value && auto.swH264Clamp
+      const fps = clamp ? 30 : +$('#fps').value
+      const qual = clamp ? '720' : $('#qual').value
       if (cam) {
         stream = await navigator.mediaDevices.getUserMedia({
           // facingMode é preferência, não exigência: no celular pega a frontal
@@ -2212,7 +2724,7 @@ $('#share-go').onclick = async () => {
         // navegador (sem filtro por app do Electron): o monitor do sink
         // FockyTV, se o tools/fockytv-sink.js estiver de pé, já vem sem Discord
         const sinkTrack = !audioOpts && $('#audio').checked ? await fockySinkTrack() : null
-        stream = await capture(fps, $('#audio').checked && !audioOpts && !sinkTrack, $('#cursor').checked)
+        stream = await capture(fps, $('#audio').checked && !audioOpts && !sinkTrack, $('#cursor').checked, qual)
         if (sinkTrack) { stream.addTrack(sinkTrack); sinkUsed = true }
         // o portal pode aceitar o pedido de áudio e devolver só vídeo (Wayland
         // sem PipeWire, por exemplo) — sem erro nenhum. Detecta e avisa:
@@ -2229,11 +2741,11 @@ $('#share-go').onclick = async () => {
             audioFail = e.message
             audioOpts = null
             stream.getTracks().forEach(t => t.stop())
-            stream = await capture(fps, true, $('#cursor').checked)
+            stream = await capture(fps, true, $('#cursor').checked, qual)
           }
         }
       }
-      pc = await publish(nick, stream, fps, $('#codec').value)
+      pc = await publish(nick, stream, fps, codec)
       camOnly = !!cam         // só a câmera no ar: não há tela pra sobrepor
       setLive(true)
       sfx.live()
@@ -2242,7 +2754,7 @@ $('#share-go').onclick = async () => {
       if (!cam) toast(semAudioCapturado
         ? (navigator.userAgent.includes('Firefox')
           ? 'Saiu sem som: o Firefox não captura o áudio da tela. No Linux, rode `node tools/fockytv-sink.js` (e aceite o microfone) e compartilhe de novo — ou use o compartilhamento de Áudio/Vídeo do YouTube.'
-          : 'Foi no ar só o vídeo: marque o áudio no SELETOR do navegador (checkbox "compartilhar áudio da aba/sistema") — o toggle daqui não força ele.')
+          : 'Saiu sem som: se o seletor do navegador não mostrou o checkbox de áudio (comum no Wayland), rode `node tools/fockytv-sink.js`, aceite o microfone e compartilhe de novo.')
         : audioFail
         ? 'FILTRO DE ÁUDIO FALHOU (' + audioFail + ') — foi o som do sistema, Discord incluso'
         : audioOpts
@@ -3617,7 +4129,12 @@ const jamFor = async mode => {
   // max-age de 4h no domínio, mais o cache do navegador) e sem subir o
   // número o index.html novo carrega o motor velho — foi o que deixou
   // "jam.setGate is not a function" barrar a entrada no canal de voz.
-  const j = await import('./jam.js?v=19').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+  const j = await import('./jam.js?v=20').then(m => m.initJam({ serverUrl: cfg.serverUrl }))
+  // saída de voz estilo Fluxer: volume geral e dispositivo valem pra qualquer
+  // engine (voice e music têm AudioContext próprio)
+  j.setOutVolume?.(+localStorage.getItem('jam-outvol') || 1)
+  if (localStorage.getItem('jam-outdevice'))
+    j.setOutput?.(localStorage.getItem('jam-outdevice')).catch(() => {})
   j.onChat(m => {
     if (m.type === 'yt') return jamYtEvent(m)
     jamChatLog.push(m); jamChatRender()
@@ -4056,8 +4573,15 @@ const jamNumPref = (k, mode, def) => {
 // Padrões: a conversa liga portão e cortes; o Estúdio nunca — o portão comeria
 // o sustain do instrumento e o corte em 8k, o brilho do prato. `jamMicPref`
 // já devolve false por padrão em 'music', então não há caso especial aqui.
+// PTT (estilo Fluxer): no modo "apertar pra falar" o portão fica FORÇADO
+// fechado e a tecla segura abre (force:'open' via keydown). Só no modo voz —
+// Estúdio é entrada crua, PTT ali não tem sentido.
+const jamInputMode = () => localStorage.getItem('jam-inputmode') ?? 'vad'
+const jamPttKey = () => localStorage.getItem('jam-ptt-key') ?? 'KeyV'
+const pttKeyLabel = code => code.replace(/^Key|^Digit/, '')
 const jamGateCfg = (mode = jamMode) => ({
-  on: jamMicPref('gate', mode),
+  on: mode === 'voice' && jamInputMode() === 'ptt' ? true : jamMicPref('gate', mode),
+  force: mode === 'voice' && jamInputMode() === 'ptt' ? 'close' : null,
   cut: jamMicPref('cut', mode),
   openDb: jamNumPref('gatethr', mode, -45),
   confirmMs: jamNumPref('gatecf', mode, 12),
@@ -4093,6 +4617,27 @@ function micPopPaint () {
   $('#dock-gate-thr').value = g.openDb
   $('#dock-gate-cf').value = g.confirmMs
   gateKnobPaint()
+  // entrada/saída estilo Fluxer: só no modo conversa — no Estúdio a entrada
+  // é crua (tem painel próprio com ganho) e PTT/portão não se aplicam
+  const conversa = mode === 'voice'
+  const ptt = conversa && jamInputMode() === 'ptt'
+  $('#ingain-row').hidden = !conversa
+  $('#mode-row').hidden = !conversa
+  $('#ptt-row').hidden = !ptt
+  $('#gate-row').hidden = ptt         // no PTT quem decide é a tecla, não o nível
+  // engine do modo conversa (pré-aquecido no boot) responde por canSetOutput
+  // mesmo antes do primeiro join
+  $('#out-row').hidden = !conversa || !(jam ?? jams.voice)?.canSetOutput
+  if (conversa) {
+    $('#dock-mode').value = jamInputMode()
+    $('#dock-ptt-key').textContent = pttKeyLabel(jamPttKey())
+    const gi = +localStorage.getItem('jam-micgain') || 1
+    $('#dock-ingain').value = gi
+    $('#dock-ingain-val').textContent = gi.toFixed(1) + '×'
+    const go = +localStorage.getItem('jam-outvol') || 1
+    $('#dock-outvol').value = go
+    $('#dock-outvol-val').textContent = Math.round(go * 100) + '%'
+  }
   // no Estúdio o aviso do rodapé (que fala do modo conversa) não se aplica
   $('#mic-pop-desc').hidden = mode === 'music'
   $('#mic-pop-desc-raw').hidden = mode !== 'music'
@@ -4158,7 +4703,7 @@ $('#vs-mic-cfg').onclick = e => {
   e.stopPropagation()
   const pop = $('#mic-pop')
   pop.hidden = !pop.hidden
-  if (!pop.hidden) { micPopPaint(); jamListMics($('#dock-dev'), jamPopMode()) }
+  if (!pop.hidden) { micPopPaint(); jamListMics($('#dock-dev'), jamPopMode()); jamListOuts($('#dock-out')) }
 }
 $('#mic-pop').onclick = e => e.stopPropagation()   // clique dentro não fecha
 document.addEventListener('click', e => { $('#mic-pop').hidden = true })
@@ -4196,6 +4741,82 @@ $('#dock-dev').addEventListener('change', () => {
   if (mode === 'music' && [...$('#jam-dev').options].some(o => o.value === $('#dock-dev').value))
     $('#jam-dev').value = $('#dock-dev').value
   applyMicSettings()
+})
+
+// ── entrada/saída estilo Fluxer: ganho, modo e dispositivo de saída ──────
+// ganho da entrada: o mesmo 'jam-micgain' do Estúdio (um valor só de ganho
+// por pessoa), aplicado na hora no tap — o join também lê essa chave.
+$('#dock-ingain').addEventListener('input', () => {
+  const v = +$('#dock-ingain').value
+  $('#dock-ingain-val').textContent = v.toFixed(1) + '×'
+  localStorage.setItem('jam-micgain', v)
+  jam?.setMicGain(dockMuted ? 0 : v)
+})
+// modo de entrada: VAD decide pelo nível; PTT força o portão fechado e a
+// tecla segura abre (ver pttKeys)
+$('#dock-mode').onchange = () => {
+  localStorage.setItem('jam-inputmode', $('#dock-mode').value)
+  micPopPaint()
+  applyGateSettings()
+}
+// captura da tecla do PTT: capture phase pra tecla não vazar pros atalhos
+// da página. Esc cancela; clicar de novo desarma.
+$('#dock-ptt-key').onclick = () => {
+  const b = $('#dock-ptt-key')
+  if (b.dataset.armed) { delete b.dataset.armed; b.textContent = pttKeyLabel(jamPttKey()); return }
+  b.dataset.armed = '1'
+  b.textContent = 'pressione…'
+  const cap = e => {
+    e.preventDefault(); e.stopPropagation()
+    if (e.code !== 'Escape') {
+      localStorage.setItem('jam-ptt-key', e.code)
+      b.textContent = pttKeyLabel(e.code)
+    } else b.textContent = pttKeyLabel(jamPttKey())
+    delete b.dataset.armed
+    window.removeEventListener('keydown', cap, true)
+  }
+  window.addEventListener('keydown', cap, true)
+}
+// saída: dispositivo (setSinkId no AudioContext do motor) e volume geral —
+// o ganho por pessoa continua no hover da lista de membros
+$('#dock-out').onchange = () => {
+  localStorage.setItem('jam-outdevice', $('#dock-out').value)
+  jam?.setOutput?.($('#dock-out').value).catch(e => toast('Saída de áudio: ' + e.message))
+}
+$('#dock-outvol').addEventListener('input', () => {
+  const v = +$('#dock-outvol').value
+  $('#dock-outvol-val').textContent = Math.round(v * 100) + '%'
+  localStorage.setItem('jam-outvol', v)
+  jam?.setOutVolume?.(v)
+})
+async function jamListOuts (sel = $('#dock-out')) {
+  if (!(jam ?? jams.voice)?.canSetOutput) return   // Firefox: sem setSinkId, fora
+  const devices = await navigator.mediaDevices.enumerateDevices()
+  const outs = devices.filter(d => d.kind === 'audiooutput')
+  sel.replaceChildren(
+    Object.assign(document.createElement('option'), { value: '', textContent: 'Padrão do sistema' }),
+    ...outs.map((d, i) => Object.assign(document.createElement('option'),
+      { value: d.deviceId, textContent: d.label || `Saída ${i + 1}` })))
+  const saved = localStorage.getItem('jam-outdevice')
+  if (saved && [...sel.options].some(o => o.value === saved)) sel.value = saved
+}
+// a tecla do PTT: keydown abre, keyup fecha. Campo de texto focado é
+// conversa escrita, não fala — ignora. Perda de foco com a tecla presa
+// deixaria o mic aberto pra sempre: blur fecha.
+const pttKeys = e => {
+  if (jamInputMode() !== 'ptt' || !jamJoined || jamMode !== 'voice' ||
+      e.code !== jamPttKey()) return
+  if (e.target.closest?.('input, textarea, select, [contenteditable]')) return
+  if (e.type === 'keydown') {
+    if (e.repeat) return
+    e.preventDefault()
+    jam?.setGate?.({ force: 'open' })
+  } else jam?.setGate?.({ force: 'close' })
+}
+window.addEventListener('keydown', pttKeys)
+window.addEventListener('keyup', pttKeys)
+window.addEventListener('blur', () => {
+  if (jamInputMode() === 'ptt') jam?.setGate?.({ force: 'close' })
 })
 
 // ── barra do host: controles do compartilhamento de YouTube ──────────────
