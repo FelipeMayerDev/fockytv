@@ -17,7 +17,7 @@ const pwcat = (...args) => spawn('pw-cat', ['--raw', '--format', 'f32', '--rate'
 const tag = 'check-' + process.pid
 const app = pwcat('--playback', '-P', `{ node.name=faketone-${tag} }`, '-')
 app.stdin.end(tone)
-const cap = pwcat('--record', '-P', `{ node.autoconnect=false node.name=fockytv-capture-${tag} }`, '-')
+const cap = pwcat('--record', '-P', `{ node.autoconnect=false node.always-process=true node.name=fockytv-capture-${tag} }`, '-')
 
 let bytes = 0, energy = 0
 cap.stdout.on('data', d => {

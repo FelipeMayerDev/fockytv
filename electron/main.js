@@ -27,6 +27,9 @@ const configPath = [
   path.join(__dirname, '..', 'config.json'),   // dev, e default embutido
 ].find(p => p && fs.existsSync(p))
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
+// a UI concatena serverUrl + '/api/...': barra no fim vira '//api' e o
+// servidor responde 307 — WebSocket e WHIP não seguem redirect
+config.serverUrl = config.serverUrl.replace(/\/+$/, '')
 
 let win, tray, quitting = false
 let sources = []    // fontes da última consulta; o handler resolve contra ELAS
@@ -280,20 +283,22 @@ function audioStop () {
 // Um nó de gravação só (pw-cat --record com node.autoconnect=false: stream,
 // não dispositivo) e cada app que deve entrar é LIGADO nele com pw-link. O
 // PipeWire mistura — sem mixer em JS, que era de onde vinha o áudio
-// craquelando (relógio do setInterval contra o do som). Enquanto nada está
-// ligado o nó não recebe clock nenhum e não sai PCM: o jitter buffer do
-// renderer trata como underrun e reprima os 250ms quando o som volta.
+// craquelando (relógio do setInterval contra o do som). node.always-process:
+// sem ele, enquanto nada está ligado o nó não recebe clock e não sai PCM — e
+// o mediamtx descarta a trilha de áudio que não manda pacote nos primeiros
+// segundos (transmissão inteira muda se nenhum app tocava ao começar).
 // Relink a cada 1s: app que abriu o som no meio da transmissão entra sozinho.
 let linuxPoller = null, linuxProc = null, linuxTail = null
 let linuxId = 0                    // id do nosso nó de captura
 const linuxLinked = new Set()      // object.serial já ligado (serial não é reusado)
 
-// Nunca entram no áudio da transmissão: o Discord (a conversa é privada) e o
+// Nunca entram no áudio da transmissão: o Discord e os clientes Vencord
+// (Vesktop/Equibop) — a conversa é privada — e o
 // próprio FockyTV — o canal de música tocando aqui é som que voltaria pra
 // stream, e quem assiste ouviria a música duas vezes, fora de sincronia.
-const AUDIO_NEVER = /^(discord|fockytv)/i
+const AUDIO_NEVER = /^(discord|vesktop|equibop|fockytv)/i
 // mesma lista pro helper do Windows (prefixo de nome do executável)
-const AUDIO_NEVER_WIN = 'Discord,FockyTV,electron'
+const AUDIO_NEVER_WIN = 'Discord,Vesktop,Equibop,FockyTV,electron'
 // nome único por captura: o pw-cat não publica o próprio PID nas props, e um
 // órfão de sessão anterior com o mesmo nome roubaria os links
 const LINUX_NODE = 'fockytv-capture'
@@ -331,7 +336,7 @@ function startLinuxAudio (opts) {
   // argumento solto e sai na hora — e a transmissão ia muda.
   linuxProc = spawn('pw-cat',
     ['--record', '--raw', '--format', 'f32', '--rate', String(RATE), '--channels', String(CH),
-     '-P', `{ node.autoconnect=false node.name=${linuxNode} }`, '-'],
+     '-P', `{ node.autoconnect=false node.always-process=true node.name=${linuxNode} }`, '-'],
     { stdio: ['ignore', 'pipe', 'pipe'] })
   win?.webContents.send('audio-meta', { rate: RATE, channels: CH })
   // o pipe corta em qualquer byte: frame pela metade desloca o interleave do
