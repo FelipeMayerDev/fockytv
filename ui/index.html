@@ -782,34 +782,13 @@ function release (pc) {
 // ── qualidade do publish: sistema portado do Fluxer ─────────────────────
 // Fonte: fluxer_app/src/features/voice/utils/ScreenShareOptions.ts e
 // ScreenShareCodecSelection.ts (fork FelipeMayerDev/fluxer). A qualidade
-// deles não vem de bitrate alto — vem de capturar na resolução do preset,
-// hint 'text' pra tela, degradation dinâmico, codec de hardware primeiro e
-// teto de 9 Mbps com piso por tier (0.02 bit por pixel por frame).
+// deles não vem de bitrate alto — vem de capturar na resolução do preset e
+// codec de hardware primeiro. Hint, degradation e teto de bitrate NÃO seguem
+// o Fluxer: com perda no upload até a VPS o GCC corta banda, e 'text' ou
+// maintain-resolution viram fps de slide (medido no app Windows, 1080p60).
 const FLUXER_DIMENSIONS = {
   240: [426, 240], 480: [854, 480], 720: [1280, 720],
   1080: [1920, 1080], 1440: [2560, 1440], fonte: [3840, 2160],
-}
-// piso de bitrate por tier/fps em kbps (BITRATE_KBPS deles, sem os 90/120fps)
-const FLUXER_FLOOR_KBPS = {
-  240: { 15: 300, 30: 500, 60: 700 },
-  480: { 15: 1200, 30: 2000, 60: 3000 },
-  720: { 15: 2000, 30: 3000, 60: 4500 },
-  1080: { 15: 3000, 30: 4500, 60: 6000 },
-  1440: { 15: 4000, 30: 5500, 60: 6000 },
-  fonte: { 15: 4500, 30: 6000, 60: 6000 },
-}
-const FLUXER_MAX_BPS = 9_000_000
-const FLUXER_RUNGS = ['240', '480', '720', '1080', '1440', 'fonte']
-
-// bitrate Fluxer: min(teto 9M, max(piso do tier, 0.02 × pixels × fps)).
-// Captura menor que o teto do tier usa os pixels reais e o piso do tier dela
-// (resolveEffectiveScreenShareDimensions + resolveBitrateRungForPixels).
-function fluxerBitrate (w, h, fps) {
-  const f = fps >= 60 ? 60 : fps >= 30 ? 30 : 15
-  const pixels = w * h
-  const rung = FLUXER_RUNGS.filter(r => FLUXER_DIMENSIONS[r][0] * FLUXER_DIMENSIONS[r][1] <= pixels).pop() ?? '240'
-  const floor = (FLUXER_FLOOR_KBPS[rung]?.[f] ?? 300) * 1000
-  return { maxBps: Math.min(FLUXER_MAX_BPS, Math.max(floor, Math.round(0.02 * pixels * f))), rung }
 }
 
 // probe de hardware via mediaCapabilities (o mesmo caminho do
@@ -848,10 +827,12 @@ function pickShareCodec (hw) {
   return { order, first: order[0], swH264Clamp: order[0] === 'video/h264' && !hw.h264 }
 }
 
-function tuneSender (s, fps, maxBps, degradation) {
+function tuneSender (s, fps, degradation) {
   const p = s.getParameters()
   if (!p.encodings?.length) p.encodings = [{}]
-  p.encodings[0].maxBitrate = maxBps
+  // 32M = mesmo teto do client nativo (1080p60 com movimento). O Chrome só
+  // usa o que o encoder e a rede aguentarem.
+  p.encodings[0].maxBitrate = 32_000_000
   p.encodings[0].maxFramerate = fps
   p.encodings[0].scaleResolutionDownBy = 1
   // a track de vídeo é a que importa: prioridade alta na rede e no encoder
@@ -885,11 +866,10 @@ async function capture (fps, withAudio, withCursor, qual = 'fonte') {
 }
 
 async function publish (key, st, fps, codec) {
-  // hint: <60fps é tela de texto/código → 'text' (o modo "screenshare" do
-  // Fluxer); 60fps fica SEM hint — o navegador auto-detecta conteúdo, que é
-  // o que o Fluxer faz com 'motion' no desktop (converte pra indefinido)
+  // 'motion' sempre: com 'text' o Chrome entra no modo screencast e aceita
+  // cair pra ~5 fps pra manter a nitidez
   const track = st.getVideoTracks()[0]
-  if (fps < 60) track.contentHint = 'text'
+  track.contentHint = 'motion'
 
   const pc = new RTCPeerConnection()
   st.getTracks().forEach(t => pc.addTrack(t, st))
@@ -926,14 +906,9 @@ async function publish (key, st, fps, codec) {
       .setCodecPreferences(list)
   }
 
-  // bitrate pela tabela do Fluxer (piso por tier, 0.02bpp/frame, teto 9M) e
-  // degradation dinâmico: source/texto preserva resolução; movimento em
-  // resolução abaixo de source preserva framerate
-  // (resolveScreenShareDegradationPreference deles)
-  const src = track.getSettings()
-  const { maxBps, rung } = fluxerBitrate(src.width, src.height, fps)
-  const degradation = rung === 'fonte' || fps < 60 ? 'maintain-resolution' : 'maintain-framerate'
-  await tuneSender(sender, fps, maxBps, degradation)
+  // 60fps pediu fluidez: sob perda/banda curta cai a resolução, não o fps.
+  // 15/30 fps foi escolha de nitidez (tela parada): aí preserva resolução.
+  await tuneSender(sender, fps, fps < 60 ? 'maintain-resolution' : 'maintain-framerate')
   st.getVideoTracks()[0].addEventListener('ended', () => { if (!swapping) stop() })
 
   await signal('/api/whip', key, pc)
