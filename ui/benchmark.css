@@ -1,0 +1,10 @@
+body.benchmark { overflow:auto; height:auto; }
+.benchmark main { display:flex; flex-direction:column; gap:16px; max-width:960px; margin:0 auto; padding:24px; overflow:visible; }
+.benchmark p { color:hsl(var(--muted-foreground)); }
+.benchmark .field, .benchmark .actions { margin:0; }
+.benchmark form, .benchmark #livekit-config { display:grid; gap:16px; }
+.benchmark [hidden] { display:none !important; }
+.benchmark .actions { flex-wrap:wrap; justify-content:flex-start; }
+.benchmark button:disabled { opacity:.5; cursor:default; }
+.benchmark video { width:100%; aspect-ratio:16/9; background:#000; border-radius:var(--radius-media); }
+.benchmark pre { overflow:auto; padding:16px; background:hsl(var(--card)); border:1px solid hsl(var(--border)); border-radius:var(--radius); }

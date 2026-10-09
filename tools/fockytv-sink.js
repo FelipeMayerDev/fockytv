@@ -15,7 +15,7 @@ const { execFile, execFileSync, spawn } = require('node:child_process')
 const SINK = 'FockyTV'
 // mesma regra do app (electron/main.js): a conversa do Discord é privada, e o
 // som do próprio FockyTV voltaria pra stream em eco
-const NEVER = /^(discord|fockytv)/i
+const NEVER = /(?:^|[/.])(discord|vesktop|vencord|equibop|fockytv)/i
 
 const sh = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8' }).trim()
 
@@ -43,7 +43,7 @@ const tick = () => (ensureSink(), execFile('pw-dump', { maxBuffer: 16 << 20 }, (
   for (const n of nodes) {
     const p = n.info?.props ?? {}
     if (p['media.class'] !== 'Stream/Output/Audio') continue
-    if (NEVER.test(p['application.process.binary'] ?? '')) continue
+    if (['application.process.binary', 'application.name', 'application.id', 'node.name'].some(key => NEVER.test(p[key] ?? ''))) continue
     const serial = +(p['object.serial'] ?? 0)
     if (!serial || linked.has(serial)) continue
     linked.add(serial)

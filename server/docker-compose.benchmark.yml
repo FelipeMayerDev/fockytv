@@ -1,0 +1,19 @@
+# Teste local independente do compose de produção.
+# LIVEKIT_API_KEY e LIVEKIT_API_SECRET devem estar no ambiente.
+services:
+  livekit:
+    image: livekit/livekit-server:v1.13.9
+    ports:
+      - "127.0.0.1:7880:7880/tcp"
+      - "127.0.0.1:7881:7881/tcp"
+      - "127.0.0.1:7882:7882/udp"
+    environment:
+      LIVEKIT_CONFIG: |
+        port: 7880
+        rtc:
+          node_ip: 127.0.0.1
+          use_external_ip: false
+          tcp_port: 7881
+          udp_port: 7882
+        keys:
+          ${LIVEKIT_API_KEY:?Defina LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET:?Defina LIVEKIT_API_SECRET}

@@ -327,7 +327,11 @@ func (a *app) sessDelete(prefix string) http.HandlerFunc {
 		a.mu.Unlock()
 		log.Printf("[%s] close path=%s id=%s", s.kind, s.path, id)
 
-		req, err := http.NewRequestWithContext(r.Context(), "DELETE", mtxWebRTC+loc, nil)
+		target := mtxWebRTC + loc
+		if s.kind == "livekit-whip" {
+			target = loc
+		}
+		req, err := http.NewRequestWithContext(r.Context(), "DELETE", target, nil)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -353,6 +357,7 @@ type sessState struct {
 type trackState map[string]any
 
 type streamState struct {
+	Engine      string       `json:"engine,omitempty"`
 	StreamKey   string       `json:"streamKey"`
 	IsPublic    bool         `json:"isPublic"`
 	Motd        string       `json:"motd"`
@@ -363,9 +368,17 @@ type streamState struct {
 }
 
 func (a *app) status(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	lk, err := a.livekitStreams(r.Context())
+	if err != nil {
+		log.Printf("[livekit] status: %v", err)
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	out := make([]streamState, 0)
+	out := lk
+	if out == nil {
+		out = make([]streamState, 0)
+	}
 	for _, p := range a.paths {
 		if !p.Ready {
 			continue
@@ -423,6 +436,7 @@ func truncMs(iso string) string {
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Expose-Headers", "Location")
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, PATCH, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
@@ -439,6 +453,16 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/status", a.status)
+	mux.HandleFunc("POST /api/livekit/join", a.livekitJoin)
+	mux.HandleFunc("POST /api/livekit/whip", a.livekitWhip)
+	mux.HandleFunc("DELETE /api/livekit/whip/{id}", a.sessDelete("api/livekit/whip"))
+	if livekitURL != "" {
+		target, err := url.Parse(livekitURL)
+		if err != nil {
+			log.Fatal(err)
+		}
+		mux.Handle("/livekit/", http.StripPrefix("/livekit", httputil.NewSingleHostReverseProxy(target)))
+	}
 	mux.HandleFunc("POST /api/whip", a.whipPost)
 	mux.HandleFunc("DELETE /api/whip/{id}", a.sessDelete("api/whip"))
 	mux.HandleFunc("POST /api/whep", a.whepPost)

@@ -80,6 +80,10 @@ vm.runInContext(`
   let nick = 'ana'
   let jamJoined = false, jamRoom = null, jamPending = null, jamPendingMode = null, dockMuted = false
   const jamLeft = new Map()
+  const peerSelfMuted = new Set()
+  const peerMuted = new Set(), peerVol = new Map()
+  const allMuted = false, ICO_SPK = '', ICO_SPK_OFF = ''
+  const applyPeerAudio = () => {}
   let voiceState = []
   const tiles = new Map()
   const VOICE_MAIN = 'geral', ESTUDIO_ROOM = 'sala'
@@ -109,8 +113,8 @@ ok(window.document.querySelectorAll('#voice-chans .vmem').length === 2,
 // fala alta nos dois: acende na hora
 now = 1000
 run(`jamLevels({ self: 0.5, peers: { beto: { level: 0.4 } } })`)
-ok(talking('ana') && talking('beto') && dock(),
-  'pico acima de TALK_ON acende ana, beto e dock')
+ok(talking('ana') && talking('beto') && !dock(),
+  'pico acima de TALK_ON acende ana e beto; controle do dock não pisca')
 
 // pausa curta entre palavras (150ms de silêncio): NÃO pode apagar (flicker #2)
 now = 1150

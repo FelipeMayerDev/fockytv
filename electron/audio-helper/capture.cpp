@@ -1,3 +1,4 @@
+#include <cassert>
 // audio-helper: captura de áudio por aplicativo no Windows (WASAPI process
 // loopback, mesmo mecanismo do "Application Audio Capture" do OBS —
 // Windows 10 build 20348+). Escreve em stdout um cabeçalho próprio e o PCM cru:
@@ -473,6 +474,18 @@ static bool excluded (const std::wstring& stem, const std::vector<std::wstring>&
   return false;
 }
 
+// Filhos do Electron também precisam respeitar a exclusão do cliente pai.
+static bool excluded_pid(DWORD pid, const std::vector<Proc>& procs, const std::vector<std::wstring>& names) {
+  for (size_t depth = 0; pid && depth < procs.size(); ++depth) {
+    const Proc* found = nullptr;
+    for (const auto& p : procs) if (p.pid == pid) { found = &p; break; }
+    if (!found) return depth == 0; // alvo desconhecido: falha fechada
+    if (excluded(found->stem, names)) return true;
+    pid = found->ppid;
+  }
+  return false;
+}
+
 // PIDs com sessão de áudio ATIVA no endpoint padrão, menos os excluídos.
 // Descendente de outro da lista não entra: o include é por árvore, e o mesmo
 // áudio entraria duas vezes (uma vez por cliente).
@@ -510,9 +523,7 @@ static void playing_pids (const std::vector<std::wstring>& names, std::vector<DW
       }
       ctl->Release();
       if (st != AudioSessionStateActive || !pid || pid == self) continue;
-      std::wstring stem;
-      for (const auto& pr : procs) if (pr.pid == pid) { stem = pr.stem; break; }
-      if (excluded(stem, names)) continue;
+      if (excluded_pid(pid, procs, names)) continue;
       out.push_back(pid);
     }
   }
@@ -697,7 +708,14 @@ int main(int argc, char** argv) {
     // acontece. Foi assim que o erro do pw-cat ficou invisível no Linux.
     setvbuf(stderr, nullptr, _IONBF, 0);
 
-    if (argc > 1 && !strcmp(argv[1], "--test")) return run_test();
+    if (argc > 1 && !strcmp(argv[1], "--test")) {
+      const std::vector<Proc> procs = {{10, 0, L"Vencord"}, {11, 10, L"electron"}, {20, 0, L"firefox"}};
+      assert(excluded_pid(10, procs, {L"vencord"}));
+      assert(excluded_pid(11, procs, {L"vencord"}));
+      assert(!excluded_pid(20, procs, {L"vencord"}));
+      assert(excluded_pid(99, procs, {L"vencord"}));
+      return run_test();
+    }
     if (argc > 1 && !strcmp(argv[1], "--mic")) return run_mic();
     if (argc > 2 && !strcmp(argv[1], "--mix-except")) return run_mix(argv[2]);
 
@@ -706,6 +724,11 @@ int main(int argc, char** argv) {
     if (argc > 2 && !strcmp(argv[1], "--hwnd")) {
       pid = pid_of_window(_strtoui64(argv[2], nullptr, 10));
       if (!pid) { fwprintf(stderr, L"janela sem processo\n"); return 2; }
+      std::vector<Proc> procs;
+      procs_snapshot(procs);
+      if (excluded_pid(pid, procs, {L"Discord", L"Vesktop", L"Vencord", L"Equibop", L"FockyTV"})) {
+        fwprintf(stderr, L"audio privado bloqueado\n"); return 3;
+      }
     } else if (argc > 2 && !strcmp(argv[1], "--exclude-name")) {
       wchar_t name[256];
       MultiByteToWideChar(CP_UTF8, 0, argv[2], -1, name, 256);

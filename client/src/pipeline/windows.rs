@@ -36,6 +36,7 @@ pub fn build(
         pick.width.unsigned_abs(),
         pick.height.unsigned_abs(),
         cfg.max_bitrate,
+        cfg.fps,
     );
     let gop = (cfg.fps * 2).max(30);
     let venc = super::encoder::select(&cfg.encoder)?;
@@ -66,7 +67,7 @@ pub fn build(
         ! queue
         ! whip.
         whipsink name=whip
-            whip-endpoint="{url}/api/whip"
+            whip-endpoint="{url}/api/livekit/whip"
             auth-token="{key}"
             use-link-headers=true
         "#,

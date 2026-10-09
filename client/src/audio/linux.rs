@@ -12,7 +12,7 @@ use super::{feeder, AudioMode};
 /// Binário cujo áudio NUNCA entra na transmissão (prefixo, sem distinguir
 /// maiúsculas): o Discord (conversa privada) e tudo que for FockyTV (o canal
 /// de música local voltaria como eco fora de sincronia).
-const AUDIO_NEVER: [&str; 3] = ["discord", "vesktop", "fockytv"];
+const AUDIO_NEVER: [&str; 5] = ["discord", "vesktop", "vencord", "equibop", "fockytv"];
 
 /// Um nó de gravação pw-cat com autoconnect desligado; o poller liga nele os
 /// apps aprovados com pw-link (nó↔nó — o PipeWire casa os canais e mistura).
@@ -74,20 +74,25 @@ fn eligible(p: &HashMap<String, Value>, own_node: &str, mode: &AudioMode) -> boo
     if vstr(p, "node.name").unwrap_or("").starts_with(own_node) {
         return false;
     }
+    if [
+        "application.process.binary",
+        "application.name",
+        "application.id",
+        "node.name",
+    ]
+    .iter()
+    .filter_map(|key| vstr(p, key))
+    .any(|name| {
+        AUDIO_NEVER
+            .iter()
+            .any(|blocked| name.to_lowercase().split(['/', '.']).any(|part| part.starts_with(blocked)))
+    }) {
+        return false;
+    }
     match mode {
         AudioMode::Pending => false,
         AudioMode::OnlyPid(pid) => vi64(p, "application.process.pid") == Some(*pid as i64),
-        AudioMode::Exclude => ![
-            "application.process.binary",
-            "application.name",
-            "node.name",
-        ]
-        .iter()
-        .filter_map(|key| vstr(p, key))
-        .any(|name| {
-            let name = name.to_lowercase();
-            AUDIO_NEVER.iter().any(|blocked| name.starts_with(blocked))
-        }),
+        AudioMode::Exclude => true,
     }
 }
 
@@ -299,6 +304,15 @@ mod tests {
         );
         p.remove("application.name");
         assert!(!eligible(&p, "fockytv-capture", &AudioMode::Exclude));
+        for name in ["Vencord", "vesktop", "Equibop"] {
+            p.insert(
+                "application.process.binary".into(),
+                Value::String(name.into()),
+            );
+            p.insert("application.process.pid".into(), Value::Number(42.into()));
+            assert!(!eligible(&p, "fockytv-capture", &AudioMode::Exclude));
+            assert!(!eligible(&p, "fockytv-capture", &AudioMode::OnlyPid(42)));
+        }
         p.insert(
             "application.process.binary".into(),
             Value::String("firefox".into()),

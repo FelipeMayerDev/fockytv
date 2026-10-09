@@ -27,7 +27,7 @@ pub fn build(
 ) -> Result<(Live, audio::Running), String> {
     let fd_raw = fd.as_raw_fd();
     let (w, h) = size.unwrap_or((1920, 1080));
-    let bitrate = bitrate_for(w.unsigned_abs(), h.unsigned_abs(), cfg.max_bitrate);
+    let bitrate = bitrate_for(w.unsigned_abs(), h.unsigned_abs(), cfg.max_bitrate, cfg.fps);
     let gop = (cfg.fps * 2).max(30);
     let venc = super::encoder::select(&cfg.encoder)?;
     // FOCKYTV_TEST_VIDEO=1 troca a fonte por videotestsrc (diagnóstico sem
@@ -66,7 +66,7 @@ pub fn build(
         ! queue
         ! whip.
         whipsink name=whip
-            whip-endpoint="{url}/api/whip"
+            whip-endpoint="{url}/api/livekit/whip"
             auth-token="{key}"
             use-link-headers=true
         "#,

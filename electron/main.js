@@ -296,9 +296,9 @@ const linuxLinked = new Set()      // object.serial já ligado (serial não é r
 // (Vesktop/Equibop) — a conversa é privada — e o
 // próprio FockyTV — o canal de música tocando aqui é som que voltaria pra
 // stream, e quem assiste ouviria a música duas vezes, fora de sincronia.
-const AUDIO_NEVER = /^(discord|vesktop|equibop|fockytv)/i
+const AUDIO_NEVER = /(?:^|[/.])(discord|vesktop|vencord|equibop|fockytv)/i
 // mesma lista pro helper do Windows (prefixo de nome do executável)
-const AUDIO_NEVER_WIN = 'Discord,Vesktop,Equibop,FockyTV,electron'
+const AUDIO_NEVER_WIN = 'Discord,Vesktop,Vencord,Equibop,FockyTV,electron'
 // nome único por captura: o pw-cat não publica o próprio PID nas props, e um
 // órfão de sessão anterior com o mesmo nome roubaria os links
 const LINUX_NODE = 'fockytv-capture'
@@ -307,9 +307,10 @@ let linuxNode = LINUX_NODE
 function linuxSelect (props, opts) {
   if (props['media.class'] !== 'Stream/Output/Audio') return false
   if ((props['node.name'] ?? '').startsWith(LINUX_NODE)) return false
+  if (['application.process.binary', 'application.name', 'application.id', 'node.name'].some(key => AUDIO_NEVER.test(props[key] ?? ''))) return false
   // janela escolhida: é o pid dela que manda, ninguém mais entra
   if (opts.mode === 'window') return +props['application.process.pid'] === opts.pid
-  return !AUDIO_NEVER.test(props['application.process.binary'] ?? '')
+  return true
 }
 
 function linuxPidOfHwnd (hwnd) {

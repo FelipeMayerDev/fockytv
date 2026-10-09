@@ -37,12 +37,12 @@ fn main() {
         ! audioconvert ! audioresample ! opusenc bitrate=192000
         ! rtpopuspay pt=111
         ! queue ! whip.
-        whipsink name=whip whip-endpoint="{s}/api/whip" auth-token="{k}" use-link-headers=true
+        whipsink name=whip whip-endpoint="{s}/api/livekit/whip" auth-token="{k}" use-link-headers=true
         "#,
         s = server.trim_end_matches('/'),
         k = key
     );
-    println!("publicando em {server}/api/whip como '{key}' por {seconds}s…");
+    println!("publicando em {server}/api/livekit/whip como '{key}' por {seconds}s…");
     let pipe = gst::parse::launch(&launch).expect("pipeline");
     let bus = pipe.bus().unwrap();
     pipe.set_state(gst::State::Playing).expect("play");

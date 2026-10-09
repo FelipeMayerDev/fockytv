@@ -835,7 +835,8 @@ setInterval(async () => {
   firstScan = false
 
   // gravação saiu: o gravador mantém só o buffer rotativo pros clips de live
-  recorder.sync(new Set([...liveKeys].filter(k => k !== "tv" && k !== "music")))
+  recorder.sync(new Set(live.filter(s => s.engine !== "livekit" && s.videoTracks?.length)
+    .map(s => s.streamKey).filter(k => k !== "tv" && k !== "music")))
 
   // "live" sem processo algum por 8 s = o pipeline morreu sem passar pelo
   // ended (kill num instante ruim, close tardio ignorado pela guarda de

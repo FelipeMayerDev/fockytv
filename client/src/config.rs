@@ -153,17 +153,44 @@ fn settings_path() -> PathBuf {
         .join("fockytv-share/settings.json")
 }
 
-/// Bitrate de vídeo pela quantidade de pixels — 60fps em resolução nativa
-/// pede folga; quem quiser trava no config.json (maxBitrate). Com encoder de
-/// hardware a cadeia aguenta esses valores de sobra; o teto real é o upload
-/// de quem publica.
-pub fn bitrate_for(width: u32, height: u32, manual: u64) -> u64 {
+/// Bitrate do Fluxer por resolução/FPS; maxBitrate preserva o override manual.
+pub fn bitrate_for(width: u32, height: u32, manual: u64, fps: u32) -> u64 {
     if manual > 0 {
         return manual;
     }
-    match width as u64 * height as u64 {
-        p if p <= 2_300_000 => 12_000_000, // ~1080p
-        p if p <= 3_800_000 => 20_000_000, // ~1440p
-        _ => 32_000_000,                   // 4K
+    let pixels = width as u64 * height as u64;
+    let index = if fps >= 60 {
+        2
+    } else if fps >= 30 {
+        1
+    } else {
+        0
+    };
+    let floor = if pixels < 854 * 480 {
+        [300_000, 500_000, 700_000][index]
+    } else if pixels < 1280 * 720 {
+        [1_200_000, 2_000_000, 3_000_000][index]
+    } else if pixels < 1920 * 1080 {
+        [2_000_000, 3_000_000, 4_500_000][index]
+    } else if pixels < 2560 * 1440 {
+        [3_000_000, 4_500_000, 6_000_000][index]
+    } else if pixels < 3840 * 2160 {
+        [4_000_000, 5_500_000, 6_000_000][index]
+    } else {
+        [4_500_000, 6_000_000, 6_000_000][index]
+    };
+    // Perfil de bitrate do Fluxer; limite de fonte/4K em 9 Mbps.
+    (pixels * fps as u64 / 50).max(floor).min(9_000_000)
+}
+
+#[cfg(test)]
+mod bitrate_tests {
+    #[test]
+    fn fluxer_budget() {
+        assert_eq!(super::bitrate_for(1920, 1080, 0, 60), 6_000_000);
+        assert_eq!(super::bitrate_for(3840, 2160, 0, 60), 9_000_000);
+        assert_eq!(super::bitrate_for(1280, 720, 0, 60), 4_500_000);
+        assert_eq!(super::bitrate_for(1280, 720, 0, 30), 3_000_000);
+        assert_eq!(super::bitrate_for(1920, 1080, 8_000_000, 60), 8_000_000);
     }
 }

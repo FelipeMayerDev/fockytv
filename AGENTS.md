@@ -73,3 +73,11 @@ Hotkey no Linux = bind do compositor chamando `fockytv-share --share`.
 - **Navegador:** precisa do `node tools/fockytv-sink.js` rodando — cria o sink
   `FockyTV` com tudo menos o Discord e a UI publica o monitor dele
   (`fockySinkTrack` em `ui/index.html`). Smoke test: `node tools/sink-check.js`.
+
+## Compartilhamento LiveKit
+
+Web/Electron usam LiveKit: `docs/livekit-sharing.md`. Na VPS, os comandos
+compose agora precisam de `-f docker-compose.yml -f docker-compose.livekit.yml`
+e de `server/.env` com as credenciais LiveKit (não versionar). Nunca sobrescrever
+o compose base local. Antes de servir/empacotar a UI: `npm run build:benchmark`
+para copiar o SDK local e sua licença. Rust publica WHIP no ingress LiveKit; TV/música/só-áudio usam MediaMTX.

@@ -1,4 +1,5 @@
 node_modules/
+ui/vendor/
 dist/
 .cache/
 server/.env

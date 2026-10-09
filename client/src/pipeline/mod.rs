@@ -291,12 +291,12 @@ pub fn refine_bitrate(live: &Live, manual: u64) -> Option<(u32, u32, u32)> {
     let fps = s
         .get::<gst::Fraction>("framerate")
         .ok()
-        .map(|f| f.numer() as u32)
+        .map(|f| (f.numer() / f.denom().max(1)) as u32)
         .unwrap_or(0);
     if let Some(enc) = live.pipeline.by_name("venc") {
         let want = encoder::chosen_kind()
-            .map(|k| k.bitrate(crate::config::bitrate_for(w, h, manual)))
-            .unwrap_or_else(|| crate::config::bitrate_for(w, h, manual));
+            .map(|k| k.bitrate(crate::config::bitrate_for(w, h, manual, fps)))
+            .unwrap_or_else(|| crate::config::bitrate_for(w, h, manual, fps));
         if encoder::applied_bitrate() != want {
             // por string: o tipo gint/guint da property varia por encoder
             enc.set_property_from_str("bitrate", &want.to_string());
@@ -317,7 +317,7 @@ pub fn current_caps(live: &Live) -> Option<(u32, u32, u32)> {
         s.get::<i32>("height").ok()? as u32,
         s.get::<gst::Fraction>("framerate")
             .ok()
-            .map(|f| f.numer() as u32)
+            .map(|f| (f.numer() / f.denom().max(1)) as u32)
             .unwrap_or(0),
     ))
 }

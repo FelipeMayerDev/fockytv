@@ -638,9 +638,9 @@
     <div class="field" id="qual-row">
       <label for="qual">Resolução</label>
       <select id="qual">
-        <option value="fonte" selected>Fonte (até 4K)</option>
+        <option value="fonte">Fonte (até 4K)</option>
         <option value="1440">1440p</option>
-        <option value="1080">1080p</option>
+        <option value="1080" selected>1080p</option>
         <option value="720">720p</option>
         <option value="480">480p</option>
         <option value="240">240p</option>
@@ -702,7 +702,9 @@
 
 <!-- ── painel dos canais fixos mora dentro do player (veja #fixed-panel) ── -->
 
+<script src="./vendor/livekit-client.umd.js?v=1"></script>
 <script>
+const connectShare = (...args) => import('./livekit-share.mjs?v=1').then(m => m.connectShare(...args))
 // No navegador, a própria página é o servidor e o seletor de tela é nativo.
 // Nunca `const focky`: no Electron o contextBridge expõe `focky` como global
 // não-configurável, e redeclarar com const/let é SyntaxError que mata o script
@@ -778,6 +780,7 @@ async function signal (path, key, pc) {
 // fecha a conexão E avisa o servidor. Todo close passa por aqui.
 function release (pc) {
   if (!pc) return
+  viewerPcs.delete(pc)
   const { resource, resourceKey } = pc
   pc.resource = null
   if (resource) fetch(new URL(resource, cfg.serverUrl), {
@@ -788,12 +791,8 @@ function release (pc) {
 }
 
 // ── qualidade do publish: sistema portado do Fluxer ─────────────────────
-// Fonte: fluxer_app/src/features/voice/utils/ScreenShareOptions.ts e
-// ScreenShareCodecSelection.ts (fork FelipeMayerDev/fluxer). A qualidade
-// deles não vem de bitrate alto — vem de capturar na resolução do preset e
-// codec de hardware primeiro. Hint, degradation e teto de bitrate NÃO seguem
-// o Fluxer: com perda no upload até a VPS o GCC corta banda, e 'text' ou
-// maintain-resolution viram fps de slide (medido no app Windows, 1080p60).
+// Referência: fluxerapp/fluxer, ScreenShareOptions e ScreenShareCodecSelection.
+// Hardware primeiro; publicação, SVC e bitrate em livekit-share.mjs.
 const FLUXER_DIMENSIONS = {
   240: [426, 240], 480: [854, 480], 720: [1280, 720],
   1080: [1920, 1080], 1440: [2560, 1440], fonte: [3840, 2160],
@@ -828,40 +827,29 @@ async function hwEncoders () {
 // SOFTWARE_H264_MAX deles (720p/30), openh264 não sustenta mais que isso.
 // Os nomes são mimeTypes completos: é o que o filtro de codecs compara.
 function pickShareCodec (hw) {
-  const rank = /firefox/i.test(navigator.userAgent)
-    ? ['video/vp8', 'video/h264'] : ['video/av1', 'video/h264', 'video/vp9', 'video/vp8']
+  const preference = /firefox/i.test(navigator.userAgent)
+    ? ['video/vp8', 'video/h264']
+    : hw.h264 ? ['video/av1', 'video/h264', 'video/vp9', 'video/vp8']
+    : ['video/av1', 'video/vp9', 'video/h264', 'video/vp8']
+  const supported = RTCRtpSender.getCapabilities('video')?.codecs ?? []
+  const rank = preference.filter(m => supported.some(c => c.mimeType.toLowerCase() === m))
   const isHw = m => hw[m.replace('video/', '')]
   const order = [...rank.filter(isHw), ...rank.filter(m => !isHw(m))]
   return { order, first: order[0], swH264Clamp: order[0] === 'video/h264' && !hw.h264 }
 }
 
-function tuneSender (s, fps, degradation) {
-  const p = s.getParameters()
-  if (!p.encodings?.length) p.encodings = [{}]
-  // 32M = mesmo teto do client nativo (1080p60 com movimento). O Chrome só
-  // usa o que o encoder e a rede aguentarem.
-  p.encodings[0].maxBitrate = 32_000_000
-  p.encodings[0].maxFramerate = fps
-  p.encodings[0].scaleResolutionDownBy = 1
-  // a track de vídeo é a que importa: prioridade alta na rede e no encoder
-  p.encodings[0].priority = 'high'
-  p.encodings[0].networkPriority = 'high'
-  p.degradationPreference = degradation
-  return s.setParameters(p)          // só depois de addTrack, senão some em silêncio
-}
-
-async function capture (fps, withAudio, withCursor, qual = 'fonte') {
+async function capture (fps, withAudio, withCursor, qual = '1080') {
   // resolução: preset do seletor com os DIMENSIONS do Fluxer ("fonte" é teto
   // 3840x2160, não infinito). O constraint é o alvo: o compositor do sistema
   // escala a captura pra ele, e o encoder codifica exatamente esse tamanho —
   // é assim que o Fluxer chega no bitrate/qualidade previsto pela tabela.
-  const [w, h] = FLUXER_DIMENSIONS[qual] ?? FLUXER_DIMENSIONS.fonte
+  const [w, h] = FLUXER_DIMENSIONS[qual] ?? FLUXER_DIMENSIONS[1080]
   return navigator.mediaDevices.getDisplayMedia({
     // ponytail: o Blink ignora `cursor` (nem aparece em getSupportedConstraints),
     // então hoje quem manda é a camada de captura: no Wayland o portal embute o
     // cursor na tela e não na janela, no Windows o Chromium sempre compõe. Fica
     // pedido do jeito certo pra valer sozinho quando o Chromium implementar.
-    video: { frameRate: fps, width: w, height: h, cursor: withCursor ? 'always' : 'never' },
+    video: { frameRate: { ideal: fps, max: fps }, width: { ideal: w, max: w }, height: { ideal: h, max: h }, cursor: withCursor ? 'always' : 'never' },
     // systemAudio 'include': sem isso o seletor do Chrome nem mostra o
     // checkbox de "áudio do sistema" no Windows — e o som sai de fora
     audio: withAudio
@@ -874,53 +862,12 @@ async function capture (fps, withAudio, withCursor, qual = 'fonte') {
 }
 
 async function publish (key, st, fps, codec) {
-  // 'motion' sempre: com 'text' o Chrome entra no modo screencast e aceita
-  // cair pra ~5 fps pra manter a nitidez
-  const track = st.getVideoTracks()[0]
-  track.contentHint = 'motion'
-
-  const pc = new RTCPeerConnection()
-  st.getTracks().forEach(t => pc.addTrack(t, st))
-
-  sender = pc.getSenders().find(x => x.track?.kind === 'video')
-  // Um m-line de áudio sempre, mesmo sem trilha: o WHIP daqui não renegocia,
-  // então sem este transceiver o microfone da câmera não teria por onde entrar
-  // depois. (Medido contra o broadcast-box: aceita o m-line vazio e passa a
-  // receber áudio no replaceTrack.)
-  audioSender = pc.getSenders().find(x => x.track?.kind === 'audio')
-    ?? pc.addTransceiver('audio', { direction: 'sendonly' }).sender
-
-  if (codec) {
-    // o value do #codec vem com a caixa original do mimeType ('video/H264') —
-    // sem o toLowerCase aqui o filtro nunca casava e o codec manual era
-    // ignorado silenciosamente
-    codec = codec.toLowerCase()
-    const list = RTCRtpSender.getCapabilities('video').codecs
-      .filter(c => c.mimeType.toLowerCase() === codec)
-    if (list.length) pc.getTransceivers().find(t => t.sender === sender)
-      .setCodecPreferences(list)
-  } else {
-    // Um codec SÓ, na escolha do Fluxer (rankScreenShareCodecs: hardware
-    // primeiro via probe mediaCapabilities). Detalhe decisivo descoberto na
-    // medição: o mediamtx escolhe o codec do answer pela PRÓPRIA ordem de
-    // preferência dele (VP8 primeiro) e ignora a ordem do offer — oferecer
-    // todos os codecs ordenados nunca aplicou H264/AV1. LiveKit publica um
-    // codec por track, e é isso que o offer precisa ser.
-    const hw = await hwEncoders()
-    const { first } = pickShareCodec(hw)
-    const caps = RTCRtpSender.getCapabilities('video').codecs
-    const list = caps.filter(c => c.mimeType.toLowerCase() === first)
-    if (list.length) pc.getTransceivers().find(t => t.sender === sender)
-      .setCodecPreferences(list)
-  }
-
-  // 60fps pediu fluidez: sob perda/banda curta cai a resolução, não o fps.
-  // 15/30 fps foi escolha de nitidez (tela parada): aí preserva resolução.
-  await tuneSender(sender, fps, fps < 60 ? 'maintain-resolution' : 'maintain-framerate')
+  if (!codec) codec = pickShareCodec(await hwEncoders()).first
+  const session = await connectShare(cfg.serverUrl, key, 'publisher', nick, null, tuneReceiver, st, fps, codec)
+  sender = session.videoSender
+  audioSender = session.audioSender
   st.getVideoTracks()[0].addEventListener('ended', () => { if (!swapping) stop() })
-
-  await signal('/api/whip', key, pc)
-  return pc
+  return session
 }
 
 // ── buffer de jitter do viewer (config "Latência do player") ─────────────
@@ -944,6 +891,14 @@ function retuneViewers () {
 }
 
 async function watch (key, videoEl, viewer) {
+  const res = await fetch(cfg.serverUrl + '/api/status', { signal: AbortSignal.timeout(10_000) })
+  if (!res.ok) throw new Error('Não foi possível consultar a transmissão')
+  const streams = await res.json()
+  if (streams.some(s => s.streamKey === key && s.engine === 'livekit')) {
+    const session = await connectShare(cfg.serverUrl, key, 'viewer', viewer || '', videoEl, tuneReceiver)
+    viewerPcs.add(session)
+    return session
+  }
   const pc = new RTCPeerConnection()
   viewerPcs.add(pc)
   pc.addTransceiver('video', { direction: 'recvonly' })
@@ -2600,7 +2555,7 @@ function updateShareAudio (srcId) {
          // Firefox: o som da tela só existe via sink (#7).
          : navigator.userAgent.includes('Firefox')
            ? 'som do sistema via sink FockyTV (rode `node tools/fockytv-sink.js`)'
-           : 'áudio do sistema')
+           : 'som filtrado via sink FockyTV (rode `node tools/fockytv-sink.js`)')
     // navegador: janela não tem som separado — mas o Chrome dá o som só da
     // aba quando o compartilhamento é de aba
     : 'o áudio sai só do aplicativo da janela (ou só da ABA, no navegador)'
@@ -2624,7 +2579,8 @@ async function doSwap (id) {
       const hwnd = hwndOf(id)
       if (hwnd) fockyApi.audioStart({ mode: 'window', hwnd: hwndNum(hwnd) }).catch(() => {})
     }
-    const fresh = await capture(+$('#fps').value, false, $('#cursor').checked)
+    const fresh = await capture(+$('#fps').value, false, $('#cursor').checked, $('#qual').value)
+    fresh.getVideoTracks()[0].contentHint = ''
     if (overlay) {
       // o canvas segue no sender; o que muda é o que ele desenha no fundo —
       // e o tamanho, que o resize do sv/syncComposeSize resolve
@@ -2724,7 +2680,7 @@ $('#share-go').onclick = async () => {
         // navegador (sem filtro por app do Electron): o monitor do sink
         // FockyTV, se o tools/fockytv-sink.js estiver de pé, já vem sem Discord
         const sinkTrack = !audioOpts && $('#audio').checked ? await fockySinkTrack() : null
-        stream = await capture(fps, $('#audio').checked && !audioOpts && !sinkTrack, $('#cursor').checked, qual)
+        stream = await capture(fps, false, $('#cursor').checked, qual)
         if (sinkTrack) { stream.addTrack(sinkTrack); sinkUsed = true }
         // o portal pode aceitar o pedido de áudio e devolver só vídeo (Wayland
         // sem PipeWire, por exemplo) — sem erro nenhum. Detecta e avisa:
@@ -2732,16 +2688,9 @@ $('#share-go').onclick = async () => {
         if (audioOpts) {
           try { stream.addTrack(await startFilteredAudio(audioOpts)) }
           catch (e) {
-            // sem o filtro, volta pro áudio do sistema (recaptura: a permissão
-            // já foi dada, o handler entrega a mesma fonte).
-            // NÃO avisar aqui: o toast do fim do fluxo sobrescrevia este em
-            // milissegundos, e a falha do filtro virava um "Som: sistema
-            // inteiro" indistinguível de ter escolhido isso. Dias de Discord
-            // vazando com o aviso certo sendo apagado antes de ser lido.
+            // Falha fechada: nunca transmitir a conversa privada sem filtro.
             audioFail = e.message
             audioOpts = null
-            stream.getTracks().forEach(t => t.stop())
-            stream = await capture(fps, true, $('#cursor').checked, qual)
           }
         }
       }
@@ -2751,12 +2700,10 @@ $('#share-go').onclick = async () => {
       sfx.live()
       // fonte de áudio visível pro host: filtro que falhou em silêncio é a
       // pior falha possível (o Discord entra e ninguém sabe o porquê)
-      if (!cam) toast(semAudioCapturado
-        ? (navigator.userAgent.includes('Firefox')
-          ? 'Saiu sem som: o Firefox não captura o áudio da tela. No Linux, rode `node tools/fockytv-sink.js` (e aceite o microfone) e compartilhe de novo — ou use o compartilhamento de Áudio/Vídeo do YouTube.'
-          : 'Saiu sem som: se o seletor do navegador não mostrou o checkbox de áudio (comum no Wayland), rode `node tools/fockytv-sink.js`, aceite o microfone e compartilhe de novo.')
-        : audioFail
-        ? 'FILTRO DE ÁUDIO FALHOU (' + audioFail + ') — foi o som do sistema, Discord incluso'
+      if (!cam) toast(audioFail
+        ? 'Filtro de áudio falhou (' + audioFail + ') — transmitindo sem som'
+        : semAudioCapturado
+        ? 'Sem som filtrado disponível: use o app FockyTV. No Linux, rode `node tools/fockytv-sink.js` e compartilhe novamente.'
         : audioOpts
         ? (audioOpts.mode === 'window' ? 'Som: só o aplicativo da janela'
            : audioOpts.mode === 'exclude' ? 'Som: sistema sem o Discord e sem o FockyTV'
