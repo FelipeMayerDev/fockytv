@@ -5,7 +5,7 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
-    "test": "node ui/test/talk-indicator.mjs && node ui/test/noise-gate.mjs && node --test ui/test/benchmark.test.mjs ui/test/livekit-share.test.mjs",
+    "test": "node ui/test/talk-indicator.mjs && node ui/test/noise-gate.mjs && node --test ui/test/benchmark.test.mjs ui/test/livekit-share.test.mjs ui/test/webcam.test.mjs",
     "build:benchmark": "node tools/build-benchmark.mjs",
     "postinstall": "node tools/build-benchmark.mjs"
   },

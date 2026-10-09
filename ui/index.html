@@ -611,7 +611,7 @@
   <p class="desc" id="share-desc">Escolha o que transmitir e ajuste a qualidade.</p>
 
   <!-- fonte: tela do computador ou conteúdo do YouTube (vídeo/áudio).
-       Some quando o diálogo abre pra câmera — ela não tem fonte -->
+       Some quando o diálogo abre pra câmera — usa o seletor de webcam -->
   <div class="field" id="src-field">
     <label for="share-src">Fonte</label>
     <div class="seg" id="share-src">
@@ -623,6 +623,11 @@
   <div class="field" id="yt-row" hidden>
     <label for="yt-url">Link do YouTube</label>
     <input id="yt-url" placeholder="cole o link do vídeo ou da música">
+  </div>
+
+  <div class="field" id="webcam-row" hidden>
+    <label for="webcam">Webcam</label>
+    <select id="webcam"><option value="">Padrão do sistema</option></select>
   </div>
 
   <div id="sources"></div>
@@ -1543,9 +1548,33 @@ function stopCompose () {
   if (pc && stream) sender?.replaceTrack(stream.getVideoTracks()[0]).catch(() => {})
 }
 
+async function loadWebcams () {
+  let devices = await navigator.mediaDevices.enumerateDevices()
+  if (!devices.some(d => d.kind === 'videoinput' && d.label)) {
+    // Antes da permissão, o navegador esconde os nomes e parte das câmeras.
+    const probe = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+    try { devices = await navigator.mediaDevices.enumerateDevices() }
+    finally { probe.getTracks().forEach(t => t.stop()) }
+  }
+  if (!$('#dlg-share').open || !$('#dlg-share').dataset.cam) return
+  const selected = $('#webcam').value
+  const cameras = devices.filter(d => d.kind === 'videoinput' && d.deviceId)
+  $('#webcam').replaceChildren(new Option('Padrão do sistema', ''),
+    ...cameras.map((d, i) => new Option(d.label || `Webcam ${i + 1}`, d.deviceId)))
+  $('#webcam').value = cameras.some(d => d.deviceId === selected) ? selected : ''
+}
+
+function webcamVideo (fps) {
+  const deviceId = $('#webcam').value
+  return { width: 1280, height: 720,
+    ...(fps ? { frameRate: fps } : {}),
+    ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'user' }),
+  }
+}
+
 async function addCam (withMic) {
   cam = await navigator.mediaDevices.getUserMedia({
-    video: { width: 1280, height: 720 }, audio: withMic,
+    video: webcamVideo(), audio: withMic,
   })
   const set = cam.getVideoTracks()[0].getSettings()
   await startCompose()
@@ -2361,8 +2390,10 @@ async function openShareDialog (isSwap, cam) {
     return
   }
   $('#share-err').textContent = ''
+  $('#share-go').disabled = false
+  $('#webcam-row').hidden = !cam
   // troca de janela e câmera por cima só existem na fonte tela
-  // câmera não tem seletor de fonte (e nem pode herdar um YT escolhido antes)
+  // câmera não pode herdar uma fonte do YouTube escolhida antes
   if (isSwap || cam) shareSrc = 'screen'
   $('#src-field').hidden = !!cam
   document.querySelectorAll('#share-src button').forEach(x =>
@@ -2407,6 +2438,16 @@ async function openShareDialog (isSwap, cam) {
     $('#audio-note').hidden = true   // câmera não usa sink; a nota é da tela
     $('#dlg-share').dataset.swap = ''
     $('#dlg-share').showModal()
+    $('#webcam').disabled = true
+    $('#share-go').disabled = true
+    try { await loadWebcams() }
+    catch (e) {
+      if ($('#dlg-share').open && $('#dlg-share').dataset.cam)
+        $('#share-err').textContent = 'Não foi possível listar as webcams: ' + e.message
+    } finally {
+      $('#webcam').disabled = false
+      if ($('#dlg-share').dataset.cam) $('#share-go').disabled = false
+    }
     return
   }
 
@@ -2655,9 +2696,7 @@ $('#share-go').onclick = async () => {
       const qual = clamp ? '720' : $('#qual').value
       if (cam) {
         stream = await navigator.mediaDevices.getUserMedia({
-          // facingMode é preferência, não exigência: no celular pega a frontal
-          // em vez do sorteio do navegador; no desktop a webcam única ignora
-          video: { frameRate: fps, width: 1280, height: 720, facingMode: 'user' },
+          video: webcamVideo(fps),
           audio: $('#audio').checked,
         })
       } else {
