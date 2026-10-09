@@ -1,4 +1,9 @@
 * { box-sizing:border-box; margin:0 }
+.share-notice { background:transparent; padding:8px; justify-content:center }
+.share-notice-card { background:hsl(var(--surface-2)); color:hsl(var(--foreground)); border:1px solid hsl(var(--border)); border-left:3px solid hsl(var(--accent)); border-radius:var(--radius); padding:14px 18px; box-shadow:var(--shadow-card) }
+.share-notice-card strong { font-family:var(--font-display) }
+.share-notice[data-kind="started"] .share-notice-card { border-left-color:hsl(var(--success)) }
+.share-notice[data-kind="error"] .share-notice-card { border-left-color:hsl(var(--destructive)) }
 [hidden] { display:none !important }
 a { color:hsl(var(--accent)); text-decoration:none }
 a:hover { color:hsl(var(--accent) / .8) }

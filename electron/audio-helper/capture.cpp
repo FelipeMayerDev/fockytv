@@ -700,6 +700,14 @@ static int run_mix (const char* except_csv) {
 }
 
 int main(int argc, char** argv) {
+    if (argc > 1 && !strcmp(argv[1], "--foreground-window")) {
+      HWND hwnd = GetForegroundWindow();
+      RECT rect{};
+      if (!hwnd || !GetWindowRect(hwnd, &rect)) return 1;
+      printf("{\"hwnd\":%llu,\"x\":%ld,\"y\":%ld,\"width\":%ld,\"height\":%ld}\n",
+        (unsigned long long)(uintptr_t)hwnd, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+      return 0;
+    }
     // stdout binário: sem isso o modo texto traduz \n e corrompe o PCM
     _setmode(_fileno(stdout), _O_BINARY);
     // stderr sem buffer: redirecionado pra arquivo ele vira full-buffered, e

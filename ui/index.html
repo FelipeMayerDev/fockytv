@@ -17,7 +17,7 @@
      e CSS velho (componente novo aparece sem estilo até a cache expirar).
      Suba o número junto com qualquer mudança em assets/. -->
 <link rel="stylesheet" href="assets/theme.css?v=1">
-<link rel="stylesheet" href="assets/app.css?v=11">
+<link rel="stylesheet" href="assets/app.css?v=12">
 
 <!-- gif do "du bist gut genug": cobre a tela enquanto toca a abertura -->
 <div id="intro-gif"></div>
@@ -601,6 +601,24 @@
     </select>
   </div>
 
+  <section id="cfg-shortcuts" hidden>
+    <h3>Atalhos de compartilhamento</h3>
+    <p class="desc">Com áudio filtrado e 60 fps, mesmo na bandeja. Pressione novamente para parar.</p>
+    <div class="field">
+      <label for="shortcut-active">Compartilhar tela atual (janela em foco)</label>
+      <input id="shortcut-active" readonly placeholder="Pressione o atalho">
+    </div>
+    <div class="field">
+      <label for="shortcut-screen">Compartilhar tela toda</label>
+      <input id="shortcut-screen" readonly placeholder="Pressione o atalho">
+    </div>
+    <p class="desc" id="shortcut-note"></p>
+    <p class="err" id="shortcut-error" role="status"></p>
+    <div class="actions">
+      <button class="outline" id="shortcut-hypr" hidden>Ativar no Hyprland</button>
+      <button id="shortcut-save">Salvar atalhos</button>
+    </div>
+  </section>
   <div class="actions">
     <button id="cfg-close">Fechar</button>
   </div>
@@ -724,6 +742,7 @@ const fockyApi = window.focky ?? {
 const $ = s => document.querySelector(s)
 let cfg, nick, pc = null, sender = null, audioSender = null, stream = null
 let poll = null, swapping = false, camOnly = false
+let shareBusy = false, shareLive = false, pendingShortcut = null
 let picked = null, pickedIsWindow = false, filterMode = null   // áudio por app
 let cam = null       // MediaStream da câmera, quando ela entra junto com a tela
 let overlay = null   // composição tela+câmera: { canvas, sv, cv, out, box, timer, gain }
@@ -1182,6 +1201,11 @@ let nowWatching = null   // streamKey aberto no player (showPlayer); usado no ch
 let clipMode = false     // aba Clips ativa: a grade mostra a lista de cortes
 
 function setLive (on) {
+  if (shareLive !== on) {
+    shareLive = on
+    fockyApi.shareFeedback?.({ kind: on ? 'started' : 'stopped', message: on
+      ? 'Compartilhamento iniciado' : 'Compartilhamento encerrado' })
+  }
   $('#live-pill').hidden = !on
   if (!on) $('#viewers-pill').hidden = true   // some com o resto da transmissão
   $('#swap').hidden = !on
@@ -1721,6 +1745,11 @@ $('#nick-ok').onclick = async () => {
   }
   setNick(v)
   $('#dlg-nick').close()
+  if (pendingShortcut) {
+    const request = pendingShortcut
+    pendingShortcut = null
+    quickShare(request)
+  }
 }
 $('#nick-cancel').onclick = () => $('#dlg-nick').close()
 $('#nick').addEventListener('keydown', e => e.key === 'Enter' && $('#nick-ok').click())
@@ -1749,6 +1778,7 @@ $('#cfg').onclick = () => {
   document.querySelectorAll('#dlg-cfg [data-set-val]').forEach(el =>
     el.value = setVal(el.dataset.setVal))
   $('#dlg-cfg').showModal()
+  loadShortcuts()
 }
 $('#no-intro').onchange = e =>
   localStorage.setItem('noIntro', e.target.checked ? '1' : '0')
@@ -1775,6 +1805,39 @@ $('#cfg-server').onchange = e => {
 }
 
 $('#cfg-close').onclick = () => $('#dlg-cfg').close()
+
+async function loadShortcuts () {
+  if (!fockyApi.shortcuts) return
+  $('#cfg-shortcuts').hidden = false
+  try {
+    const settings = await fockyApi.shortcuts()
+    for (const mode of ['active', 'screen']) $('#shortcut-' + mode).value = settings.keys[mode]
+    $('#shortcut-error').textContent = settings.error
+    $('#shortcut-hypr').hidden = !cfg.hyprland || settings.hyprland
+    $('#shortcut-note').textContent = cfg.wayland
+      ? 'O sistema pedirá confirmação da fonte de captura.' : ''
+  } catch (e) { $('#shortcut-error').textContent = e.message }
+}
+
+for (const mode of ['active', 'screen']) $('#shortcut-' + mode).onkeydown = e => {
+  if (e.key === 'Tab') return
+  e.preventDefault()
+  e.stopPropagation()
+  const key = /^Key[A-Z]$/.test(e.code) ? e.code.slice(3) : /^Digit\d$/.test(e.code) ? e.code.slice(5) : /^F\d{1,2}$/.test(e.code) ? e.code : null
+  const modifiers = [e.ctrlKey && 'Control', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Super'].filter(Boolean)
+  if (key && modifiers.length) e.target.value = [...modifiers, key].join('+')
+}
+async function saveShortcuts (hyprland) {
+  $('#shortcut-save').disabled = $('#shortcut-hypr').disabled = true
+  try {
+    await fockyApi.saveShortcuts({ active: $('#shortcut-active').value, screen: $('#shortcut-screen').value }, hyprland)
+    await loadShortcuts()
+    $('#shortcut-error').textContent = 'Atalhos salvos.'
+  } catch (e) { $('#shortcut-error').textContent = e.message }
+  finally { $('#shortcut-save').disabled = $('#shortcut-hypr').disabled = false }
+}
+$('#shortcut-save').onclick = () => saveShortcuts()
+$('#shortcut-hypr').onclick = () => saveShortcuts(true)
 
 // ── chat por transmissão: uma sala por stream, aberta junto do player ────
 // Canais fixos: o chat mora no fim do painel lateral; streams de pessoas:
@@ -2383,6 +2446,7 @@ document.querySelectorAll('#dlg-cfg [data-set]').forEach(el =>
 // ── compartilhar ─────────────────────────────────────────────────────────
 
 async function openShareDialog (isSwap, cam) {
+  if (shareBusy) return
   // O iframe da Activity não recebe camera/microphone/display-capture do
   // Discord (permissions policy deles) — transmitir é no desktop/navegador.
   if (discord) {
@@ -2657,7 +2721,38 @@ $('#share-cancel').onclick = () => {
   if (wasSwap && cfg.wayland) { stop(); toast('Transmissão encerrada ao cancelar a troca.') }
 }
 
-$('#share-go').onclick = async () => {
+async function quickShare (request) {
+  if (!cfg || !nick) { pendingShortcut = request; return }
+  if (shareBusy) return
+  if (pc) { stop(); return }
+  shareBusy = true
+  try {
+    if (request.error) throw new Error(request.error)
+    if (document.querySelector('dialog[open]')) throw new Error('Feche o diálogo aberto antes de usar o atalho.')
+    if (!cfg.audioFilter) throw new Error('Compartilhar com áudio filtrado precisa do helper de áudio no Windows ou PipeWire no Linux.')
+    if (cfg.wayland) fockyApi.shareFeedback({ kind: 'select', message: request.mode === 'active'
+      ? 'Confirme a janela em foco no seletor do sistema' : 'Confirme a tela inteira no seletor do sistema' })
+    const source = await fockyApi.shareSource(request)
+    picked = source.id
+    pickedIsWindow = source.isWindow
+    shareSrc = 'screen'
+    $('#dlg-share').dataset.cam = $('#dlg-share').dataset.swap = ''
+    $('#fps').value = '60'
+    $('#audio').checked = true
+    await startShare(true)
+  } catch (e) {
+    toast(e.message)
+    fockyApi.shareFeedback?.({ kind: 'error', message: e.message })
+    sfx.end()
+  } finally { shareBusy = false }
+}
+fockyApi.onShareShortcut?.(request => quickShare(request))
+
+$('#share-go').onclick = () => startShare()
+async function startShare (quick = null) {
+  if (shareBusy && !quick) return
+  shareBusy = true
+  $('#share-go').disabled = true
   const isSwap = !!$('#dlg-share').dataset.swap
   const cam = !!$('#dlg-share').dataset.cam
   let audioOpts = null   // fonte de áudio escolhida (null = som do sistema/sem filtro)
@@ -2692,7 +2787,7 @@ $('#share-go').onclick = async () => {
       const auto = pickShareCodec(hw)
       const codec = $('#codec').value || auto.first
       const clamp = !$('#codec').value && auto.swH264Clamp
-      const fps = clamp ? 30 : +$('#fps').value
+      const fps = quick ? 60 : clamp ? 30 : +$('#fps').value
       const qual = clamp ? '720' : $('#qual').value
       if (cam) {
         stream = await navigator.mediaDevices.getUserMedia({
@@ -2730,6 +2825,7 @@ $('#share-go').onclick = async () => {
             // Falha fechada: nunca transmitir a conversa privada sem filtro.
             audioFail = e.message
             audioOpts = null
+            if (quick) throw new Error('Não foi possível compartilhar com áudio filtrado: ' + e.message)
           }
         }
       }
@@ -2766,6 +2862,11 @@ $('#share-go').onclick = async () => {
     $('#share-err').textContent = /already has a host/.test(e.message)
       ? `Já existe uma transmissão com o nick "${nick}" — troque o nick (botão do topo) pra transmitir.`
       : e.message
+    if (quick) {
+      toast($('#share-err').textContent)
+      fockyApi.shareFeedback?.({ kind: 'error', message: $('#share-err').textContent })
+      sfx.end()
+    }
     // captura aberta e nada no ar: solta a fonte, senão o indicador de
     // compartilhamento do navegador fica aceso à toa depois do erro
     if (!pc && stream && !isSwap) {
@@ -2774,7 +2875,7 @@ $('#share-go').onclick = async () => {
     }
     // no Wayland a fonte antiga já foi solta: sem nova, não há o que transmitir
     if (isSwap && cfg.wayland) { $('#dlg-share').close(); stop(); toast('Transmissão encerrada: ' + e.message) }
-  }
+  } finally { shareBusy = false; $('#share-go').disabled = false }
 }
 
 $('#stop').onclick = stop
@@ -4080,6 +4181,11 @@ fockyApi.config().then(async c => {
   // "você perdeu": depois da UI assentar (e atrás do dialog de nick, se houver)
   setTimeout(maybeDigest, 3000)
   showNews()
+  if (pendingShortcut && nick) {
+    const request = pendingShortcut
+    pendingShortcut = null
+    quickShare(request)
+  }
 })
 
 // ── atualização ──────────────────────────────────────────────────────────

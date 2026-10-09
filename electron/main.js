@@ -1,8 +1,13 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, desktopCapturer, session } = require('electron')
+const { app, BrowserWindow, Menu, Tray, ipcMain, desktopCapturer, session, globalShortcut, screen } = require('electron')
 const { autoUpdater } = require('electron-updater')
 const { spawn, execFile, execFileSync } = require('node:child_process')
 const path = require('node:path')
 const fs = require('node:fs')
+const { promisify } = require('node:util')
+const runFile = promisify(execFile)
+const { DEFAULT_SHORTCUTS, validateShortcuts, selectQuickSource, bindShortcuts } = require('./shortcuts')
+const { shellQuote, installHyprShortcuts } = require('./hypr-shortcuts')
+app.setDesktopName('tv.focky.client.desktop')
 
 const hasTool = t => { try { execFileSync('sh', ['-c', `command -v ${t}`], { stdio: 'ignore' }); return true } catch { return false } }
 const linuxAudio = process.platform === 'linux' && hasTool('pw-dump') && hasTool('pw-cat') && hasTool('pw-link')
@@ -31,11 +36,87 @@ const config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
 // servidor responde 307 — WebSocket e WHIP não seguem redirect
 config.serverUrl = config.serverUrl.replace(/\/+$/, '')
 
-let win, tray, quitting = false
+let win, tray, quitting = false, sharing = false, notice = null, shortcutError = ''
 let sources = []    // fontes da última consulta; o handler resolve contra ELAS
 let picked = null   // id escolhido no overlay
+let shortcuts = { ...DEFAULT_SHORTCUTS }, hyprShortcuts = false
+const shortcutFile = () => path.join(app.getPath('userData'), 'share-shortcuts.json')
+try {
+  const saved = JSON.parse(fs.readFileSync(shortcutFile(), 'utf8'))
+  shortcuts = validateShortcuts(saved.keys)
+  hyprShortcuts = saved.hyprland === true && !!process.env.HYPRLAND_INSTANCE_SIGNATURE
+} catch {}
 
-app.whenReady().then(() => {
+function shortcutCommand () {
+  const executable = process.env.APPIMAGE || process.execPath
+  return [executable, ...(!app.isPackaged ? [path.join(__dirname, '..')] : []), '--no-sandbox'].map(shellQuote).join(' ')
+}
+
+function registerShortcuts (next, useHypr = hyprShortcuts) {
+  const previous = shortcutError ? {} : shortcuts
+  if (useHypr) {
+    const undo = installHyprShortcuts(next, shortcutCommand(), app.getPath('userData'))
+    for (const key of Object.values(previous)) globalShortcut.unregister(key)
+    return () => {
+      undo()
+      if (!hyprShortcuts) bindShortcuts(globalShortcut, {}, previous, triggerShare)
+    }
+  }
+  bindShortcuts(globalShortcut, previous, next, triggerShare)
+  return () => bindShortcuts(globalShortcut, next, previous, triggerShare)
+}
+
+async function focusedWindow () {
+  if (process.platform === 'win32') {
+    const { stdout } = await runFile(helperPath, ['--foreground-window'], { windowsHide: true, timeout: 3000 })
+    return JSON.parse(stdout)
+  }
+  if (process.env.HYPRLAND_INSTANCE_SIGNATURE) {
+    const { stdout } = await runFile('hyprctl', ['activewindow', '-j'], { timeout: 3000 })
+    return JSON.parse(stdout)
+  }
+  if (!wayland) {
+    const { stdout } = await runFile('xprop', ['-root', '_NET_ACTIVE_WINDOW'], { timeout: 3000 })
+    const hwnd = Number(stdout.match(/0x[0-9a-f]+/i)?.[0])
+    if (!hwnd) throw new Error('Não há janela em foco.')
+    return { hwnd }
+  }
+  return null
+}
+
+async function triggerShare (mode) {
+  if (!win || win.webContents.isLoadingMainFrame()) return
+  try {
+    // Não mostrar/focar o app: isso trocaria a janela que o atalho deve capturar.
+    const focused = sharing ? null : await focusedWindow()
+    win.webContents.send('share-shortcut', { mode, focused })
+  } catch (e) { win.webContents.send('share-shortcut', { error: e.message }) }
+}
+
+function showShareNotice (kind, message) {
+  if (process.env.HYPRLAND_INSTANCE_SIGNATURE) {
+    execFile('hyprctl', ['notify', '-1', '4000', '0', 'FockyTV — ' + message], () => {})
+    return
+  }
+  notice?.destroy()
+  const { x, y, width } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
+  const popup = notice = new BrowserWindow({
+    width: 400, height: 120, x: x + width - 420, y: y + 20,
+    show: false, frame: false, transparent: true, resizable: false,
+    focusable: false, skipTaskbar: true, alwaysOnTop: true, type: 'notification',
+  })
+  popup.setIgnoreMouseEvents(true)
+  popup.setContentProtection(true)
+  popup.loadFile(path.join(__dirname, 'share-notice.html'), { query: { kind, message } })
+  popup.once('ready-to-show', () => {
+    if (popup.isDestroyed()) return
+    popup.showInactive()
+    setTimeout(() => { if (!popup.isDestroyed()) popup.destroy() }, 4000)
+  })
+  popup.on('closed', () => { if (notice === popup) notice = null })
+}
+
+app.whenReady().then(async () => {
   Menu.setApplicationMenu(null)   // sem File/Edit/View
 
   ipcMain.handle('config', () => ({
@@ -53,6 +134,7 @@ app.whenReady().then(() => {
     // sala de músicos: microfone pelo helper WASAPI exclusivo (10ms, sem
     // pipeline de voz do Windows); a UI esconde a opção fora do Windows
     nativeMic: process.platform === 'win32',
+    hyprland: !!process.env.HYPRLAND_INSTANCE_SIGNATURE,
   }))
 
   ipcMain.handle('sources', async () => {
@@ -72,6 +154,52 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('pick', (_e, id) => { picked = id })
+
+  ipcMain.handle('share-source', async (_e, { mode, focused }) => {
+    if (_e.sender !== win?.webContents) throw new Error('Origem inválida.')
+    if (!['active', 'screen'].includes(mode)) throw new Error('Fonte inválida.')
+    sources = []
+    picked = null
+    const list = await desktopCapturer.getSources({ types: mode === 'active' ? ['window'] : ['screen'], thumbnailSize: { width: 320, height: 200 } })
+    let src
+    if (wayland) {
+      // O portal exige confirmação do usuário e devolve uma única fonte autorizada.
+      src = list[0]
+      if (!src) throw new Error('Seleção de tela cancelada.')
+    } else {
+      const display = focused?.width ? screen.getDisplayMatching(focused) : screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+      src = selectQuickSource(list, mode, focused ?? {}, display.id)
+    }
+    sources = [src]
+    picked = src.id
+    return { id: src.id, name: src.name, isWindow: mode === 'active', pid: focused?.pid }
+  })
+
+  ipcMain.handle('shortcuts-get', () => ({ keys: shortcuts, hyprland: hyprShortcuts, error: shortcutError }))
+  ipcMain.handle('shortcuts-save', (_e, keys, enableHypr = hyprShortcuts) => {
+    if (_e.sender !== win?.webContents || typeof enableHypr !== 'boolean') throw new Error('Origem ou configuração inválida.')
+    const next = validateShortcuts(keys)
+    let rollback
+    try {
+      fs.mkdirSync(app.getPath('userData'), { recursive: true })
+      fs.writeFileSync(shortcutFile() + '.tmp', JSON.stringify({ keys: next, hyprland: enableHypr }))
+      rollback = registerShortcuts(next, enableHypr)
+      fs.renameSync(shortcutFile() + '.tmp', shortcutFile())
+    } catch (e) {
+      rollback?.()
+      throw e
+    } finally { fs.rmSync(shortcutFile() + '.tmp', { force: true }) }
+    shortcuts = next
+    hyprShortcuts = enableHypr
+    shortcutError = ''
+    return { keys: shortcuts, hyprland: hyprShortcuts, error: '' }
+  })
+  ipcMain.on('share-feedback', (e, { kind, message }) => {
+    if (e.sender !== win?.webContents || !['started', 'stopped', 'error', 'select'].includes(kind)) return
+    if (kind === 'started') sharing = true
+    if (kind === 'stopped') sharing = false
+    showShareNotice(kind, String(message).slice(0, 180))
+  })
 
   // O renderer já escolheu antes de chamar getDisplayMedia, então aqui é só entregar.
   // NÃO chamar getSources de novo: no Wayland cada chamada abre uma sessão nova do
@@ -97,6 +225,12 @@ app.whenReady().then(() => {
   ipcMain.handle('audio-stop', () => audioStop())
 
   const icon = path.join(__dirname, '..', 'build', 'icon.png')
+  const initialMode = process.argv.includes('--share-active') ? 'active' : process.argv.includes('--share-screen') ? 'screen' : null
+  let initialRequest
+  if (initialMode) {
+    try { initialRequest = { mode: initialMode, focused: await focusedWindow() } }
+    catch (e) { initialRequest = { error: e.message } }
+  }
 
   win = new BrowserWindow({
     width: 1100, height: 720,
@@ -127,16 +261,28 @@ app.whenReady().then(() => {
   tray.setToolTip('FockyTV')
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Abrir FockyTV', click: show },
+    { label: 'Compartilhar tela atual / parar', click: () => triggerShare('active') },
+    { label: 'Compartilhar tela toda / parar', click: () => triggerShare('screen') },
     { type: 'separator' },
     { label: 'Sair', click: () => { quitting = true; app.quit() } },
   ]))
   // No Windows o clique simples abre; no Linux muitas bandejas só entregam o menu.
   tray.on('click', show)
 
-  app.on('second-instance', show)
+  app.on('second-instance', (_e, argv) => {
+    const mode = argv.includes('--share-active') ? 'active' : argv.includes('--share-screen') ? 'screen' : null
+    if (mode) triggerShare(mode)
+    else show()
+  })
+
+  try { registerShortcuts(shortcuts) } catch (e) { shortcutError = e.message }
+  win.webContents.once('did-finish-load', () => {
+    if (initialRequest) win.webContents.send('share-shortcut', initialRequest)
+  })
 
   setupUpdates()
 })
+app.on('will-quit', () => { globalShortcut.unregisterAll(); audioStop() })
 
 // ── áudio por aplicativo: ciclo de vida do helper ─────────────────────────
 // Dentro do asar não dá para executar: o audio-helper vai em asarUnpacked.

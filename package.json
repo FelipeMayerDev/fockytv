@@ -2,10 +2,11 @@
   "name": "fockytv",
   "version": "0.7.5",
   "main": "electron/main.js",
+  "desktopName": "tv.focky.client.desktop",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
-    "test": "node ui/test/talk-indicator.mjs && node ui/test/noise-gate.mjs && node --test ui/test/benchmark.test.mjs ui/test/livekit-share.test.mjs ui/test/webcam.test.mjs",
+    "test": "node ui/test/talk-indicator.mjs && node ui/test/noise-gate.mjs && node --test ui/test/benchmark.test.mjs ui/test/livekit-share.test.mjs ui/test/webcam.test.mjs ui/test/share-shortcuts.test.mjs electron/test/shortcuts.test.cjs",
     "build:benchmark": "node tools/build-benchmark.mjs",
     "postinstall": "node tools/build-benchmark.mjs"
   },
@@ -18,6 +19,7 @@
     "appId": "tv.focky.client",
     "files": [
       "electron/**",
+      "!electron/test/**",
       "ui/**",
       "!ui/test/**",
       "build/icon.png",
@@ -41,6 +43,12 @@
       ]
     },
     "linux": {
+      "syncDesktopName": true,
+      "desktop": {
+        "entry": {
+          "Name": "FockyTV"
+        }
+      },
       "target": [
         {
           "target": "AppImage",
