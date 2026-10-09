@@ -121,3 +121,24 @@ func TestLivekitWhipProxy(t *testing.T) {
 		}
 	}
 }
+
+func TestLegacyPublisherCannotOverwriteLivekitRoom(t *testing.T) {
+	oldURL := livekitURL
+	defer func() { livekitURL = oldURL }()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "ListRooms") {
+			w.Write([]byte(`{"rooms":[{"name":"ana"}]}`))
+			return
+		}
+		w.Write([]byte(`{"participants":[{"identity":"publisher","joined_at":"123","tracks":[{"type":"VIDEO"}]}]}`))
+	}))
+	defer upstream.Close()
+	livekitURL = upstream.URL
+	r := httptest.NewRequest("POST", "/api/whip", strings.NewReader("offer"))
+	r.Header.Set("Authorization", "Bearer ana")
+	w := httptest.NewRecorder()
+	newApp().whipPost(w, r)
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "already has a host") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}

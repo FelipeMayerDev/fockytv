@@ -243,6 +243,17 @@ func (a *app) whipPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "stream key inválida", http.StatusBadRequest)
 		return
 	}
+	streams, err := a.livekitStreams(r.Context())
+	if err != nil {
+		http.Error(w, "LiveKit indisponível", http.StatusServiceUnavailable)
+		return
+	}
+	for _, stream := range streams {
+		if stream.StreamKey == nick {
+			http.Error(w, "session already has a host (active)", http.StatusBadRequest)
+			return
+		}
+	}
 	// regra do host-takeover (mesma string que fixed-live e o client Rust
 	// esperam): publisher com RTP recente segura o lugar; fantasma cede.
 	if t := a.lastMediaAt(nick); t != nil && time.Since(*t) < ghostWindow {
