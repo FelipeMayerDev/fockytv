@@ -3137,6 +3137,10 @@ function buildTile (st, kind = null) {
          <div class="s-nick"><span class="avatar sm"></span><span class="s-sub"></span></div>
        </div>
        <div class="s-acts">
+         <button class="s-pause" title="Pausar" aria-label="Pausar esta transmissão">
+           <svg viewBox="0 0 24 24" class="off"><path d="M7 4.5l13 7.5-13 7.5v-15Z"/></svg>
+           <svg viewBox="0 0 24 24"><path d="M7 4h3.6v16H7zM13.4 4H17v16h-3.6z"/></svg>
+         </button>
          <input type="range" class="s-volr" min="0" max="1" step="0.05" value="1"
                 title="Volume" aria-label="Volume dessa transmissão">
          <button class="s-vol" title="Som">
@@ -3210,6 +3214,22 @@ function buildTile (st, kind = null) {
   }
   el.querySelector('.s-vol').onclick = () => {
     t.on = !t.on; applyVol(); paintVol(); saveVol()
+  }
+  // pausa só local: a sessão segue de pé e retomar volta direto pro ao vivo.
+  // O 'play' re-pausa porque reconexão (watch → play()) não pode despausar.
+  const pb = el.querySelector('.s-pause')
+  const paintPause = () => {
+    const [play, pause] = pb.querySelectorAll('svg')
+    play.classList.toggle('off', !t.paused)
+    pause.classList.toggle('off', t.paused)
+    pb.title = t.paused ? 'Retomar' : 'Pausar'
+    pb.setAttribute('aria-label', t.paused ? 'Retomar esta transmissão' : 'Pausar esta transmissão')
+  }
+  video.addEventListener('play', () => { if (t.paused) video.pause() })
+  pb.onclick = () => {
+    t.paused = !t.paused
+    if (t.paused) video.pause(); else video.play().catch(() => {})
+    paintPause()
   }
   el.querySelector('.s-pip').onclick = () => {
     // o PiP é do elemento de vídeo do tile: segue tocando solto na tela
