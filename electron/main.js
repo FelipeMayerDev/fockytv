@@ -223,6 +223,16 @@ app.whenReady().then(async () => {
   // renegocia o WHIP, então a track entra no lugar da do getDisplayMedia.
   ipcMain.handle('audio-start', (_e, opts) => audioStart(opts))
   ipcMain.handle('audio-stop', () => audioStop())
+  // trocar o servidor nas configurações reinicia o app inteiro. No AppImage o
+  // execPath é o binário montado em /tmp, que some ao sair: tem que ser o $APPIMAGE.
+  ipcMain.handle('relaunch', e => {
+    if (e.sender !== win?.webContents) return
+    quitting = true
+    // sem os --share-*: reabrir não pode começar uma transmissão sozinho
+    const args = process.argv.slice(1).filter(a => !a.startsWith('--share-'))
+    app.relaunch(process.env.APPIMAGE ? { execPath: process.env.APPIMAGE, args } : { args })
+    app.quit()
+  })
 
   const icon = path.join(__dirname, '..', 'build', 'icon.png')
   const initialMode = process.argv.includes('--share-active') ? 'active' : process.argv.includes('--share-screen') ? 'screen' : null

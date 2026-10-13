@@ -552,9 +552,12 @@
   <div class="row" id="cfg-server-row" style="margin:16px 0 0" hidden>
     <div>
       <label for="cfg-server" style="color:hsl(var(--foreground))">Servidor</label>
-      <p class="desc" style="margin:2px 0 0">vazio volta pro do config.json; trocar recarrega o app</p>
+      <p class="desc" style="margin:2px 0 0">vazio volta pro do config.json; salvar reinicia o app</p>
     </div>
-    <input type="url" id="cfg-server" placeholder="https://tv.huestavo.com" style="width:220px">
+    <div style="display:flex;gap:6px">
+      <input type="url" id="cfg-server" placeholder="https://tv.huestavo.com" style="width:220px">
+      <button id="cfg-server-save">Salvar</button>
+    </div>
   </div>
 
   <div class="row" style="margin:16px 0 0">
@@ -1790,18 +1793,21 @@ document.querySelectorAll('#dlg-cfg [data-set-val]').forEach(el =>
 $('#cfg-latency').addEventListener('change', retuneViewers)
 
 // servidor (só no app; no navegador é a própria página): presença, chat e
-// polls abrem no boot com cfg.serverUrl, então trocar recarrega. Grava só a
-// origin — barra no fim virava '//api' e o servidor responde 307.
+// polls abrem no boot com cfg.serverUrl, então trocar reinicia o app. Grava
+// só a origin — barra no fim virava '//api' e o servidor responde 307.
+// Botão explícito: o onchange antigo não disparava ao fechar com Esc.
 $('#cfg-server-row').hidden = !window.focky
-$('#cfg-server').onchange = e => {
-  const v = e.target.value.trim()
+$('#cfg-server').onkeydown = e => { if (e.key === 'Enter') saveServer() }
+$('#cfg-server-save').onclick = () => saveServer()
+function saveServer () {
+  const v = $('#cfg-server').value.trim()
   let url = ''
   try { if (v) url = new URL(v).origin } catch {}
   if (v && !/^https?:\/\//.test(url)) return toast('Servidor inválido: use https://endereço')
   if (pc) return toast('Encerre a transmissão antes de trocar o servidor.')
   if (url) localStorage.setItem('set:server', url)
   else localStorage.removeItem('set:server')
-  location.reload()
+  fockyApi.relaunch ? fockyApi.relaunch() : location.reload()
 }
 
 $('#cfg-close').onclick = () => $('#dlg-cfg').close()
