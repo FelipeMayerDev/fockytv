@@ -727,7 +727,7 @@
 
 <script src="./vendor/livekit-client.umd.js?v=1"></script>
 <script>
-const connectShare = (...args) => import('./livekit-share.mjs?v=1').then(m => m.connectShare(...args))
+const connectShare = (...args) => import('./livekit-share.mjs?v=2').then(m => m.connectShare(...args))
 // No navegador, a própria página é o servidor e o seletor de tela é nativo.
 // Nunca `const focky`: no Electron o contextBridge expõe `focky` como global
 // não-configurável, e redeclarar com const/let é SyntaxError que mata o script
@@ -2685,7 +2685,7 @@ async function doSwap (id) {
       if (hwnd) fockyApi.audioStart({ mode: 'window', hwnd: hwndNum(hwnd) }).catch(() => {})
     }
     const fresh = await capture(+$('#fps').value, false, $('#cursor').checked, $('#qual').value)
-    fresh.getVideoTracks()[0].contentHint = ''
+    fresh.getVideoTracks()[0].contentHint = 'motion'
     if (overlay) {
       // o canvas segue no sender; o que muda é o que ele desenha no fundo —
       // e o tamanho, que o resize do sv/syncComposeSize resolve

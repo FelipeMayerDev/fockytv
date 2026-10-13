@@ -4,18 +4,18 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { shareOptions } from '../livekit-share.mjs'
 
-test('perfil Fluxer: bitrate por pixels, teto 9 Mbps, SVC apenas AV1/VP9', () => {
+test('teto fixo 32 Mbps, SVC apenas AV1/VP9', () => {
   const track = (width, height) => ({ getSettings: () => ({ width, height }) })
   const full = shareOptions(track(1920,1080), 60, 'video/H264')
-  assert.equal(full.screenShareEncoding.maxBitrate, 6_000_000)
+  assert.equal(full.screenShareEncoding.maxBitrate, 32_000_000)
   assert.equal(full.simulcast, false)
   assert.equal(full.scalabilityMode, undefined)
   assert.equal(full.degradationPreference, 'maintain-framerate')
   const source = shareOptions(track(3840,2160), 60, 'video/AV1')
-  assert.equal(source.screenShareEncoding.maxBitrate, 9_000_000)
+  assert.equal(source.screenShareEncoding.maxBitrate, 32_000_000)
   assert.equal(source.scalabilityMode, 'L1T3')
   assert.equal(source.degradationPreference, 'maintain-resolution')
-  assert.equal(shareOptions(track(1280,720),30,'video/VP9').screenShareEncoding.maxBitrate,3_000_000)
+  assert.equal(shareOptions(track(1280,720),30,'video/VP9').screenShareEncoding.maxBitrate,32_000_000)
 })
 
 test('áudio privado excluído mesmo quando a janela do cliente é escolhida', () => {

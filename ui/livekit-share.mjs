@@ -2,9 +2,9 @@
 export function shareOptions(track, fps, codec) {
   const { width = 1920, height = 1080 } = track.getSettings()
   const pixels = width * height
-  const floors = [[426*240, [300,500,700]], [854*480,[1200,2000,3000]], [1280*720,[2000,3000,4500]], [1920*1080,[3000,4500,6000]], [2560*1440,[4000,5500,6000]], [3840*2160,[4500,6000,6000]]]
-  const rung = floors.filter(([size]) => size <= pixels).at(-1) ?? floors[0]
-  const maxBitrate = Math.min(9_000_000, Math.max(rung[1][fps >= 60 ? 2 : fps >= 30 ? 1 : 0]*1000, Math.round(pixels*fps*0.02)))
+  // teto fixo de 32 Mbps (o do antes da migração): o perfil do Fluxer (6 Mbps
+  // em 1080p60) deixava a tela borrada. O Chrome só usa o que o GCC deixar.
+  const maxBitrate = 32_000_000
   return {
     videoCodec: codec.replace('video/', '').toLowerCase(), simulcast: false,
     ...( /av1|vp9/i.test(codec) ? { scalabilityMode: 'L1T3' } : {} ),
@@ -67,7 +67,7 @@ export async function connectShare(base, key, role, viewer, videoEl, tuneReceive
   try {
     await room.connect(url.href, token, { autoSubscribe: role === 'viewer' })
     if (role === 'publisher') {
-      const track = stream.getVideoTracks()[0]; track.contentHint = ''
+      const track = stream.getVideoTracks()[0]; track.contentHint = 'motion'
       await session.videoSender.replaceTrack(track)
       const audio = stream.getAudioTracks()[0]; if (audio) await session.audioSender.replaceTrack(audio)
     }

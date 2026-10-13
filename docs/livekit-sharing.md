@@ -7,9 +7,8 @@ com sinalização WebSocket e mídia WebRTC UDP (TCP como fallback). A referênc
 e [ScreenShareCodecSelection](https://github.com/fluxerapp/fluxer/blob/main/fluxer_app/src/features/voice/utils/ScreenShareCodecSelection.ts).
 
 Perfil: hardware primeiro entre codecs suportados; sem simulcast; AV1/VP9
-com L1T3; bitrate por pixels e FPS, pisos por resolução, teto 9 Mbps
-(1080p60: 6 Mbps). Captura de tela sem contentHint motion, como o Fluxer atual;
-fonte 4K e 15/30 fps preservam resolução, 60 fps preserva fluidez.
+com L1T3. Bitrate e hint NÃO seguem o Fluxer: teto fixo de 32 Mbps e
+contentHint motion (com 6 Mbps em 1080p60 a imagem ficava borrada); fonte 4K e 15/30 fps preservam resolução, 60 fps preserva fluidez.
 O projeto mantém seus seletores, sem planos pagos ou limites de assinatura.
 H.265 não é oferecido devido à compatibilidade dos espectadores.
 
