@@ -3172,9 +3172,14 @@ function buildTile (st, kind = null) {
   const t = { el, video, pc: null, loading: false,
     ...{ vol: 1, on: true, ...streamVol.get(key) } }
   el.querySelector('.s-volr').value = t.vol
+  // a própria live nunca toca som aqui: no Windows o filtro por janela pega a
+  // árvore de processos do app escolhido, e o retorno da stream entrava de
+  // volta na captura — eco em loop infinito pra quem assiste
+  const self = key === nick
+  el.querySelector('.s-vol').hidden = el.querySelector('.s-volr').hidden = self
   const applyVol = () => {
     video.volume = t.vol
-    video.muted = !t.on || t.vol === 0
+    video.muted = self || !t.on || t.vol === 0
   }
   const saveVol = () => {
     streamVol.set(key, { vol: t.vol, on: t.on })
