@@ -14,8 +14,11 @@ Dois ambientes de deploy, só quando o usuário pedir explicitamente:
   pública direta em `:8180` (tcp HTTP no live-api + udp mídia no mediamtx),
   caddy na frente (aponta pra `host.docker.internal:8180` — não depende do
   nome de container).
-- **LAN:** `ssh focky@192.168.1.129 /opt/docker/fockytv`: git pull +
-  restart/rebuild dos containers.
+- **LAN:** `ssh focky@192.168.1.129 /opt/docker/fockytv`, branch `main`:
+  git pull + `npm ci` (SDK em `ui/vendor`) + restart/rebuild dos containers,
+  sempre com `-f docker-compose.yml -f docker-compose.livekit.yml`. A máquina
+  roda também o LiveKit do Fluxer (7881/7882): o `.env` da LAN usa
+  `LIVEKIT_TCP_PORT=7891`/`LIVEKIT_UDP_PORT=7892`.
 
 Publicar release (bump de versão, tag `v*`, AppImage local + workflow
 Actions do Windows) idem, só por pedido. Commits e push na branch corrente
