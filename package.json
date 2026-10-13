@@ -1,6 +1,6 @@
 {
   "name": "fockytv",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "main": "electron/main.js",
   "desktopName": "tv.focky.client.desktop",
   "scripts": {
