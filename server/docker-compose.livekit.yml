@@ -11,9 +11,11 @@ services:
     restart: unless-stopped
     depends_on:
       - livekit-redis
+    # porta do host = porta anunciada no ICE: trocar só via .env, as duas juntas
+    # (a LAN divide a máquina com o LiveKit do Fluxer, que já usa 7881/7882)
     ports:
-      - "7881:7881/tcp"
-      - "7882:7882/udp"
+      - "${LIVEKIT_TCP_PORT:-7881}:${LIVEKIT_TCP_PORT:-7881}/tcp"
+      - "${LIVEKIT_UDP_PORT:-7882}:${LIVEKIT_UDP_PORT:-7882}/udp"
     environment:
       LIVEKIT_CONFIG: |
         port: 7880
@@ -24,8 +26,8 @@ services:
         rtc:
           node_ip: ${LIVEKIT_NODE_IP:?Defina LIVEKIT_NODE_IP}
           use_external_ip: false
-          tcp_port: 7881
-          udp_port: 7882
+          tcp_port: ${LIVEKIT_TCP_PORT:-7881}
+          udp_port: ${LIVEKIT_UDP_PORT:-7882}
         keys:
           ${LIVEKIT_API_KEY:?Defina LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET:?Defina LIVEKIT_API_SECRET}
   livekit-ingress:
