@@ -483,6 +483,9 @@
       <svg viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M10 20H4v-6"/>
         <path d="M20 4 13 11"/><path d="M4 20l7-7"/></svg>
     </button>
+    <button class="dock-btn" id="quality" hidden title="Alterar qualidade" aria-label="Alterar qualidade">
+      <svg viewBox="0 0 24 24"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg>
+    </button>
     <button class="dock-btn destructive" id="stop" hidden title="Parar transmissão" aria-label="Parar transmissão">
       <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>
     </button>
@@ -730,7 +733,7 @@
 
 <script src="./vendor/livekit-client.umd.js?v=1"></script>
 <script>
-const connectShare = (...args) => import('./livekit-share.mjs?v=2').then(m => m.connectShare(...args))
+const connectShare = (...args) => import('./livekit-share.mjs?v=3').then(m => m.connectShare(...args))
 // No navegador, a própria página é o servidor e o seletor de tela é nativo.
 // Nunca `const focky`: no Electron o contextBridge expõe `focky` como global
 // não-configurável, e redeclarar com const/let é SyntaxError que mata o script
@@ -850,8 +853,7 @@ async function hwEncoders () {
 // ordem do Fluxer (rankScreenShareCodecs): hardware primeiro, software depois.
 // Firefox (Gecko) só tem vp8/h264 confiáveis no WebRTC — ordem deles
 // (GECKO_CODEC_PREFERENCE). h265 fica de fora — player WHEP decodificar
-// h265 é raro. swH264Clamp = o codec escolhido é h264 SEM hardware: igual ao
-// SOFTWARE_H264_MAX deles (720p/30), openh264 não sustenta mais que isso.
+// h265 é raro.
 // Os nomes são mimeTypes completos: é o que o filtro de codecs compara.
 function pickShareCodec (hw) {
   const preference = /firefox/i.test(navigator.userAgent)
@@ -862,7 +864,7 @@ function pickShareCodec (hw) {
   const rank = preference.filter(m => supported.some(c => c.mimeType.toLowerCase() === m))
   const isHw = m => hw[m.replace('video/', '')]
   const order = [...rank.filter(isHw), ...rank.filter(m => !isHw(m))]
-  return { order, first: order[0], swH264Clamp: order[0] === 'video/h264' && !hw.h264 }
+  return { order, first: order[0] }
 }
 
 async function capture (fps, withAudio, withCursor, qual = '1080') {
@@ -1211,6 +1213,7 @@ function setLive (on) {
   }
   $('#live-pill').hidden = !on
   if (!on) $('#viewers-pill').hidden = true   // some com o resto da transmissão
+  $('#quality').hidden = !on || !pc?.livekit || camOnly || !!ytShare
   $('#swap').hidden = !on
   $('#stop').hidden = !on
   $('#share').hidden = on
@@ -1512,7 +1515,7 @@ async function startCompose () {
   const out = canvas.captureStream(fps)
   overlay = { canvas, sv, cv: null, out, gain: null, mirror: false,
               box: { x: 0.72, y: 0.68, w: +$('#cam-size').value / 100 }, ratio: 0.5625,
-              timer: setInterval(draw, 1000 / fps) }
+              draw, timer: setInterval(draw, 1000 / fps) }
   await sender.replaceTrack(out.getVideoTracks()[0])
   return overlay
 }
@@ -2486,7 +2489,7 @@ async function openShareDialog (isSwap, cam) {
     : cam ? 'Entre no ar com a câmera.'
     : 'Escolha o que transmitir e ajuste a qualidade.'
   $('#share-go').textContent = isSwap ? 'Trocar' : adding ? 'Adicionar' : 'Compartilhar'
-  // numa troca a conexão já existe: fps/codec/áudio não mudam sem renegociar.
+  // A troca de fonte conserva a qualidade da transmissão atual.
   // na câmera fps/codec são os da transmissão, não há o que escolher.
   $('.opts').hidden = isSwap || !!cam
   document.querySelectorAll('#dlg-share .row').forEach(el => el.hidden = isSwap)
@@ -2678,6 +2681,54 @@ $('#audio').onchange = () => updateShareAudio(picked)
 //   openShareDialog(!!$('#dlg-share').dataset.swap, !!$('#dlg-share').dataset.cam).catch(() => {})
 // }
 
+const qualityDialog = document.createElement('dialog')
+qualityDialog.innerHTML = `<h2>Alterar qualidade</h2>
+  <div class="opts"><div class="field"><label for="live-qual">Resolução</label><select id="live-qual"></select></div>
+  <div class="field"><label for="live-fps">Taxa de quadros</label><select id="live-fps"></select></div></div>
+  <p id="quality-error" role="alert"></p>
+  <div class="row"><button id="quality-cancel">Cancelar</button><button id="quality-apply">Aplicar</button></div>`
+document.body.append(qualityDialog)
+for (const name of ['qual', 'fps']) $('#live-' + name).innerHTML = $('#' + name).innerHTML
+$('#quality').onclick = () => {
+  if (shareBusy) return
+  for (const name of ['qual', 'fps']) $('#live-' + name).value = $('#' + name).value
+  $('#quality-error').textContent = ''
+  qualityDialog.showModal()
+}
+$('#quality-cancel').onclick = () => qualityDialog.close()
+$('#quality-apply').onclick = async () => {
+  if (shareBusy || !pc?.livekit) return
+  const session = pc, source = stream.getVideoTracks()[0]
+  const qual = $('#live-qual').value, fps = +$('#live-fps').value
+  const [width, height] = FLUXER_DIMENSIONS[qual]
+  shareBusy = true
+  $('#quality-apply').disabled = true
+  try {
+    await session.updateQuality(source, {
+      ...source.getConstraints(),
+      width: { ideal: width, max: width }, height: { ideal: height, max: height },
+      frameRate: { ideal: fps, max: fps },
+    }, fps, async nextFps => {
+      if (pc !== session) throw new Error('Transmissão encerrada.')
+      if (!overlay) return
+      syncComposeSize()
+      const previous = overlay.out
+      const next = overlay.canvas.captureStream(nextFps)
+      try { await sender.replaceTrack(next.getVideoTracks()[0]) }
+      catch (error) { next.getTracks().forEach(t => t.stop()); throw error }
+      overlay.out = next
+      clearInterval(overlay.timer)
+      overlay.timer = setInterval(overlay.draw, 1000 / nextFps)
+      previous.getTracks().forEach(t => t.stop())
+    })
+    if (pc !== session) return
+    $('#qual').value = qual
+    $('#fps').value = String(fps)
+    qualityDialog.close()
+  } catch (error) { $('#quality-error').textContent = error.message }
+  finally { shareBusy = false; $('#quality-apply').disabled = false }
+}
+
 $('#share').onclick = () => openShareDialog(false).catch(e => toast(e.message))
 $('#share-cam').onclick = () => openShareDialog(false, true).catch(e => toast(e.message))
 // replaceTrack troca a fonte sem renegociar: quem assiste não cai
@@ -2786,15 +2837,12 @@ async function startShare (quick = null) {
       ytBarOpen()
       toast(`Transmitindo do YouTube: ${ytShare.title}`, null, 'info')
     } else {
-      // codec e clamp decididos ANTES da captura (igual ao Fluxer: o alvo de
-      // qualidade depende do codec): h264 de software clampa a 720p30 —
-      // openh264 não sustenta mais que isso com qualidade (SOFTWARE_H264_MAX)
+      // O codec automático não altera a resolução/FPS escolhidos.
       const hw = await hwEncoders()
       const auto = pickShareCodec(hw)
       const codec = $('#codec').value || auto.first
-      const clamp = !$('#codec').value && auto.swH264Clamp
-      const fps = quick ? 60 : clamp ? 30 : +$('#fps').value
-      const qual = clamp ? '720' : $('#qual').value
+      const fps = quick ? 60 : +$('#fps').value
+      const qual = $('#qual').value
       if (cam) {
         stream = await navigator.mediaDevices.getUserMedia({
           video: webcamVideo(fps),

@@ -12,6 +12,16 @@ contentHint motion (com 6 Mbps em 1080p60 a imagem ficava borrada); fonte 4K e 1
 O projeto mantém seus seletores, sem planos pagos ou limites de assinatura.
 H.265 não é oferecido devido à compatibilidade dos espectadores.
 
+Durante o compartilhamento de tela no web/Electron, o botão **Alterar qualidade**
+permite alterar resolução e FPS sem abrir outra captura, desconectar espectadores
+ou reiniciar o áudio. A captura e o encoder recebem os novos alvos; a composição
+com webcam acompanha as dimensões e a cadência. Falhas restauram a configuração
+anterior e são exibidas no diálogo. O codec automático não reduz a escolha para
+720p30 silenciosamente. A resolução mantém a proporção da fonte dentro do teto
+escolhido; FPS real depende da fonte, encoder e rede.
+Esse controle não se aplica a YouTube, câmera sozinha ou ao cliente Rust.
+Mudanças reais com espectadores em Windows/Wayland ainda precisam de validação.
+
 Áudio entra antes do SDK: PipeWire no Linux e WASAPI no Windows.
 Discord, Vesktop, Vencord, Equibop e FockyTV são excluídos. Falha do filtro
 resulta em vídeo sem áudio. No navegador, som de tela exige o sink filtrado

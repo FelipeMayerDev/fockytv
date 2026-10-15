@@ -21,7 +21,7 @@ function setup({ failAudio = false, wayland = false } = {}) {
       pick: async id => calls.push(['pick', id]), onShareShortcut: () => {},
       shareFeedback: o => calls.push(['feedback', o.kind]),
     },
-    hwEncoders: async () => ({}), pickShareCodec: () => ({first:'video/h264',swH264Clamp:true}),
+    hwEncoders: async () => ({}), pickShareCodec: () => ({first:'video/h264'}),
     hwndOf: id => id.startsWith('window:') ? id.split(':')[1] : null, hwndNum: Number,
     capture: async (...args) => { calls.push(['capture', ...args]); return captured },
     startFilteredAudio: async opts => { calls.push(['audio', opts.mode]); if(failAudio)throw Error('helper falhou'); return {kind:'audio',stop:()=>calls.push(['track-stop'])} },
@@ -34,7 +34,7 @@ function setup({ failAudio = false, wayland = false } = {}) {
   return { context, calls, $, run: mode => vm.runInContext(`quickShare({mode:'${mode}'})`, context) }
 }
 
-test('atalhos forçam 60 fps e áudio filtrado, inclusive com clamp H264 de software', async () => {
+test('atalhos forçam 60 fps e áudio filtrado, inclusive com H264 de software', async () => {
   for (const mode of ['active','screen']) {
     const { calls,run,$ } = setup()
     $('#fps').value = '30'
@@ -75,9 +75,24 @@ test('atalhos simultâneos não abrem duas capturas, cancelamento do portal não
 
 test('overlay acompanha as transições reais, sem avisar encerramento no boot', () => {
   const dom = new JSDOM(html), events=[]
-  const context = vm.createContext({ $:s=>dom.window.document.querySelector(s),shareLive:false,camOnly:false,rpcUpdate:()=>{},fockyApi:{shareFeedback:o=>events.push(o.kind)} })
+  const context = vm.createContext({ $:s=>dom.window.document.querySelector(s),shareLive:false,camOnly:false,pc:{livekit:true},ytShare:null,rpcUpdate:()=>{},fockyApi:{shareFeedback:o=>events.push(o.kind)} })
   const setLive = html.slice(html.indexOf('function setLive ('),html.indexOf('// ── Rich Presence'))
   vm.runInContext(setLive,context)
   vm.runInContext('setLive(false);setLive(true);setLive(true);setLive(false)',context)
   assert.deepEqual(events,['started','stopped'])
+})
+
+
+test('início normal respeita resolução e FPS escolhidos com H264 de software', async () => {
+  const {context, calls, $} = setup()
+  context.shareSrc = 'screen'
+  context.picked = 'screen:0:0'
+  $('#audio').checked = true
+  $('#qual').value = '1440'
+  $('#fps').value = '60'
+  await vm.runInContext('startShare()', context)
+  const capture = calls.find(c => c[0] === 'capture')
+  assert.equal(capture[1], 60)
+  assert.equal(capture[4], '1440')
+  assert.deepEqual(calls.find(c => c[0] === 'publish'), ['publish', 60, 1])
 })

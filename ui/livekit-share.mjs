@@ -28,6 +28,7 @@ export async function connectShare(base, key, role, viewer, videoEl, tuneReceive
   const room = new sdk.Room({ adaptiveStream: false, dynacast: true, stopLocalTrackOnUnpublish: false })
   const remote = new Set(), local = new Map(), media = new MediaStream()
   let closed = false
+  let qualityChange = Promise.resolve()
   const session = {
     livekit: true,
     get connectionState() { return closed ? 'closed' : room.state === 'disconnected' ? 'failed' : room.state },
@@ -37,6 +38,47 @@ export async function connectShare(base, key, role, viewer, videoEl, tuneReceive
       const out = new Map()
       reports.forEach(report => report?.forEach((v,k) => out.set(k,v)))
       return out
+    },
+    updateQuality(track, constraints, nextFps, updateOutput = async () => {}) {
+      const change = qualityChange.then(async () => {
+        if (closed) throw new Error('Transmissão encerrada.')
+        if (!Number.isFinite(nextFps) || nextFps <= 0 || nextFps > 240) throw new Error('FPS inválido.')
+        const video = local.get('video')
+        if (!video?.sender) throw new Error('Vídeo não publicado.')
+        const previous = track.getConstraints()
+        const previousOptions = video.publishOptions
+        const previousFps = fps
+        try {
+          await track.applyConstraints(constraints)
+          if (closed) throw new Error('Transmissão encerrada.')
+          await updateOutput(nextFps)
+          if (closed) throw new Error('Transmissão encerrada.')
+          const options = shareOptions(video.mediaStreamTrack, nextFps, codec)
+          video.publishOptions = { ...previousOptions, ...options }
+          const parameters = video.sender.getParameters()
+          if (!parameters.encodings?.length) throw new Error('Encoder sem parâmetros de vídeo.')
+          parameters.encodings.forEach(encoding => { encoding.maxFramerate = nextFps })
+          await video.sender.setParameters(parameters)
+          await video.setDegradationPreference(options.degradationPreference)
+          if (closed) throw new Error('Transmissão encerrada.')
+          fps = nextFps
+        } catch (error) {
+          if (!closed) {
+            try {
+              video.publishOptions = previousOptions
+              await track.applyConstraints(previous)
+              await updateOutput(previousFps)
+              const parameters = video.sender.getParameters()
+              parameters.encodings?.forEach(encoding => { encoding.maxFramerate = previousFps })
+              await video.sender.setParameters(parameters)
+              await video.setDegradationPreference(shareOptions(video.mediaStreamTrack, previousFps, codec).degradationPreference)
+            } catch (rollback) { throw new AggregateError([error, rollback], 'Falha ao alterar e restaurar a qualidade.') }
+          }
+          throw error
+        }
+      })
+      qualityChange = change.catch(() => {})
+      return change
     },
     close() { closed = true; remote.clear(); room.disconnect(false).catch(console.warn); if (videoEl?.srcObject === media) videoEl.srcObject = null },
   }
