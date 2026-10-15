@@ -368,14 +368,15 @@ type sessState struct {
 type trackState map[string]any
 
 type streamState struct {
-	Engine      string       `json:"engine,omitempty"`
-	StreamKey   string       `json:"streamKey"`
-	IsPublic    bool         `json:"isPublic"`
-	Motd        string       `json:"motd"`
-	StreamStart string       `json:"streamStart"`
-	AudioTracks []trackState `json:"audioTracks"`
-	VideoTracks []trackState `json:"videoTracks"`
-	Sessions    []sessState  `json:"sessions"`
+	Engine      string         `json:"engine,omitempty"`
+	StreamKey   string         `json:"streamKey"`
+	IsPublic    bool           `json:"isPublic"`
+	Motd        string         `json:"motd"`
+	StreamStart string         `json:"streamStart"`
+	AudioTracks []trackState   `json:"audioTracks"`
+	VideoTracks []trackState   `json:"videoTracks"`
+	Sessions    []sessState    `json:"sessions"`
+	Quality     *streamQuality `json:"quality,omitempty"`
 }
 
 func (a *app) status(w http.ResponseWriter, r *http.Request) {
@@ -468,6 +469,7 @@ func main() {
 	mux.HandleFunc("POST /api/livekit/join", a.livekitJoin)
 	mux.HandleFunc("POST /api/livekit/whip", a.livekitWhip)
 	mux.HandleFunc("DELETE /api/livekit/whip/{id}", a.sessDelete("api/livekit/whip"))
+	mux.HandleFunc("POST /api/livekit/whip/{id}/quality", a.livekitQuality)
 	if livekitURL != "" {
 		target, err := url.Parse(livekitURL)
 		if err != nil {

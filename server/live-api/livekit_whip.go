@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -118,4 +119,41 @@ func (a *app) livekitWhip(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/sdp")
 	w.WriteHeader(201)
 	w.Write(body)
+}
+
+// Resolução (0 = fonte) e FPS escolhidos por quem transmite; o plugin mostra no selo da live.
+type streamQuality struct {
+	Resolution int `json:"resolution"`
+	FPS        int `json:"fps"`
+}
+
+func (q streamQuality) valid() bool {
+	return q.Resolution >= 0 && q.Resolution <= 4320 && q.FPS > 0 && q.FPS <= 240
+}
+
+// Só o dono da sessão WHIP (id secreto + bearer da live) anuncia a qualidade, guardada no metadata do publisher.
+func (a *app) livekitQuality(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
+	s := a.sessions[r.PathValue("id")]
+	a.mu.Unlock()
+	if s == nil || s.kind != "livekit-whip" {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	if bearer(r) != s.nick {
+		http.Error(w, "Authorization was not set", http.StatusBadRequest)
+		return
+	}
+	var quality streamQuality
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&quality); err != nil || !quality.valid() {
+		http.Error(w, "Qualidade inválida", 400)
+		return
+	}
+	metadata, _ := json.Marshal(quality)
+	var out struct{}
+	if err := a.livekitRPC(r.Context(), "UpdateParticipant", map[string]string{"room": s.path, "identity": "publisher", "metadata": string(metadata)}, &out); err != nil {
+		http.Error(w, "LiveKit indisponível", 502)
+		return
+	}
+	w.WriteHeader(204)
 }

@@ -65,6 +65,7 @@ func roomFrom(input any) string {
 type lkParticipant struct {
 	Identity string `json:"identity"`
 	Name     string `json:"name"`
+	Metadata string `json:"metadata"`
 	JoinedAt string `json:"joined_at"`
 	Tracks   []struct {
 		Type string `json:"type"`
@@ -99,6 +100,10 @@ func (a *app) livekitStreams(ctx context.Context) ([]streamState, error) {
 			if p.Identity != "publisher" {
 				st.Sessions = append(st.Sessions, sessState{ID: p.Identity, Viewer: p.Name})
 				continue
+			}
+			var quality streamQuality
+			if json.Unmarshal([]byte(p.Metadata), &quality) == nil && quality.valid() {
+				st.Quality = &quality
 			}
 			seconds, _ := strconv.ParseInt(p.JoinedAt, 10, 64)
 			st.StreamStart = time.Unix(seconds, 0).UTC().Format(time.RFC3339Nano)

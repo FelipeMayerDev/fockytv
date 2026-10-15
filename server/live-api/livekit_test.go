@@ -142,3 +142,58 @@ func TestLegacyPublisherCannotOverwriteLivekitRoom(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }
+
+func TestLivekitQualityOnlyFromPublisherSession(t *testing.T) {
+	oldURL, oldKey, oldSecret := livekitURL, livekitKey, livekitSecret
+	defer func() { livekitURL, livekitKey, livekitSecret = oldURL, oldKey, oldSecret }()
+	var metadata string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/twirp/livekit.RoomService/UpdateParticipant":
+			var input map[string]string
+			json.NewDecoder(r.Body).Decode(&input)
+			if input["room"] != "ana" || input["identity"] != "publisher" {
+				t.Error("unexpected participant", input)
+			}
+			metadata = input["metadata"]
+			w.Write([]byte(`{}`))
+		case "/twirp/livekit.RoomService/ListRooms":
+			w.Write([]byte(`{"rooms":[{"name":"ana"}]}`))
+		case "/twirp/livekit.RoomService/ListParticipants":
+			body, _ := json.Marshal(map[string]any{"participants": []map[string]any{{"identity": "publisher", "metadata": metadata, "joined_at": "1", "tracks": []map[string]string{{"type": "VIDEO"}}}}})
+			w.Write(body)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer upstream.Close()
+	livekitURL, livekitKey, livekitSecret = upstream.URL, "key", strings.Repeat("s", 32)
+	a := newApp()
+	a.sessions["sid"] = &session{kind: "livekit-whip", path: "ana", nick: "ana", id: "sid"}
+	send := func(id, who, body string) int {
+		r := httptest.NewRequest("POST", "/api/livekit/whip/"+id+"/quality", strings.NewReader(body))
+		r.SetPathValue("id", id)
+		r.Header.Set("Authorization", "Bearer "+who)
+		w := httptest.NewRecorder()
+		a.livekitQuality(w, r)
+		return w.Code
+	}
+	for _, c := range []struct {
+		id, who, body string
+		code          int
+	}{
+		{"missing", "ana", `{"resolution":1080,"fps":60}`, 404},
+		{"sid", "bob", `{"resolution":1080,"fps":60}`, 400},
+		{"sid", "ana", `{"resolution":1080,"fps":0}`, 400},
+		{"sid", "ana", `{"resolution":9999,"fps":60}`, 400},
+		{"sid", "ana", `{"resolution":1080,"fps":60}`, 204},
+	} {
+		if code := send(c.id, c.who, c.body); code != c.code {
+			t.Fatalf("%+v: got %d", c, code)
+		}
+	}
+	streams, err := a.livekitStreams(t.Context())
+	if err != nil || len(streams) != 1 || streams[0].Quality == nil || *streams[0].Quality != (streamQuality{Resolution: 1080, FPS: 60}) {
+		t.Fatal(err, streams)
+	}
+}
