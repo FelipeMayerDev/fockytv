@@ -464,6 +464,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/status", a.status)
+	mux.HandleFunc("GET /api/presence", presenceGet)
 	mux.HandleFunc("POST /api/livekit/join", a.livekitJoin)
 	mux.HandleFunc("POST /api/livekit/whip", a.livekitWhip)
 	mux.HandleFunc("DELETE /api/livekit/whip/{id}", a.sessDelete("api/livekit/whip"))
