@@ -41,16 +41,22 @@ pub fn build(
     let gop = (cfg.fps * 2).max(30);
     let venc = super::encoder::select(&cfg.encoder)?;
 
+    let quality_caps = super::quality_caps(
+        pick.width.unsigned_abs(),
+        pick.height.unsigned_abs(),
+        cfg.height,
+        cfg.fps,
+    )?;
     let launch = format!(
         r#"
         {source}
         ! d3d11download
         ! queue leaky=downstream max-size-buffers=2 max-size-time=0
-        ! videorate drop-only=true
-        ! capsfilter name=vcaps caps=video/x-raw,framerate={fps}/1
         ! videoconvert
         ! compositor name=canvas
-        canvas. ! capsfilter caps=video/x-raw,width={width},height={height} ! tee name=out
+        canvas. ! capsfilter name=sourcecaps caps=video/x-raw,width={width},height={height}
+        ! videoscale ! videorate drop-only=true
+        ! capsfilter name=qualitycaps caps="{quality_caps}" ! tee name=out
         out. ! queue leaky=downstream max-size-buffers=2 max-size-time=0
         ! {venc_chunk}
         ! h264parse
@@ -71,7 +77,6 @@ pub fn build(
             auth-token="{key}"
             use-link-headers=true
         "#,
-        fps = cfg.fps,
         width = pick.width,
         height = pick.height,
         url = cfg.server_url.trim_end_matches('/'),

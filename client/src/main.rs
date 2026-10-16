@@ -21,6 +21,7 @@ enum Cmd {
         fps: u32,
         bitrate: u64,
     },
+    SetResolution(u32),
     Stop,
     Preview,
     PreviewClosed,
@@ -154,7 +155,16 @@ async fn main() {
                 share_cfg.max_bitrate = bitrate;
                 session = start_share(share_cfg, &tray, &tx).await;
             }
-            Cmd::StartShare { .. } => {}
+            Cmd::StartShare { fps, bitrate } => {
+                if let Some(s) = &mut session {
+                    change_quality(s, &tray, fps, s.cfg.height, bitrate).await;
+                }
+            }
+            Cmd::SetResolution(height) => {
+                if let Some(s) = &mut session {
+                    change_quality(s, &tray, s.cfg.fps, height, s.cfg.max_bitrate).await;
+                }
+            }
             Cmd::Stop => stop_session(&mut session, &tray).await,
             Cmd::Preview => {
                 if let Some(s) = &mut session {
@@ -294,6 +304,31 @@ async fn restart_or_giveup(
             Err(e) => {
                 eprintln!("[fockytv] restart falhou: {e}");
             }
+        }
+    }
+}
+
+async fn change_quality(
+    s: &mut Session,
+    tray: &tray::TrayHandle,
+    fps: u32,
+    height: u32,
+    bitrate: u64,
+) {
+    match pipeline::set_quality(&s.live, fps, height, bitrate).await {
+        Ok(()) => {
+            s.cfg.fps = fps;
+            s.cfg.height = height;
+            s.cfg.max_bitrate = bitrate;
+            tray.set(tray::State::Live {
+                status: status_text(&s.live),
+            });
+        }
+        Err(error) => {
+            eprintln!("[fockytv] qualidade: {error}");
+            tray.set(tray::State::Live {
+                status: format!("{} — {error}", status_text(&s.live)),
+            });
         }
     }
 }

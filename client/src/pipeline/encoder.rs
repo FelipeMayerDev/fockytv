@@ -138,11 +138,6 @@ pub fn invalidate() {
     *CHOSEN.lock().unwrap() = None;
 }
 
-/// O encoder escolhido nesta sessão (unidade de bitrate no refine ao vivo).
-pub fn chosen_kind() -> Option<Kind> {
-    *CHOSEN.lock().unwrap()
-}
-
 /// `knob` vem do config/env: "auto" (default), "hw", "sw" ou o nome exato do
 /// elemento. Pedido explícito que não funciona é erro, não fallback silencioso.
 pub fn select(knob: &str) -> Result<Kind, String> {

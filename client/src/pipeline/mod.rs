@@ -163,7 +163,9 @@ pub fn open_preview(tx: tokio::sync::mpsc::UnboundedSender<crate::Cmd>) -> Resul
     .map_err(|_| "preview não é um bin".to_string())?;
     // Navegação sobe do renderizador; este pad fica imediatamente antes dele
     // e não depende da implementação interna do glimagesinkbin.
-    let input = pipeline.by_name("previewinput").ok_or("preview sem entrada")?;
+    let input = pipeline
+        .by_name("previewinput")
+        .ok_or("preview sem entrada")?;
     let pad = input.static_pad("src").ok_or("preview sem saída")?;
     let event_tx = tx.clone();
     pad.add_probe(gst::PadProbeType::EVENT_UPSTREAM, move |_, info| {
@@ -188,7 +190,9 @@ pub fn open_preview(tx: tokio::sync::mpsc::UnboundedSender<crate::Cmd>) -> Resul
     let watch_active = active.clone();
     let watch_pipeline = pipeline.clone();
     std::thread::spawn(move || {
-        let Some(bus) = watch_pipeline.bus() else { return };
+        let Some(bus) = watch_pipeline.bus() else {
+            return;
+        };
         while watch_active.load(std::sync::atomic::Ordering::Relaxed) {
             if bus
                 .timed_pop_filtered(
@@ -277,26 +281,90 @@ pub fn build(
     windows::build(pick, target, cfg).inspect_err(|_| encoder::invalidate())
 }
 
+pub fn quality_caps(
+    width: u32,
+    height: u32,
+    target_height: u32,
+    fps: u32,
+) -> Result<gst::Caps, String> {
+    if width < 2 || height < 2 || fps == 0 || fps > 240 || target_height > 4320 {
+        return Err("Qualidade inválida.".into());
+    }
+    let out_height = if target_height == 0 {
+        height
+    } else {
+        height.min(target_height)
+    } & !1;
+    let out_width = ((width as u64 * out_height as u64 / height as u64) as u32).max(2) & !1;
+    Ok(gst::Caps::builder("video/x-raw")
+        .field("width", out_width as i32)
+        .field("height", out_height as i32)
+        .field("framerate", gst::Fraction::new(fps as i32, 1))
+        .build())
+}
+
+/// Reconfigura somente o ramo de vídeo; fonte, áudio e whipsink continuam vivos.
+pub async fn set_quality(live: &Live, fps: u32, height: u32, bitrate: u64) -> Result<(), String> {
+    let source = live
+        .pipeline
+        .by_name("sourcecaps")
+        .ok_or("Resolução da fonte indisponível.")?;
+    let source_caps = source.property::<gst::Caps>("caps");
+    let dimensions = source_caps.structure(0).ok_or("Fonte sem dimensões.")?;
+    let width = dimensions.get::<i32>("width").map_err(|e| e.to_string())? as u32;
+    let source_height = dimensions.get::<i32>("height").map_err(|e| e.to_string())? as u32;
+    let wanted = quality_caps(width, source_height, height, fps)?;
+    let output = live
+        .pipeline
+        .by_name("qualitycaps")
+        .ok_or("Controle de qualidade indisponível.")?;
+    let previous = output.property::<gst::Caps>("caps");
+    let previous_encoded = current_caps(live);
+    let expected = wanted.structure(0).unwrap();
+    let expected = (
+        expected.get::<i32>("width").unwrap() as u32,
+        expected.get::<i32>("height").unwrap() as u32,
+        fps,
+    );
+    output.set_property("caps", &wanted);
+    // A propriedade aceita caps antes da negociação: confirmar no vídeo já codificado.
+    if wait_for_caps(live, expected).await {
+        refine_bitrate(live, bitrate);
+        return Ok(());
+    }
+    output.set_property("caps", previous);
+    if let Some(previous) = previous_encoded {
+        if wait_for_caps(live, previous).await {
+            return Err(
+                "Encoder não confirmou a qualidade; configuração anterior restaurada.".into(),
+            );
+        }
+    }
+    Err("Encoder não confirmou a qualidade nem a restauração anterior.".into())
+}
+
+async fn wait_for_caps(live: &Live, expected: (u32, u32, u32)) -> bool {
+    for _ in 0..100 {
+        if current_caps(live) == Some(expected) {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    false
+}
+
 /// Ajusta o bitrate do encoder ao vivo quando a resolução real negociada
 /// difere da estimativa (portal devolve tamanho lógico, não pixels). A
 /// unidade do `bitrate` depende do encoder escolhido (bps no OpenH264, kbps
 /// no resto) — a conversão fica no encoder::Kind.
 pub fn refine_bitrate(live: &Live, manual: u64) -> Option<(u32, u32, u32)> {
-    let capsfilter = live.pipeline.by_name("vcaps")?;
-    let pad = capsfilter.static_pad("sink")?;
-    let caps = pad.current_caps()?;
-    let s = caps.structure(0)?;
-    let w = s.get::<i32>("width").ok()? as u32;
-    let h = s.get::<i32>("height").ok()? as u32;
-    let fps = s
-        .get::<gst::Fraction>("framerate")
-        .ok()
-        .map(|f| (f.numer() / f.denom().max(1)) as u32)
-        .unwrap_or(0);
+    let (w, h, fps) = current_caps(live)?;
     if let Some(enc) = live.pipeline.by_name("venc") {
-        let want = encoder::chosen_kind()
-            .map(|k| k.bitrate(crate::config::bitrate_for(w, h, manual, fps)))
-            .unwrap_or_else(|| crate::config::bitrate_for(w, h, manual, fps));
+        let factory = enc.factory()?;
+        let kind = encoder::LADDER
+            .iter()
+            .find(|kind| kind.element() == factory.name())?;
+        let want = kind.bitrate(crate::config::bitrate_for(w, h, manual, fps));
         if encoder::applied_bitrate() != want {
             // por string: o tipo gint/guint da property varia por encoder
             enc.set_property_from_str("bitrate", &want.to_string());
@@ -308,8 +376,8 @@ pub fn refine_bitrate(live: &Live, manual: u64) -> Option<(u32, u32, u32)> {
 
 /// Lê a resolução negociada sem mexer em nada (para o status do tray).
 pub fn current_caps(live: &Live) -> Option<(u32, u32, u32)> {
-    let capsfilter = live.pipeline.by_name("vcaps")?;
-    let pad = capsfilter.static_pad("sink")?;
+    let encoder = live.pipeline.by_name("venc")?;
+    let pad = encoder.static_pad("src")?;
     let caps = pad.current_caps()?;
     let s = caps.structure(0)?;
     Some((
@@ -325,6 +393,88 @@ pub fn current_caps(live: &Live) -> Option<(u32, u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quality_preserves_aspect_and_rejects_invalid_values() {
+        gst::init().unwrap();
+        let caps = quality_caps(2560, 1080, 720, 60).unwrap();
+        let s = caps.structure(0).unwrap();
+        assert_eq!(s.get::<i32>("width").unwrap(), 1706);
+        assert_eq!(s.get::<i32>("height").unwrap(), 720);
+        assert_eq!(
+            quality_caps(1280, 720, 1080, 30)
+                .unwrap()
+                .structure(0)
+                .unwrap()
+                .get::<i32>("height")
+                .unwrap(),
+            720
+        );
+        assert!(quality_caps(1920, 1080, 720, 0).is_err());
+        assert!(quality_caps(1920, 1080, 5000, 30).is_err());
+    }
+
+    #[tokio::test]
+    async fn live_quality_reconfigures_encoded_video_without_stopping_audio() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        gst::init().unwrap();
+        let pipeline = gst::parse::launch(
+            "videotestsrc is-live=true ! video/x-raw,width=1280,height=720,framerate=60/1 \
+             ! videoconvert ! compositor name=canvas canvas. \
+             ! capsfilter name=sourcecaps caps=video/x-raw,width=1280,height=720 \
+             ! videoscale ! videorate drop-only=true \
+             ! capsfilter name=qualitycaps caps=video/x-raw,width=1280,height=720,framerate=60/1 \
+             ! x264enc name=venc tune=zerolatency speed-preset=ultrafast bitrate=8000 \
+             ! h264parse ! rtph264pay config-interval=-1 ! fakesink sync=false \
+             audiotestsrc is-live=true ! opusenc ! fakesink name=audio sync=false",
+        )
+        .unwrap()
+        .dynamic_cast::<gst::Pipeline>()
+        .unwrap();
+        let audio = Arc::new(AtomicUsize::new(0));
+        let count = audio.clone();
+        pipeline
+            .by_name("audio")
+            .unwrap()
+            .static_pad("sink")
+            .unwrap()
+            .add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+                count.fetch_add(1, Ordering::Relaxed);
+                gst::PadProbeReturn::Ok
+            });
+        pipeline.set_state(gst::State::Playing).unwrap();
+        let live = Live {
+            pipeline: pipeline.clone(),
+            camera: None,
+            #[cfg(target_os = "linux")]
+            video: None,
+        };
+        let result: Result<(), String> = async {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            for (fps, height, expected) in [
+                (30, 480, (852, 480, 30)),
+                (60, 0, (1280, 720, 60)),
+                (15, 240, (426, 240, 15)),
+            ] {
+                let before = audio.load(Ordering::Relaxed);
+                set_quality(&live, fps, height, 8_000_000).await?;
+                assert_eq!(current_caps(&live), Some(expected));
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                assert!(audio.load(Ordering::Relaxed) > before);
+                assert_eq!(pipeline.current_state(), gst::State::Playing);
+            }
+            let caps = current_caps(&live);
+            assert!(set_quality(&live, 0, 720, 8_000_000).await.is_err());
+            assert_eq!(current_caps(&live), caps);
+            Ok(())
+        }
+        .await;
+        pipeline.set_state(gst::State::Null).unwrap();
+        result.unwrap();
+    }
 
     #[test]
     fn canvas_entrega_whip_e_preview() {

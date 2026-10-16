@@ -42,14 +42,17 @@ pub fn build(
             .to_string()
     };
 
+    let quality_caps =
+        super::quality_caps(w.unsigned_abs(), h.unsigned_abs(), cfg.height, cfg.fps)?;
     let launch = format!(
         r#"
         {source}
         ! queue leaky=downstream max-size-buffers=2 max-size-time=0
-        ! {rate_chain}
         ! videoconvert
         ! compositor name=canvas
-        canvas. ! capsfilter caps=video/x-raw,width={w},height={h} ! tee name=out
+        canvas. ! capsfilter name=sourcecaps caps=video/x-raw,width={w},height={h}
+        ! videoscale ! videorate drop-only=true
+        ! capsfilter name=qualitycaps caps="{quality_caps}" ! tee name=out
         out. ! queue leaky=downstream max-size-buffers=2 max-size-time=0
         ! {venc_chunk}
         ! h264parse
@@ -70,15 +73,6 @@ pub fn build(
             auth-token="{key}"
             use-link-headers=true
         "#,
-        rate_chain = if std::env::var("FOCKYTV_NO_RATE").is_ok() {
-            // diagnóstico: sem videorate/caps — deixa o framerate do stream passar direto
-            "identity silent=true".to_string()
-        } else {
-            format!(
-                "videorate drop-only=true ! capsfilter name=vcaps caps=video/x-raw,framerate={}/1",
-                cfg.fps
-            )
-        },
         url = cfg.server_url.trim_end_matches('/'),
         key = cfg.display_name,
         abr = cfg.audio_bitrate,

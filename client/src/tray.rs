@@ -25,6 +25,16 @@ pub const QUALITY: [(u32, u64); 9] = [
     (60, 32_000_000),
 ];
 
+pub const RESOLUTIONS: [u32; 7] = [0, 2160, 1440, 1080, 720, 480, 240];
+
+pub fn resolution_label(height: u32) -> String {
+    if height == 0 {
+        "Resolução da fonte".into()
+    } else {
+        format!("{height}p")
+    }
+}
+
 pub fn quality_label(fps: u32, bitrate: u64) -> String {
     let name = match bitrate {
         2_000_000 => "econômico",
@@ -50,9 +60,9 @@ mod tests {
 
 #[cfg(target_os = "linux")]
 mod imp {
-    use super::{quality_label, Candidate, Cmd, State, QUALITY};
+    use super::{quality_label, resolution_label, Candidate, Cmd, State, QUALITY, RESOLUTIONS};
     use ksni::blocking::TrayMethods;
-    use ksni::menu::StandardItem;
+    use ksni::menu::{StandardItem, SubMenu};
     use ksni::{MenuItem, Tray};
     use std::sync::{Arc, Mutex};
     use tokio::sync::mpsc::UnboundedSender;
@@ -141,6 +151,38 @@ mod imp {
                     }));
                 }
                 State::Live { status } => {
+                    items.push(MenuItem::SubMenu(SubMenu {
+                        label: "Alterar FPS / bitrate".into(),
+                        submenu: QUALITY
+                            .into_iter()
+                            .map(|(fps, bitrate)| {
+                                MenuItem::Standard(StandardItem {
+                                    label: quality_label(fps, bitrate),
+                                    activate: Box::new(move |t: &mut Self| {
+                                        let _ = t.tx.send(Cmd::StartShare { fps, bitrate });
+                                    }),
+                                    ..Default::default()
+                                })
+                            })
+                            .collect(),
+                        ..Default::default()
+                    }));
+                    items.push(MenuItem::SubMenu(SubMenu {
+                        label: "Resolução".into(),
+                        submenu: RESOLUTIONS
+                            .into_iter()
+                            .map(|height| {
+                                MenuItem::Standard(StandardItem {
+                                    label: resolution_label(height),
+                                    activate: Box::new(move |t: &mut Self| {
+                                        let _ = t.tx.send(Cmd::SetResolution(height));
+                                    }),
+                                    ..Default::default()
+                                })
+                            })
+                            .collect(),
+                        ..Default::default()
+                    }));
                     items.push(MenuItem::Standard(StandardItem {
                         label: format!("Ao vivo — {status}"),
                         enabled: false,
@@ -305,7 +347,7 @@ pub use imp::{spawn, TrayHandle};
 
 #[cfg(not(target_os = "linux"))]
 mod imp {
-    use super::{quality_label, Candidate, Cmd, State, QUALITY};
+    use super::{quality_label, resolution_label, Candidate, Cmd, State, QUALITY, RESOLUTIONS};
     use std::sync::mpsc;
     use std::sync::{Arc, Mutex};
     use tokio::sync::mpsc::UnboundedSender;
@@ -348,18 +390,16 @@ mod imp {
     ) -> ! {
         use global_hotkey::hotkey::{Code, HotKey, Modifiers};
         use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
-        use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+        use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
         use tray_icon::TrayIconBuilder;
 
         let share = MenuItem::with_id("share", "Compartilhar tela", true, None);
         let preview = MenuItem::with_id("preview", "Ver preview", false, None);
         let webcam = MenuItem::with_id("webcam", "Compartilhar webcam", false, None);
-        let camera_controls = [
-            (
-                MenuItem::with_id("cam-mirror", "Webcam: espelhar", false, None),
-                Cmd::MirrorWebcam,
-            ),
-        ];
+        let camera_controls = [(
+            MenuItem::with_id("cam-mirror", "Webcam: espelhar", false, None),
+            Cmd::MirrorWebcam,
+        )];
         let stop = MenuItem::with_id("stop", "Parar", false, None);
         let quality = QUALITY.map(|(fps, bitrate)| {
             (
@@ -373,6 +413,21 @@ mod imp {
                 bitrate,
             )
         });
+        let resolutions = RESOLUTIONS.map(|height| {
+            (
+                MenuItem::with_id(
+                    format!("resolution-{height}"),
+                    resolution_label(height),
+                    true,
+                    None,
+                ),
+                height,
+            )
+        });
+        let resolution_menu = Submenu::new("Resolução", false);
+        for (item, _) in &resolutions {
+            let _ = resolution_menu.append(item);
+        }
         let hotkey_choices = [
             (
                 MenuItem::with_id("hotkey-f10", "Atalho: Ctrl+Shift+F10", true, None),
@@ -411,6 +466,7 @@ mod imp {
             &quality[6].0,
             &quality[7].0,
             &quality[8].0,
+            &resolution_menu,
             &PredefinedMenuItem::separator(),
             &hotkey_label,
             &hotkey_choices[0].0,
@@ -480,6 +536,11 @@ mod imp {
                         });
                     }
                 }
+                for (item, height) in &resolutions {
+                    if ev.id == *item.id() {
+                        let _ = tx.send(Cmd::SetResolution(*height));
+                    }
+                }
                 for (item, key) in &hotkey_choices {
                     if ev.id != *item.id() {
                         continue;
@@ -501,6 +562,7 @@ mod imp {
                 }
             }
             while let Ok(s) = from_main.try_recv() {
+                let _ = resolution_menu.set_enabled(matches!(s, State::Live { .. }));
                 match s {
                     State::Idle => {
                         let _ = share.set_text("Escolha a qualidade abaixo");
@@ -550,7 +612,7 @@ mod imp {
                             let _ = item.set_enabled(true);
                         }
                         for (item, ..) in &quality {
-                            let _ = item.set_enabled(false);
+                            let _ = item.set_enabled(true);
                         }
                     }
                 }

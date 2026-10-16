@@ -8,6 +8,8 @@ pub struct Config {
     pub server_url: String,
     pub display_name: String,
     pub fps: u32,
+    /// Teto escolhido no menu ao vivo; 0 conserva a resolução da fonte.
+    pub height: u32,
     /// 0 = escolher pela resolução da tela
     pub max_bitrate: u64,
     pub audio_bitrate: u32,
@@ -88,6 +90,7 @@ pub fn load() -> Result<Config, String> {
             .filter(|s| !s.is_empty())
             .unwrap_or(raw.display_name),
         fps: raw.fps.filter(|f| *f > 0 && *f <= 240).unwrap_or(60),
+        height: 0,
         max_bitrate: raw.max_bitrate.unwrap_or(0),
         audio_bitrate: raw.audio_bitrate.unwrap_or(192_000),
         encoder: std::env::var("FOCKYTV_ENCODER")
