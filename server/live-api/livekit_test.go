@@ -147,9 +147,18 @@ func TestLivekitQualityOnlyFromPublisherSession(t *testing.T) {
 	oldURL, oldKey, oldSecret := livekitURL, livekitKey, livekitSecret
 	defer func() { livekitURL, livekitKey, livekitSecret = oldURL, oldKey, oldSecret }()
 	var metadata string
+	updates := 0
+	oldRetry := qualityRetry
+	qualityRetry = time.Millisecond
+	defer func() { qualityRetry = oldRetry }()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/twirp/livekit.RoomService/UpdateParticipant":
+			// O publisher do ingress ainda não entrou na sala na primeira tentativa.
+			if updates++; updates == 1 {
+				w.WriteHeader(404)
+				return
+			}
 			var input map[string]string
 			json.NewDecoder(r.Body).Decode(&input)
 			if input["room"] != "ana" || input["identity"] != "publisher" {

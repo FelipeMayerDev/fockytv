@@ -121,6 +121,8 @@ func (a *app) livekitWhip(w http.ResponseWriter, r *http.Request) {
 	w.Write(body)
 }
 
+var qualityAttempts, qualityRetry = 15, time.Second
+
 // Resolução (0 = fonte) e FPS escolhidos por quem transmite; o plugin mostra no selo da live.
 type streamQuality struct {
 	Resolution int `json:"resolution"`
@@ -150,10 +152,22 @@ func (a *app) livekitQuality(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metadata, _ := json.Marshal(quality)
-	var out struct{}
-	if err := a.livekitRPC(r.Context(), "UpdateParticipant", map[string]string{"room": s.path, "identity": "publisher", "metadata": string(metadata)}, &out); err != nil {
-		http.Error(w, "LiveKit indisponível", 502)
-		return
+	// O publisher do ingress só entra na sala quando a mídia chega: o anúncio feito logo após o WHIP espera por ele.
+	for attempt := 1; ; attempt++ {
+		var out struct{}
+		err := a.livekitRPC(r.Context(), "UpdateParticipant", map[string]string{"room": s.path, "identity": "publisher", "metadata": string(metadata)}, &out)
+		if err == nil {
+			break
+		}
+		if attempt == qualityAttempts {
+			http.Error(w, "LiveKit indisponível", 502)
+			return
+		}
+		select {
+		case <-time.After(qualityRetry):
+		case <-r.Context().Done():
+			return
+		}
 	}
 	w.WriteHeader(204)
 }
