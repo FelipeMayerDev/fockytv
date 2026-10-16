@@ -8,12 +8,12 @@ use crate::config::{bitrate_for, Config};
 
 /// Pipeline Windows:
 ///
-///   d3d11screencapturesrc (monitor OU window-handle via WGC) → encoder ┐
-///                                                                      ├→ whipsink
-///   audio-helper.exe (WASAPI por processo) → appsrc → opus ───────────┘
+///   d3d12screencapturesrc (monitor DXGI OU janela WGC, HDR→SDR) → encoder ┐
+///                                                                         ├→ whipsink
+///   audio-helper.exe (WASAPI por processo) → appsrc → opus ──────────────┘
 ///
-/// A captura sai em memória D3D11: o d3d11download traz pra RAM antes do
-/// videoconvert. Mesma cadeia de qualidade do Linux: 60fps drop-only,
+/// A captura sai em memória D3D12 (D3D11 no fallback): o download traz pra
+/// RAM antes do videoconvert. Mesma cadeia de qualidade do Linux: 60fps drop-only,
 /// resolução nativa, bitrate pela resolução. Encoder pela escada
 /// (encoder.rs): D3D11 → Media Foundation → x264 → OpenH264.
 pub fn build(
@@ -21,17 +21,7 @@ pub fn build(
     target: AudioTarget,
     cfg: &Config,
 ) -> Result<(Live, audio::Running), String> {
-    let source = if pick.monitor != 0 {
-        format!(
-            "d3d11screencapturesrc monitor-handle={} show-cursor=true",
-            pick.monitor
-        )
-    } else {
-        format!(
-            "d3d11screencapturesrc window-handle={} show-cursor=true",
-            pick.hwnd
-        )
-    };
+    let source = capture_source(pick);
     let bitrate = bitrate_for(
         pick.width.unsigned_abs(),
         pick.height.unsigned_abs(),
@@ -50,7 +40,6 @@ pub fn build(
     let launch = format!(
         r#"
         {source}
-        ! d3d11download
         ! queue leaky=downstream max-size-buffers=2 max-size-time=0
         ! videoconvert
         ! compositor name=canvas
@@ -122,4 +111,59 @@ pub fn build(
         },
         running,
     ))
+}
+
+/// Captura + download pra RAM. O d3d12screencapturesrc detecta sozinho
+/// monitor em HDR: lê em scRGB e faz tonemap pra SDR usando o nível de
+/// branco SDR do Windows — sem isso o BGRA8 do d3d11 sai lavado/estourado.
+/// `linear` deixa o desktop idêntico ao SDR e só corta os brilhos acima do
+/// branco; `FOCKYTV_HDR_TONEMAP=reinhard` comprime esses brilhos (jogo/vídeo
+/// HDR), mas mexe também no tom do resto. Monitor SDR: não muda nada.
+/// `FOCKYTV_CAPTURE=d3d11` volta pra captura antiga (GPU sem D3D12).
+fn capture_source(pick: &crate::picker::windows::Pick) -> String {
+    let target = if pick.monitor != 0 {
+        format!("monitor-handle={}", pick.monitor)
+    } else {
+        format!("window-handle={}", pick.hwnd)
+    };
+    let d3d12 = std::env::var("FOCKYTV_CAPTURE").as_deref() != Ok("d3d11")
+        && gst::ElementFactory::find("d3d12screencapturesrc").is_some();
+    if !d3d12 {
+        return format!("d3d11screencapturesrc {target} show-cursor=true ! d3d11download");
+    }
+    let tonemap = match std::env::var("FOCKYTV_HDR_TONEMAP").as_deref() {
+        Ok("reinhard") => "reinhard",
+        _ => "linear",
+    };
+    let api = if pick.monitor != 0 { "dxgi" } else { "wgc" };
+    format!(
+        "d3d12screencapturesrc {target} capture-api={api} tonemap={tonemap} show-cursor=true \
+         ! d3d12download"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Nomes de propriedade/enum errados só aparecem no parse — e só no
+    /// Windows, que é onde o elemento existe.
+    #[test]
+    fn fonte_de_captura_parseia() {
+        gst::init().unwrap();
+        for monitor in [1, 0] {
+            let pick = crate::picker::windows::Pick {
+                monitor,
+                hwnd: 1,
+                title: String::new(),
+                process: String::new(),
+                pid: 0,
+                width: 1920,
+                height: 1080,
+            };
+            let launch = format!("{} ! fakesink", capture_source(&pick));
+            gst::parse::launch(&launch)
+                .unwrap_or_else(|e| panic!("fonte não parseia: {e}\n{launch}"));
+        }
+    }
 }

@@ -94,7 +94,9 @@ Diagnóstico: `FOCKYTV_TEST_VIDEO=1` troca a captura por `videotestsrc`
 
 ## Windows
 
-Mesmo fluxo (tray + hotkey global nativa, `d3d11screencapturesrc` para
-monitor/janela via WGC, áudio WASAPI por processo com o helper
+Mesmo fluxo (tray + hotkey global nativa, `d3d12screencapturesrc` para
+monitor (DXGI) / janela (WGC) — monitor em HDR é detectado e convertido pra
+SDR sozinho; `FOCKYTV_HDR_TONEMAP=reinhard` preserva brilho de jogo/vídeo HDR,
+`FOCKYTV_CAPTURE=d3d11` volta pra captura antiga — áudio WASAPI por processo com o helper
 `electron/audio-helper/capture.cpp`). Build portátil via GitHub Actions
 (`workflow_dispatch`), zip com os DLLs do GStreamer MSVC.
