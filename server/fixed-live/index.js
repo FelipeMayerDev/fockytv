@@ -15,6 +15,7 @@ import { logTrackPlayed, mediaHistory, addChatMsg, chatGet, chatPage, chatLatest
          editChatMsg, deleteChatMsg, toggleChatReaction,
          addClip, getClip, listClips, updateClipFile, delClip } from "./db.js"
 import { recorder } from "./recorder.js"
+import { createRadio } from "./radio.js"
 
 const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
 const PORT = +(process.env.PORT ?? 3000)
@@ -948,6 +949,22 @@ app.get("/api/fixed/jam/yt/stream", wrap(async (req, res) => {
   else res.end()
 }))
 
+// ── player de música das calls do Discord (radio.js) ──────────────────────
+// bestaudio direto pro stdout: a faixa nunca toca o disco. webm/opus primeiro
+// (menor e o Chromium toca), m4a se o vídeo não tiver.
+const radio = createRadio({
+  log,
+  download: id => run("yt-dlp", ["--quiet", "--no-warnings", "--no-playlist", "--socket-timeout", "15", ...cookieFlags(),
+                                 "-f", "ba[ext=webm]/ba[ext=m4a]/ba", "-o", "-", `https://www.youtube.com/watch?v=${id}`]),
+})
+app.get("/api/fixed/radio/:room/:uid", wrap(async (req, res) => {
+  const data = await radio.audio(req.params.room, req.params.uid)
+  if (!data) return res.status(404).json({ error: "faixa fora da fila" })
+  res.setHeader("content-type", data.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3])) ? "audio/webm" : "audio/mp4")
+  res.setHeader("cache-control", "no-store")
+  res.end(data)
+}))
+
 app.get("/api/fixed/search", wrap(async (req, res) => {
   const q = (req.query.q ?? "").toString().trim()
   if (q.length < 2) return res.json([])
@@ -1221,6 +1238,7 @@ httpServer.on("upgrade", (req, sock, head) => {
   // sob o prefixo do proxy do broadcast-box (ReverseProxy repassa o upgrade do WS)
   if (req.url.startsWith("/api/fixed/ws/jam")) jamWss.handleUpgrade(req, sock, head, ws => jamWss.emit("connection", ws, req))
   else if (req.url.startsWith("/api/fixed/ws/presence")) presenceWss.handleUpgrade(req, sock, head, ws => presenceWss.emit("connection", ws, req))
+  else if (req.url.startsWith("/api/fixed/ws/radio")) radio.upgrade(req, sock, head)
   else if (req.url.startsWith("/api/fixed/ws/chat")) chatWss.handleUpgrade(req, sock, head, ws => chatWss.emit("connection", ws, req))
   else sock.destroy()
 })
