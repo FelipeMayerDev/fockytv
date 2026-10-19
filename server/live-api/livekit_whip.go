@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -119,7 +120,25 @@ func (a *app) livekitWhip(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Location", "/api/livekit/whip/"+id)
 	w.Header().Set("Content-Type", "application/sdp")
 	w.WriteHeader(201)
-	w.Write(body)
+	w.Write(withWHIPLANAddress(body, env("LIVEKIT_INGRESS_LAN_IP", "")))
+}
+
+func withWHIPLANAddress(body []byte, address string) []byte {
+	ip := net.ParseIP(strings.TrimSpace(address))
+	if ip == nil {
+		return body
+	}
+	var lines []string
+	for _, line := range strings.Split(string(body), "\r\n") {
+		lines = append(lines, line)
+		fields := strings.Fields(line)
+		if len(fields) < 8 || !strings.HasPrefix(fields[0], "a=candidate:") || !strings.EqualFold(fields[2], "udp") || fields[6] != "typ" || fields[7] != "host" || fields[4] == ip.String() {
+			continue
+		}
+		fields[4] = ip.String()
+		lines = append(lines, strings.Join(fields, " "))
+	}
+	return []byte(strings.Join(lines, "\r\n"))
 }
 
 var qualityAttempts, qualityRetry = 15, time.Second

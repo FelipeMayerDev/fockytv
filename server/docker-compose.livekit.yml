@@ -57,6 +57,7 @@ services:
     environment:
       - LIVEKIT_URL=http://livekit:7880
       - LIVEKIT_INGRESS_URL=http://livekit-ingress:8080
+      - LIVEKIT_INGRESS_LAN_IP=${LIVEKIT_INGRESS_LAN_IP:-}
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:?Defina LIVEKIT_API_KEY}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:?Defina LIVEKIT_API_SECRET}
       # Opcional: bot do Discord que avisa no chat do canal de voz quando uma live começa (só canais desse servidor).
