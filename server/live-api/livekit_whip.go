@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -124,13 +125,17 @@ func (a *app) livekitWhip(w http.ResponseWriter, r *http.Request) {
 var qualityAttempts, qualityRetry = 15, time.Second
 
 // Resolução (0 = fonte) e FPS escolhidos por quem transmite; o plugin mostra no selo da live.
+// Style é o visual do anel e do selo "AO VIVO" que o dono escolheu no plugin.
 type streamQuality struct {
-	Resolution int `json:"resolution"`
-	FPS        int `json:"fps"`
+	Resolution int    `json:"resolution"`
+	FPS        int    `json:"fps"`
+	Style      string `json:"style,omitempty"`
 }
 
+var styleRe = regexp.MustCompile(`^[a-z]{0,16}$`)
+
 func (q streamQuality) valid() bool {
-	return q.Resolution >= 0 && q.Resolution <= 4320 && q.FPS > 0 && q.FPS <= 240
+	return q.Resolution >= 0 && q.Resolution <= 4320 && q.FPS > 0 && q.FPS <= 240 && styleRe.MatchString(q.Style)
 }
 
 // Só o dono da sessão WHIP (id secreto + bearer da live) anuncia a qualidade, guardada no metadata do publisher.

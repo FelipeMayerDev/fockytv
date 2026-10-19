@@ -195,14 +195,15 @@ func TestLivekitQualityOnlyFromPublisherSession(t *testing.T) {
 		{"sid", "bob", `{"resolution":1080,"fps":60}`, 400},
 		{"sid", "ana", `{"resolution":1080,"fps":0}`, 400},
 		{"sid", "ana", `{"resolution":9999,"fps":60}`, 400},
-		{"sid", "ana", `{"resolution":1080,"fps":60}`, 204},
+		{"sid", "ana", `{"resolution":1080,"fps":60,"style":"<b>"}`, 400},
+		{"sid", "ana", `{"resolution":1080,"fps":60,"style":"rainbow"}`, 204},
 	} {
 		if code := send(c.id, c.who, c.body); code != c.code {
 			t.Fatalf("%+v: got %d", c, code)
 		}
 	}
 	streams, err := a.livekitStreams(t.Context())
-	if err != nil || len(streams) != 1 || streams[0].Quality == nil || *streams[0].Quality != (streamQuality{Resolution: 1080, FPS: 60}) {
+	if err != nil || len(streams) != 1 || streams[0].Quality == nil || *streams[0].Quality != (streamQuality{Resolution: 1080, FPS: 60, Style: "rainbow"}) {
 		t.Fatal(err, streams)
 	}
 }
