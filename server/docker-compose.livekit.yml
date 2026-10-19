@@ -59,5 +59,8 @@ services:
       - LIVEKIT_INGRESS_URL=http://livekit-ingress:8080
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:?Defina LIVEKIT_API_KEY}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:?Defina LIVEKIT_API_SECRET}
+      # Opcional: bot do Discord que avisa no chat do canal de voz quando uma live começa (só canais desse servidor).
+      - FOCKYTV_DISCORD_TOKEN=${FOCKYTV_DISCORD_TOKEN:-}
+      - FOCKYTV_DISCORD_GUILD=${FOCKYTV_DISCORD_GUILD:-}
 volumes:
   livekit-redis:

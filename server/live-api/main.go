@@ -79,6 +79,7 @@ type session struct {
 	location  string // recurso da sessão no mediamtx (requestURI)
 	id        string // uuid que o adapter entregou na Location
 	createdAt time.Time
+	announced bool // livekit-whip: aviso de live já enviado ao Discord
 }
 
 type app struct {
@@ -460,6 +461,9 @@ func cors(next http.Handler) http.Handler {
 }
 
 func main() {
+	if discordGuild != "" && !snowflakeRe.MatchString(discordGuild) {
+		log.Fatal("FOCKYTV_DISCORD_GUILD precisa ser o id numérico do servidor do Discord")
+	}
 	a := newApp()
 	go a.pollLoop()
 
@@ -470,6 +474,7 @@ func main() {
 	mux.HandleFunc("POST /api/livekit/whip", a.livekitWhip)
 	mux.HandleFunc("DELETE /api/livekit/whip/{id}", a.sessDelete("api/livekit/whip"))
 	mux.HandleFunc("POST /api/livekit/whip/{id}/quality", a.livekitQuality)
+	mux.HandleFunc("POST /api/livekit/whip/{id}/announce", a.livekitAnnounce)
 	if livekitURL != "" {
 		target, err := url.Parse(livekitURL)
 		if err != nil {
