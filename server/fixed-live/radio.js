@@ -142,7 +142,9 @@ export function createRadio ({ download, log = () => {}, emptyMs = EMPTY_MS }) {
     if (!room) rooms.set(id, room = { queue: [], index: 0, paused: false, ready: false, offset: 0, startedAt: 0, clients: new Map() })
     clearTimeout(room.emptyTimer)
     const client = { user, name, listening: false }
+    const since = Date.now()
     room.clients.set(ws, client)
+    log(`[radio] ${name} conectou em ${id} (${room.clients.size})`)
     broadcast(room)
 
     ws.on("message", data => {
@@ -151,8 +153,9 @@ export function createRadio ({ download, log = () => {}, emptyMs = EMPTY_MS }) {
       if (!Object.hasOwn(commands, msg?.type)) return
       try { commands[msg.type](room, client, msg) } catch (e) { send(ws, { type: "error", message: e.message }) }
     })
-    ws.on("close", () => {
+    ws.on("close", (code, reason) => {
       room.clients.delete(ws)
+      log(`[radio] ${name} desconectou de ${id} após ${Math.round((Date.now() - since) / 1000)} s, código ${code}${reason?.length ? ` (${reason})` : ""} (${room.clients.size})`)
       broadcast(room)
       // Sala vazia some depois de um tempo (recarregar o Discord não perde a fila).
       if (!room.clients.size) room.emptyTimer = setTimeout(() => {
