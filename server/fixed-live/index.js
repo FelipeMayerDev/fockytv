@@ -16,6 +16,7 @@ import { logTrackPlayed, mediaHistory, addChatMsg, chatGet, chatPage, chatLatest
          addClip, getClip, listClips, updateClipFile, delClip } from "./db.js"
 import { recorder } from "./recorder.js"
 import { createRadio } from "./radio.js"
+import { createPluginUpdates } from "./plugin-updates.js"
 
 const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
 const PORT = +(process.env.PORT ?? 3000)
@@ -897,6 +898,7 @@ setInterval(async () => {
 
 // ── API ─────────────────────────────────────────────────────────────────
 const app = express()
+const pluginUpdates = createPluginUpdates(app)
 app.use(express.json({ limit: "256kb" }))
 const wrap = fn => (req, res) => fn(req, res).catch(e => res.status(500).json({ error: e.message }))
 
@@ -1236,7 +1238,8 @@ presenceWss.on("connection", ws => {
 const httpServer = app.listen(PORT, () => log(`fixed-live na porta ${PORT}, broadcast-box em ${BB_URL}`))
 httpServer.on("upgrade", (req, sock, head) => {
   // sob o prefixo do proxy do broadcast-box (ReverseProxy repassa o upgrade do WS)
-  if (req.url.startsWith("/api/fixed/ws/jam")) jamWss.handleUpgrade(req, sock, head, ws => jamWss.emit("connection", ws, req))
+  if (new URL(req.url, "http://localhost").pathname === "/api/fixed/ws/plugin-updates") pluginUpdates.upgrade(req, sock, head)
+  else if (req.url.startsWith("/api/fixed/ws/jam")) jamWss.handleUpgrade(req, sock, head, ws => jamWss.emit("connection", ws, req))
   else if (req.url.startsWith("/api/fixed/ws/presence")) presenceWss.handleUpgrade(req, sock, head, ws => presenceWss.emit("connection", ws, req))
   else if (req.url.startsWith("/api/fixed/ws/radio")) radio.upgrade(req, sock, head)
   else if (req.url.startsWith("/api/fixed/ws/chat")) chatWss.handleUpgrade(req, sock, head, ws => chatWss.emit("connection", ws, req))
