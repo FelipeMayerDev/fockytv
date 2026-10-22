@@ -26,3 +26,24 @@ test('yt: troca, pause, play, seek e snapshot tardio usam o relógio do servidor
   assert.equal(room.snapshot().videoId, 'bbbbbbbbbbb')
   assert.equal(jamYtState().snapshot(), null, 'outra sala começa vazia')
 })
+
+test('mux de vídeo e áudio usa MP4 sem recodificar e encerra subprocesso ao desconectar', async () => {
+  const { EventEmitter } = await import('node:events')
+  const { PassThrough } = await import('node:stream')
+  const { muxYt } = await import('../jam-yt.js')
+  const process = new EventEmitter()
+  process.stdout = new PassThrough()
+  let killed = false, args
+  process.kill = () => { killed = true }
+  const res = new PassThrough()
+  let contentType
+  res.setHeader = (key, value) => { contentType = value }
+  muxYt('video-url', 'audio-url', res, (command, argv) => { assert.equal(command, 'ffmpeg'); args = argv; return process })
+  assert.ok(args.includes('video-url') && args.includes('audio-url'))
+  assert.equal(args[args.indexOf('-c') + 1], 'copy')
+  assert.equal(contentType, 'video/mp4')
+  res.destroy()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.ok(killed)
+  process.emit('close', 0)
+})

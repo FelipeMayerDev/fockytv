@@ -16,7 +16,7 @@ import { logTrackPlayed, mediaHistory, addChatMsg, chatGet, chatPage, chatLatest
          addClip, getClip, listClips, updateClipFile, delClip } from "./db.js"
 import { recorder } from "./recorder.js"
 import { createRadio } from "./radio.js"
-import { jamYtState } from "./jam-yt.js"
+import { jamYtState, muxYt } from "./jam-yt.js"
 import { createPluginUpdates } from "./plugin-updates.js"
 
 const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
@@ -918,11 +918,11 @@ async function jamYtMeta (id, video = false) {
   const hit = ytCache.get(key)
   if (hit && Date.now() - hit.at < 60 * 60_000) return hit
   const prom = ytPending.get(key) ?? (async () => {
-    const j = await ytdlJson(["-J", "--no-playlist", "-f", video ? "b[ext=mp4][height<=720]" : "ba/b", ...cookieFlags(),
+    const j = await ytdlJson(["-J", "--no-playlist", "-f", video ? "bv[ext=mp4][vcodec^=avc1][height<=720]+ba[ext=m4a]/b[ext=mp4][height<=720]" : "ba/b", ...cookieFlags(),
                               `https://www.youtube.com/watch?v=${id}`])
     const url = j.requested_formats?.[0]?.url ?? j.url
     if (!url) throw new Error("sem stream disponível")
-    const meta = { at: Date.now(), title: j.title ?? id, duration: j.duration ?? 0, url }
+    const meta = { at: Date.now(), title: j.title ?? id, duration: j.duration ?? 0, url, ...(video && j.requested_formats?.[1]?.url ? { audioUrl: j.requested_formats[1].url } : {}) }
     ytCache.set(key, meta)
     capped(ytCache, 200)
     return meta
@@ -935,13 +935,18 @@ app.get("/api/fixed/jam/yt", wrap(async (req, res) => {
   const id = (req.query.id ?? "").toString()
   if (!/^[\w-]{11}$/.test(id)) return res.status(400).json({ error: "id inválido" })
   const meta = await jamYtMeta(id, req.query.video === "1")
-  res.json({ title: meta.title, duration: meta.duration, url: meta.url })
+  res.json({ title: meta.title, duration: meta.duration, url: meta.url, ...(meta.audioUrl ? { audioUrl: meta.audioUrl } : {}) })
 }))
 
 app.get("/api/fixed/jam/yt/stream", wrap(async (req, res) => {
-  let u
-  try { u = new URL((req.query.u ?? "").toString()) } catch { return res.status(400).json({ error: "url inválida" }) }
-  if (u.protocol !== "https:" || u.port || u.username || u.password || !u.hostname.endsWith(".googlevideo.com")) return res.status(400).json({ error: "host não permitido" })
+  let u, audio
+  try {
+    u = new URL((req.query.u ?? "").toString())
+    if (req.query.a) audio = new URL(req.query.a.toString())
+  } catch { return res.status(400).json({ error: "url inválida" }) }
+  if ([u, audio].filter(Boolean).some(u => u.protocol !== "https:" || u.port || u.username || u.password || !u.hostname.endsWith(".googlevideo.com")))
+    return res.status(400).json({ error: "host não permitido" })
+  if (audio) return muxYt(u.href, audio.href, res)
   const headers = {}
   if (req.headers.range) headers.Range = req.headers.range
   const r = await fetch(u, { headers, redirect: "error", signal: AbortSignal.timeout(180_000) })
