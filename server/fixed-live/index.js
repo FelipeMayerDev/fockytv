@@ -262,6 +262,7 @@ async function lyricsOf (meta) {
     // falha transitória (429, rede): NÃO cacheia — a próxima chamada tenta de
     // novo. Cachear aqui seria enterrar a letra de uma música famosa pra sempre
     log("[music] busca de letra falhou (vai retryar):", e.message)
+    lines = undefined
   }
   return lines
 }
@@ -1512,7 +1513,10 @@ app.get("/api/fixed/jam/yt/lyrics", wrap(async (req, res) => {
   if (!/^[\w-]{11}$/.test(id)) return res.status(400).json({ error: "id inválido" })
   // jamYtMeta não traz o id: lyricsOf cacheia por ele
   const meta = { ...await jamYtMeta(id), id }
-  res.json({ id, lines: (await lyricsOf(meta)) ?? [] })
+  const lines = await lyricsOf(meta)
+  // 503 = falha transitória do LRCLIB: o plugin tenta de novo em vez de mostrar "Sem letra"
+  if (lines === undefined) return res.status(503).json({ error: "busca de letra falhou" })
+  res.json({ id, lines: lines ?? [] })
 }))
 
 
