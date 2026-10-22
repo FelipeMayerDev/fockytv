@@ -17,6 +17,7 @@ import { logTrackPlayed, mediaHistory, addChatMsg, chatGet, chatPage, chatLatest
 import { recorder } from "./recorder.js"
 import { createRadio } from "./radio.js"
 import { jamYtState, muxYt } from "./jam-yt.js"
+import { pickLyrics } from "./lyrics.js"
 import { createPluginUpdates } from "./plugin-updates.js"
 
 const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
@@ -224,21 +225,6 @@ const cleanTitle = t => t
   .replace(/\s*[-–—|]\s*$/, "")
   .trim()
 
-const lrcTime = /^\[(\d+):(\d+)(?:[.:](\d+))?\]/gm
-function parseLrc (lrc) {
-  const lines = []
-  for (const raw of lrc.split("\n")) {
-    lrcTime.lastIndex = 0
-    const stamps = []
-    let m, text = raw
-    while ((m = lrcTime.exec(raw))) stamps.push(+m[1] * 60 + +m[2] + (+((m[3] ?? "0").padEnd(3, "0")) / 1000))
-    text = raw.replace(lrcTime, "").trim()
-    if (!text) continue
-    for (const t of stamps) lines.push({ t, text })
-  }
-  return lines.sort((a, b) => a.t - b.t)
-}
-
 const lyricsCache = new Map() // id -> lines[] | null (null = sem letra)
 async function lyricsOf (meta) {
   if (lyricsCache.has(meta.id)) return lyricsCache.get(meta.id)
@@ -267,9 +253,7 @@ async function lyricsOf (meta) {
     if (!hits.some(qualifies) && artist && track)
       hits = hits.concat(await get({ q: `${artist} ${track}` }))
 
-    const hit = hits.filter(qualifies)
-      .sort((a, b) => Math.abs(a.duration - meta.duration) - Math.abs(b.duration - meta.duration))[0]
-    if (hit) lines = parseLrc(hit.syncedLyrics)
+    lines = pickLyrics(hits.filter(qualifies), meta.duration)
     if (lines?.length) log(`[music] letra encontrada (${lines.length} linhas): ${meta.title}`)
     else log(`[music] sem letra no LRCLIB: ${meta.title}`)
     capped(lyricsCache, 500)
