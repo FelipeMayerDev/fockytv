@@ -1201,7 +1201,11 @@ jamWss.on("connection", (ws, req) => {
   // as offers (joiner conecta aos veteranos — evita offer dupla no par)
   for (const [other, ows] of members) if (ows !== ws) jamSend(ows, { type: "peer-joined", nick })
   jamSend(ws, { type: "peers", peers: [...members.keys()].filter(n => n !== nick) })
-  if (watch && watchStates.has(room)) jamSend(ws, watchStates.get(room).snapshot())
+  if (watch) {
+    if (!watchStates.has(room)) watchStates.set(room, jamYtState())
+    jamSend(ws, watchStates.get(room).members())
+    if (watchStates.get(room).snapshot()) jamSend(ws, watchStates.get(room).snapshot())
+  }
 
   ws.on("message", data => {
     let msg
@@ -1219,7 +1223,7 @@ jamWss.on("connection", (ws, req) => {
       if (watch) {
         let state = watchStates.get(room)
         if (!state) watchStates.set(room, state = jamYtState())
-        const update = state.command(msg, nick)
+        const update = msg.action === "listen" && typeof msg.on === "boolean" ? state.listen(nick, msg.on) : state.command(msg, nick)
         if (update) for (const ows of members.values()) jamSend(ows, update)
         return
       }
@@ -1235,6 +1239,10 @@ jamWss.on("connection", (ws, req) => {
   const leave = () => {
     if (members.get(nick) !== ws) return // reconexão já assumiu o nick
     members.delete(nick)
+    if (watch && watchStates.has(room)) {
+      const update = watchStates.get(room).listen(nick, false)
+      for (const ows of members.values()) jamSend(ows, update)
+    }
     if (members.size) jamRooms.set(room, members)
     else { jamRooms.delete(room); jamRoomTypes.delete(room); watchStates.delete(room) }
     for (const ows of members.values()) jamSend(ows, { type: "peer-left", nick })
