@@ -961,12 +961,12 @@ app.get("/api/fixed/jam/yt/stream", wrap(async (req, res) => {
 const watchVideos = new Map() // videoId -> Promise<Buffer>
 function watchVideo (id) {
   if (watchVideos.has(id)) return watchVideos.get(id)
-  const ytdl = format => run("yt-dlp", ["--quiet", "--no-warnings", "--no-playlist", "--socket-timeout", "15", "--max-filesize", "200M",
+  const ytdl = format => run("yt-dlp", ["--quiet", "--no-warnings", "--no-playlist", "--socket-timeout", "15", "--max-filesize", "400M",
                                         ...cookieFlags(), "-f", format, "-o", "-", `https://www.youtube.com/watch?v=${id}`])
-  const data = Promise.all([ytdl("bv[ext=mp4][vcodec^=avc1][height<=720]/b[ext=mp4][height<=720]"), ytdl("ba[ext=m4a]")])
+  const data = Promise.all([ytdl("bv[ext=mp4][vcodec^=avc1][height<=1080][filesize<?400M]/bv[ext=mp4][vcodec^=avc1][height<=720]/b[ext=mp4][height<=720]"), ytdl("ba[ext=m4a]")])
     .then(([video, audio]) => muxYt(video, audio))
   watchVideos.set(id, data)
-  // ponytail: até 3 vídeos (~200 MB cada) por 30 min; limite por bytes se a RAM apertar
+  // ponytail: até 3 vídeos (~400 MB cada) por 30 min; limite por bytes se a RAM apertar
   capped(watchVideos, 3)
   const forget = () => { if (watchVideos.get(id) === data) watchVideos.delete(id) }
   data.catch(e => { log(`[watch] ${id} falhou:`, e.message); forget() })
