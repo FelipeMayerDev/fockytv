@@ -910,46 +910,40 @@ app.get("/api/status", (req, res) => res.json([]))
 // ── /yt da sala: áudio do YouTube pelo mesmo pipeline do canal de música ──
 // yt-dlp extrai a URL do bestaudio; o stream é proxado pra evitar o 403 de
 // IP-lock do googlevideo nos clientes e dar suporte a Range (seek).
-const ytCache = new Map()      // videoId:video -> { at, title, duration, url }
-const ytPending = new Map()    // videoId:video -> Promise (dedup entre os membros)
+const ytCache = new Map()      // videoId -> { at, title, duration, url }
+const ytPending = new Map()    // videoId -> Promise (dedup entre os membros)
 
-async function jamYtMeta (id, video = false) {
-  const key = `${id}:${video}`
-  const hit = ytCache.get(key)
+async function jamYtMeta (id) {
+  const hit = ytCache.get(id)
   if (hit && Date.now() - hit.at < 60 * 60_000) return hit
-  const prom = ytPending.get(key) ?? (async () => {
-    const j = await ytdlJson(["-J", "--no-playlist", "-f", video ? "bv[ext=mp4][vcodec^=avc1][height<=720]+ba[ext=m4a]/b[ext=mp4][height<=720]" : "ba/b", ...cookieFlags(),
+  const prom = ytPending.get(id) ?? (async () => {
+    const j = await ytdlJson(["-J", "--no-playlist", "-f", "ba/b", ...cookieFlags(),
                               `https://www.youtube.com/watch?v=${id}`])
     const url = j.requested_formats?.[0]?.url ?? j.url
-    if (!url) throw new Error("sem stream disponível")
-    const meta = { at: Date.now(), title: j.title ?? id, duration: j.duration ?? 0, url, ...(video && j.requested_formats?.[1]?.url ? { audioUrl: j.requested_formats[1].url } : {}) }
-    ytCache.set(key, meta)
+    if (!url) throw new Error("sem stream de áudio")
+    const meta = { at: Date.now(), title: j.title ?? id, duration: j.duration ?? 0, url }
+    ytCache.set(id, meta)
     capped(ytCache, 200)
     return meta
   })()
-  ytPending.set(key, prom)
-  try { return await prom } finally { ytPending.delete(key) }
+  ytPending.set(id, prom)
+  try { return await prom } finally { ytPending.delete(id) }
 }
 
 app.get("/api/fixed/jam/yt", wrap(async (req, res) => {
   const id = (req.query.id ?? "").toString()
   if (!/^[\w-]{11}$/.test(id)) return res.status(400).json({ error: "id inválido" })
-  const meta = await jamYtMeta(id, req.query.video === "1")
-  res.json({ title: meta.title, duration: meta.duration, url: meta.url, ...(meta.audioUrl ? { audioUrl: meta.audioUrl } : {}) })
+  const meta = await jamYtMeta(id)
+  res.json({ title: meta.title, duration: meta.duration, url: meta.url })
 }))
 
 app.get("/api/fixed/jam/yt/stream", wrap(async (req, res) => {
-  let u, audio
-  try {
-    u = new URL((req.query.u ?? "").toString())
-    if (req.query.a) audio = new URL(req.query.a.toString())
-  } catch { return res.status(400).json({ error: "url inválida" }) }
-  if ([u, audio].filter(Boolean).some(u => u.protocol !== "https:" || u.port || u.username || u.password || !u.hostname.endsWith(".googlevideo.com")))
-    return res.status(400).json({ error: "host não permitido" })
-  if (audio) return muxYt(u.href, audio.href, res)
+  let u
+  try { u = new URL((req.query.u ?? "").toString()) } catch { return res.status(400).json({ error: "url inválida" }) }
+  if (u.protocol !== "https:" || u.port || u.username || u.password || !u.hostname.endsWith(".googlevideo.com")) return res.status(400).json({ error: "host não permitido" })
   const headers = {}
   if (req.headers.range) headers.Range = req.headers.range
-  const r = await fetch(u, { headers, redirect: "error", signal: AbortSignal.timeout(180_000) })
+  const r = await fetch(u, { headers, redirect: "error", signal: AbortSignal.timeout(30_000) })
   const pass = {}
   for (const h of ["content-type", "content-length", "content-range", "accept-ranges"])
     if (r.headers.get(h)) pass[h] = r.headers.get(h)
@@ -960,6 +954,34 @@ app.get("/api/fixed/jam/yt/stream", wrap(async (req, res) => {
     res.on("close", () => stream.destroy())
     stream.pipe(res)
   } else res.end()
+}))
+
+// Watch party: o yt-dlp baixa em blocos (o googlevideo limita download contínuo
+// à velocidade do vídeo) direto pra memória. Fica em cache pra quem entrar depois.
+const watchVideos = new Map() // videoId -> Promise<Buffer>
+function watchVideo (id) {
+  if (watchVideos.has(id)) return watchVideos.get(id)
+  const ytdl = format => run("yt-dlp", ["--quiet", "--no-warnings", "--no-playlist", "--socket-timeout", "15", "--max-filesize", "200M",
+                                        ...cookieFlags(), "-f", format, "-o", "-", `https://www.youtube.com/watch?v=${id}`])
+  const data = Promise.all([ytdl("bv[ext=mp4][vcodec^=avc1][height<=720]/b[ext=mp4][height<=720]"), ytdl("ba[ext=m4a]")])
+    .then(([video, audio]) => muxYt(video, audio))
+  watchVideos.set(id, data)
+  // ponytail: até 3 vídeos (~200 MB cada) por 30 min; limite por bytes se a RAM apertar
+  capped(watchVideos, 3)
+  const forget = () => { if (watchVideos.get(id) === data) watchVideos.delete(id) }
+  data.catch(e => { log(`[watch] ${id} falhou:`, e.message); forget() })
+  setTimeout(forget, 30 * 60_000).unref()
+  return data
+}
+app.get("/api/fixed/jam/yt/video", wrap(async (req, res) => {
+  const id = (req.query.id ?? "").toString()
+  if (!/^[\w-]{11}$/.test(id)) return res.status(400).json({ error: "id inválido" })
+  const started = Date.now()
+  const data = await watchVideo(id)
+  log(`[watch] ${id}: ${(data.length / 1e6).toFixed(1)} MB em ${((Date.now() - started) / 1000).toFixed(1)} s`)
+  res.setHeader("content-type", "video/mp4")
+  res.setHeader("cache-control", "no-store")
+  res.end(data)
 }))
 
 // ── player de música das calls do Discord (radio.js) ──────────────────────
