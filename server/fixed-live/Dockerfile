@@ -21,7 +21,7 @@ RUN curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_
 WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev && npm cache clean --force
-COPY index.js db.js recorder.js radio.js jam-yt.js plugin-updates.js ./
+COPY index.js db.js recorder.js radio.js jam-yt.js lyrics.js plugin-updates.js ./
 
 ENV PORT=3000 BB_URL=http://broadcast-box:8080
 CMD ["node", "index.js"]
