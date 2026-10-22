@@ -188,6 +188,57 @@ try {
   ok(!snap4?.rooms?.length && snap4?.total === 0 && snap4?.status === 'idle',
     'sala vazia desaparece do snapshot')
 
+  // Watch party usa o mesmo WS do jam, ecoa estado autoritativo e guarda snapshot.
+  const watchUrl = nick => `${base}/api/fixed/ws/jam?room=watch:123456&watch=1&nick=${nick}`
+  const wa = await opened(new WebSocket(watchUrl('wa')))
+  const wb = await opened(new WebSocket(watchUrl('wb')))
+  const other = await opened(new WebSocket(`${base}/api/fixed/ws/jam?room=watch:654321&watch=1&nick=other`))
+  const stateA = next(wa, m => m.type === 'yt')
+  const stateB = next(wb, m => m.type === 'yt')
+  const isolated = none(other, m => m.type === 'yt', 100)
+  wa.send(JSON.stringify({ type: 'yt', action: 'load', videoId: 'aaaaaaaaaaa' }))
+  ok((await stateA)?.playing === true && (await stateB)?.videoId === 'aaaaaaaaaaa',
+    'load confirma estado no remetente e no participante')
+  ok(await isolated, 'watch party não vaza para outro canal')
+  const pause = next(wa, m => m.type === 'yt' && !m.playing)
+  wb.send(JSON.stringify({ type: 'yt', action: 'state', videoId: 'aaaaaaaaaaa', playing: false, pos: 20 }))
+  ok((await pause)?.pos === 20, 'outro participante pode pausar')
+  const seek = next(wb, m => m.type === 'yt' && m.pos === 50)
+  wa.send(JSON.stringify({ type: 'yt', action: 'seek', videoId: 'aaaaaaaaaaa', playing: false, pos: 50 }))
+  ok((await seek)?.playing === false, 'seek compartilhado preserva pausa')
+  const wc = new WebSocket(watchUrl('wc'))
+  const latePaused = next(wc, m => m.type === 'yt')
+  await opened(wc)
+  ok((await latePaused)?.pos === 50, 'entrada tardia recebe posição pausada')
+  const resume = next(wa, m => m.type === 'yt' && m.playing)
+  wb.send(JSON.stringify({ type: 'yt', action: 'state', videoId: 'aaaaaaaaaaa', playing: true, pos: 60, at: -999 }))
+  await resume
+  const wd = new WebSocket(watchUrl('wd'))
+  const latePlaying = next(wd, m => m.type === 'yt')
+  await opened(wd)
+  const live = await latePlaying
+  ok(live?.playing && live.pos >= 60 && live.pos < 62, 'entrada tardia tocando ignora relógio do cliente')
+  const changed = next(wc, m => m.type === 'yt' && m.videoId === 'bbbbbbbbbbb')
+  wa.send(JSON.stringify({ type: 'yt', action: 'load', videoId: 'bbbbbbbbbbb' }))
+  ok((await changed)?.pos === 0, 'troca de vídeo reinicia relógio')
+  const invalid = none(wc, m => m.type === 'yt', 100)
+  wb.send('null')
+  wb.send(JSON.stringify({ type: 'yt', action: 'seek', videoId: 'aaaaaaaaaaa', playing: true, pos: 500 }))
+  ok(await invalid, 'mensagem malformada e comando do vídeo anterior são ignorados')
+  const closed = next(p1, m => m.type === 'member-left' && m.nick === 'wa')
+  wb.close(); wc.close(); wd.close(); other.close(); wa.close()
+  await closed
+  // Fecha a sala inteira antes de confirmar que a próxima entrada começa vazia.
+  for (let i = 0; i < 20; i++) {
+    const rooms = await fetch(`http://127.0.0.1:${PORT}/api/fixed/jam`).then(r => r.json())
+    if (!rooms.rooms.some(r => r.room === 'watch:123456')) break
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  const fresh = new WebSocket(watchUrl('fresh'))
+  const empty = none(fresh, m => m.type === 'yt', 100)
+  await opened(fresh)
+  ok(await empty, 'sala vazia descarta estado da watch party')
+  fresh.close()
   p1.close()
 } finally {
   killChild()

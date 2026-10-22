@@ -16,6 +16,7 @@ import { logTrackPlayed, mediaHistory, addChatMsg, chatGet, chatPage, chatLatest
          addClip, getClip, listClips, updateClipFile, delClip } from "./db.js"
 import { recorder } from "./recorder.js"
 import { createRadio } from "./radio.js"
+import { jamYtState } from "./jam-yt.js"
 import { createPluginUpdates } from "./plugin-updates.js"
 
 const BB_URL = process.env.BB_URL ?? "http://broadcast-box:8080"
@@ -909,46 +910,51 @@ app.get("/api/status", (req, res) => res.json([]))
 // ── /yt da sala: áudio do YouTube pelo mesmo pipeline do canal de música ──
 // yt-dlp extrai a URL do bestaudio; o stream é proxado pra evitar o 403 de
 // IP-lock do googlevideo nos clientes e dar suporte a Range (seek).
-const ytCache = new Map()      // videoId -> { at, title, duration, url }
-const ytPending = new Map()    // videoId -> Promise (dedup entre os membros)
+const ytCache = new Map()      // videoId:video -> { at, title, duration, url }
+const ytPending = new Map()    // videoId:video -> Promise (dedup entre os membros)
 
-async function jamYtMeta (id) {
-  const hit = ytCache.get(id)
+async function jamYtMeta (id, video = false) {
+  const key = `${id}:${video}`
+  const hit = ytCache.get(key)
   if (hit && Date.now() - hit.at < 60 * 60_000) return hit
-  const prom = ytPending.get(id) ?? (async () => {
-    const j = await ytdlJson(["-J", "--no-playlist", "-f", "ba/b", ...cookieFlags(),
+  const prom = ytPending.get(key) ?? (async () => {
+    const j = await ytdlJson(["-J", "--no-playlist", "-f", video ? "b[ext=mp4][height<=720]" : "ba/b", ...cookieFlags(),
                               `https://www.youtube.com/watch?v=${id}`])
     const url = j.requested_formats?.[0]?.url ?? j.url
-    if (!url) throw new Error("sem stream de áudio")
+    if (!url) throw new Error("sem stream disponível")
     const meta = { at: Date.now(), title: j.title ?? id, duration: j.duration ?? 0, url }
-    ytCache.set(id, meta)
+    ytCache.set(key, meta)
     capped(ytCache, 200)
     return meta
   })()
-  ytPending.set(id, prom)
-  try { return await prom } finally { ytPending.delete(id) }
+  ytPending.set(key, prom)
+  try { return await prom } finally { ytPending.delete(key) }
 }
 
 app.get("/api/fixed/jam/yt", wrap(async (req, res) => {
   const id = (req.query.id ?? "").toString()
   if (!/^[\w-]{11}$/.test(id)) return res.status(400).json({ error: "id inválido" })
-  const meta = await jamYtMeta(id)
+  const meta = await jamYtMeta(id, req.query.video === "1")
   res.json({ title: meta.title, duration: meta.duration, url: meta.url })
 }))
 
 app.get("/api/fixed/jam/yt/stream", wrap(async (req, res) => {
   let u
   try { u = new URL((req.query.u ?? "").toString()) } catch { return res.status(400).json({ error: "url inválida" }) }
-  if (!u.hostname.endsWith(".googlevideo.com")) return res.status(400).json({ error: "host não permitido" })
+  if (u.protocol !== "https:" || u.port || u.username || u.password || !u.hostname.endsWith(".googlevideo.com")) return res.status(400).json({ error: "host não permitido" })
   const headers = {}
   if (req.headers.range) headers.Range = req.headers.range
-  const r = await fetch(u, { headers, signal: AbortSignal.timeout(30_000) })
+  const r = await fetch(u, { headers, redirect: "error", signal: AbortSignal.timeout(180_000) })
   const pass = {}
   for (const h of ["content-type", "content-length", "content-range", "accept-ranges"])
     if (r.headers.get(h)) pass[h] = r.headers.get(h)
   res.writeHead(r.status, pass)
-  if (r.body) Readable.fromWeb(r.body).pipe(res)
-  else res.end()
+  if (r.body) {
+    const stream = Readable.fromWeb(r.body)
+    stream.on("error", () => res.destroy())
+    res.on("close", () => stream.destroy())
+    stream.pipe(res)
+  } else res.end()
 }))
 
 // ── player de música das calls do Discord (radio.js) ──────────────────────
@@ -1131,6 +1137,7 @@ app.post("/api/fixed/music/stop", wrap(async (req, res) => {
 const jamWss = new WebSocketServer({ noServer: true })
 // sala -> Map(nick -> ws). Reuso de nick derruba o antigo (reconexão).
 const jamRooms = new Map()
+const watchStates = new Map()
 // sala -> 'music' | 'voice'. O primeiro join define (mode do cliente vai na
 // query como type); sala vazia esquece. É o que separa Estúdio de canal de
 // conversa no /api/fixed/jam e nos eventos de presença (campo `kind`) — sem
@@ -1150,6 +1157,8 @@ jamWss.on("connection", (ws, req) => {
   if (!room || !nick) return ws.close(4001, "room e nick obrigatórios")
   // sem type (cliente antigo) a sala é conversa: era o comportamento dos
   // canais genéricos antes do Estúdio ganhar pipeline própria
+  const watch = u.searchParams.get("watch") === "1"
+  if (watch !== room.startsWith("watch:") || watch && !/^watch:\d{5,25}$/.test(room)) return ws.close(4001, "sala watch inválida")
   const type = u.searchParams.get("type") === "music" ? "music" : "voice"
 
   const members = jamRooms.get(room) ?? new Map()
@@ -1165,10 +1174,12 @@ jamWss.on("connection", (ws, req) => {
   // as offers (joiner conecta aos veteranos — evita offer dupla no par)
   for (const [other, ows] of members) if (ows !== ws) jamSend(ows, { type: "peer-joined", nick })
   jamSend(ws, { type: "peers", peers: [...members.keys()].filter(n => n !== nick) })
+  if (watch && watchStates.has(room)) jamSend(ws, watchStates.get(room).snapshot())
 
   ws.on("message", data => {
     let msg
     try { msg = JSON.parse(data) } catch { return }
+    if (!msg || typeof msg !== "object" || members.get(nick) !== ws) return
     if (msg.type === "ping") return jamSend(ws, { type: "pong", t: msg.t })
     // chat da sala: broadcast pra todos (o remetente renderiza o dele local)
     if (msg.type === "chat" && typeof msg.text === "string") {
@@ -1178,6 +1189,13 @@ jamWss.on("connection", (ws, req) => {
     }
     // /yt do chat: estado do player compartilhado (load/state/seek)
     if (msg.type === "yt") {
+      if (watch) {
+        let state = watchStates.get(room)
+        if (!state) watchStates.set(room, state = jamYtState())
+        const update = state.command(msg, nick)
+        if (update) for (const ows of members.values()) jamSend(ows, update)
+        return
+      }
       const relay = { type: "yt", from: nick, ...msg }
       for (const ows of members.values()) if (ows !== ws) jamSend(ows, relay)
       return
@@ -1191,7 +1209,7 @@ jamWss.on("connection", (ws, req) => {
     if (members.get(nick) !== ws) return // reconexão já assumiu o nick
     members.delete(nick)
     if (members.size) jamRooms.set(room, members)
-    else { jamRooms.delete(room); jamRoomTypes.delete(room) }
+    else { jamRooms.delete(room); jamRoomTypes.delete(room); watchStates.delete(room) }
     for (const ows of members.values()) jamSend(ows, { type: "peer-left", nick })
     presenceBroadcast({ type: "member-left", room, nick, kind: jamRoomTypes.get(room) ?? type })
     log(`[jam] ${nick} saiu de "${room}" (${members.size})`)
