@@ -262,9 +262,10 @@ async function lyricsOf (meta) {
       ? await get({ artist_name: artist, track_name: track })
       : await get({ q: cleanTitle(meta.title) })
     // busca por artista+música é exigente: se ninguém casou, tenta o título
-    // completo como fallback antes de desistir
+    // completo como fallback antes de desistir. Falha aqui também é
+    // transitória: sobe pro catch de fora em vez de cachear "sem letra"
     if (!hits.some(qualifies) && artist && track)
-      hits = hits.concat(await get({ q: `${artist} ${track}` }).catch(() => []))
+      hits = hits.concat(await get({ q: `${artist} ${track}` }))
 
     const hit = hits.filter(qualifies)
       .sort((a, b) => Math.abs(a.duration - meta.duration) - Math.abs(b.duration - meta.duration))[0]
