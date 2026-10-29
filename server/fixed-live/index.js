@@ -946,7 +946,7 @@ app.get("/api/fixed/jam/yt", wrap(async (req, res) => {
   const id = (req.query.id ?? "").toString()
   if (!/^[\w-]{11}$/.test(id)) return res.status(400).json({ error: "id inválido" })
   const meta = await ("video" in req.query ? jamYtVideoMeta(id) : jamYtMeta(id))
-  res.json({ title: meta.title, duration: meta.duration, url: meta.url })
+  res.json({ title: meta.title, duration: meta.duration, url: meta.url, audioUrl: meta.audioUrl })
 }))
 
 app.get("/api/fixed/jam/yt/stream", wrap(async (req, res) => {
