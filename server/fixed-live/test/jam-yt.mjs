@@ -27,29 +27,6 @@ test('yt: troca, pause, play, seek e snapshot tardio usam o relógio do servidor
   assert.equal(jamYtState().snapshot(), null, 'outra sala começa vazia')
 })
 
-test('mux junta vídeo e áudio da memória sem recodificar', async () => {
-  const { EventEmitter } = await import('node:events')
-  const { PassThrough } = await import('node:stream')
-  const { muxYt } = await import('../jam-yt.js')
-  const fake = () => {
-    const process = new EventEmitter()
-    process.stdout = new PassThrough()
-    process.stdin = new PassThrough()
-    process.stdio = [process.stdin, process.stdout, null, new PassThrough()]
-    return process
-  }
-  let process, args
-  const result = muxYt(Buffer.from('video'), Buffer.from('audio'), (command, argv) => { assert.equal(command, 'ffmpeg'); args = argv; return process = fake() })
-  assert.deepEqual([args[args.indexOf('-c') + 1], process.stdin.read().toString(), process.stdio[3].read().toString()], ['copy', 'video', 'audio'])
-  process.stdout.write('mp4')
-  process.emit('close', 0)
-  assert.equal((await result).toString(), 'mp4')
-  const failed = muxYt(Buffer.from('v'), Buffer.from('a'), () => process = fake())
-  process.emit('close', 1)
-  await assert.rejects(failed)
-})
-
-
 test('playlist compartilhada preserva o vídeo atual, avança uma vez e informa espectadores', () => {
   const room = jamYtState(() => 1000)
   assert.deepEqual(room.members().viewers, [])
