@@ -1,10 +1,12 @@
 # live-api: binário estático sem CGO — imagem scratch mínima (sinalização é
 # leve: só HTTP pro mediamtx/fixed-live + estáticos da ui/)
 FROM golang:1.26-alpine AS build
+RUN apk add --no-cache ca-certificates
 WORKDIR /src
 COPY go.mod *.go ./
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /live-api .
 
 FROM scratch
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /live-api /live-api
 ENTRYPOINT ["/live-api"]

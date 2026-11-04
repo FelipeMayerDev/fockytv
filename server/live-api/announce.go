@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -84,6 +85,7 @@ func (a *app) livekitAnnounce(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, message, code)
 	}
 	if allowed, err := voiceChannel(r, announce.Channel); err != nil {
+		log.Printf("[discord-announce] verify channel: %v", err)
 		retry(502, "Discord indisponível")
 		return
 	} else if !allowed {
@@ -91,6 +93,7 @@ func (a *app) livekitAnnounce(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := postAnnounce(r, s.path, announce, image); err != nil {
+		log.Printf("[discord-announce] send message: %v", err)
 		retry(502, "Discord indisponível")
 		return
 	}
