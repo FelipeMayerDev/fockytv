@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -92,16 +93,27 @@ func (a *app) livekitAnnounce(w http.ResponseWriter, r *http.Request) {
 		retry(403, "Canal não permitido")
 		return
 	}
-	if err := postAnnounce(r, s.path, announce, image); err != nil {
+	message, err := postAnnounce(r, s.path, announce, image)
+	if err != nil {
 		log.Printf("[discord-announce] send message: %v", err)
 		retry(502, "Discord indisponível")
 		return
 	}
+	a.mu.Lock()
+	active := a.sessions[s.id] == s
+	if active {
+		s.announceChannel, s.announceMessage = announce.Channel, message
+	}
+	a.mu.Unlock()
+	// A live pode encerrar enquanto o Discord recebe o POST.
+	if !active {
+		go deleteAnnounce(announce.Channel, message)
+	}
 	w.WriteHeader(204)
 }
 
-func discordRequest(r *http.Request, method, path string, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(r.Context(), method, discordAPI+path, body)
+func discordRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, discordAPI+path, body)
 	if err == nil {
 		req.Header.Set("Authorization", "Bot "+discordToken)
 	}
@@ -110,7 +122,7 @@ func discordRequest(r *http.Request, method, path string, body io.Reader) (*http
 
 // Canal de voz ou palco do servidor configurado.
 func voiceChannel(r *http.Request, id string) (bool, error) {
-	req, err := discordRequest(r, "GET", "/channels/"+id, nil)
+	req, err := discordRequest(r.Context(), "GET", "/channels/"+id, nil)
 	if err != nil {
 		return false, err
 	}
@@ -135,7 +147,7 @@ func voiceChannel(r *http.Request, id string) (bool, error) {
 	return channel.GuildID == discordGuild && (channel.Type == 2 || channel.Type == 13), nil
 }
 
-func postAnnounce(r *http.Request, nick string, announce liveAnnounce, image []byte) error {
+func postAnnounce(r *http.Request, nick string, announce liveAnnounce, image []byte) (string, error) {
 	embed := map[string]any{
 		"title":     strings.TrimSpace(announce.Title),
 		"color":     0x5865f2,
@@ -161,18 +173,87 @@ func postAnnounce(r *http.Request, nick string, announce liveAnnounce, image []b
 		part.Write(image)
 	}
 	form.Close()
-	req, err := discordRequest(r, "POST", "/channels/"+announce.Channel+"/messages", &body)
+	req, err := discordRequest(r.Context(), "POST", "/channels/"+announce.Channel+"/messages", &body)
 	if err != nil {
-		return err
+		return "", err
 	}
 	req.Header.Set("Content-Type", form.FormDataContentType())
 	res, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
-	res.Body.Close()
+	defer res.Body.Close()
 	if res.StatusCode >= 300 {
-		return fmt.Errorf("discord HTTP %d", res.StatusCode)
+		return "", fmt.Errorf("discord HTTP %d", res.StatusCode)
 	}
-	return nil
+	var message struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&message); err != nil {
+		return "", err
+	}
+	if !snowflakeRe.MatchString(message.ID) {
+		return "", fmt.Errorf("Discord retornou uma mensagem sem id válido")
+	}
+	return message.ID, nil
+}
+
+// Usa contexto próprio: o DELETE do cliente pode já ter sido cancelado.
+func deleteAnnounce(channel, message string) {
+	for attempt := 0; attempt < 3; attempt++ {
+		req, err := discordRequest(context.Background(), "DELETE", "/channels/"+channel+"/messages/"+message, nil)
+		if err == nil {
+			var res *http.Response
+			res, err = (&http.Client{Timeout: 10 * time.Second}).Do(req)
+			if err == nil {
+				res.Body.Close()
+				if res.StatusCode < 300 || res.StatusCode == 404 {
+					return
+				}
+				err = fmt.Errorf("discord HTTP %d", res.StatusCode)
+				if res.StatusCode < 500 && res.StatusCode != 429 {
+					log.Printf("[discord-announce] delete message: %v", err)
+					return
+				}
+			}
+		}
+		if attempt == 2 {
+			log.Printf("[discord-announce] delete message: %v", err)
+			return
+		}
+		time.Sleep(time.Duration(attempt+1) * 2 * time.Second)
+	}
+}
+
+// Também remove o aviso se o publicador cair sem enviar DELETE.
+func (a *app) pollAnnouncements() {
+	a.mu.Lock()
+	var sessions []*session
+	for _, s := range a.sessions {
+		if s.announceMessage != "" && time.Since(s.createdAt) > 30*time.Second {
+			sessions = append(sessions, s)
+		}
+	}
+	a.mu.Unlock()
+	if len(sessions) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	streams, err := a.livekitStreams(ctx)
+	if err != nil {
+		log.Printf("[discord-announce] check live: %v", err)
+		return
+	}
+	live := map[string]bool{}
+	for _, stream := range streams {
+		live[stream.StreamKey] = true
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, s := range sessions {
+		if a.sessions[s.id] == s && !live[s.path] {
+			a.drop(s)
+		}
+	}
 }

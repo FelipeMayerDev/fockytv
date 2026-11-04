@@ -72,14 +72,16 @@ type mtxPath struct {
 
 // sessão de sinalização registrada pelo adapter
 type session struct {
-	kind      string // "whip" | "whep"
-	path      string // path no mediamtx (== stream key)
-	nick      string // bearer que criou (whip: publicador; whep: key assistida)
-	viewer    string // whep: ?viewer=
-	location  string // recurso da sessão no mediamtx (requestURI)
-	id        string // uuid que o adapter entregou na Location
-	createdAt time.Time
-	announced bool // livekit-whip: aviso de live já enviado ao Discord
+	kind            string // "whip" | "whep"
+	path            string // path no mediamtx (== stream key)
+	nick            string // bearer que criou (whip: publicador; whep: key assistida)
+	viewer          string // whep: ?viewer=
+	location        string // recurso da sessão no mediamtx (requestURI)
+	id              string // uuid que o adapter entregou na Location
+	createdAt       time.Time
+	announced       bool // livekit-whip: aviso de live já enviado ao Discord
+	announceChannel string
+	announceMessage string
 }
 
 type app struct {
@@ -121,6 +123,7 @@ func bearer(r *http.Request) string {
 func (a *app) pollLoop() {
 	for {
 		a.poll()
+		a.pollAnnouncements()
 		time.Sleep(pollEvery)
 	}
 }
@@ -192,6 +195,10 @@ func (a *app) poll() {
 
 // drop remove a sessão do registro. Chamador segura a.mu.
 func (a *app) drop(s *session) {
+	if s.announceMessage != "" {
+		go deleteAnnounce(s.announceChannel, s.announceMessage)
+		s.announceMessage = ""
+	}
 	delete(a.sessions, s.id)
 	if m := a.byPath[s.path]; m != nil {
 		delete(m, s)
