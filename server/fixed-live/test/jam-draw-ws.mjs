@@ -5,10 +5,10 @@
 //   node test/jam-draw-ws.mjs
 //
 // - traço da caneta (begin/points/end) chega aos outros com o remetente, sem eco
-// - quem entra depois recebe o sync com os traços já guardados
+// - traços são efêmeros: quem entra depois recebe sync só com o toggle "Permitir anotações"
 // - allow é privilégio do dono da live (target === nick); espectador é ignorado
 // - resync devolve um alvo específico com o estado corrente
-// - clear do dono apaga tudo; sala sem watch=1 ignora draw
+// - clear do dono espelha; sala sem watch=1 ignora draw
 import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -113,12 +113,10 @@ try {
   await noMsg(ana, { type: 'draw', action: 'end', id: 's1' })
   ok(true, 'remetente não recebe o próprio traço de volta')
 
-  // quem entra depois recebe o traço guardado
+  // quem entra depois NÃO recebe os traços (efêmeros); o toggle segue no sync
   const bruna = await connect('333333')
   const sync = await bruna.recv({ type: 'draw', action: 'sync' })
-  const entry = sync.targets.find(t => t.target === OWNER)
-  ok(entry && entry.strokes.length === 1 && entry.strokes[0].pts.length === 4 && entry.allowed === true,
-     'sync de boas-vindas traz o traço e o toggle ligado')
+  ok(sync.targets.length === 0, 'traços não são replayados a quem entra depois')
 
   // allow: espectador é ignorado; dono desliga e o estado propaga
   send(bruna.ws, { type: 'draw', target: OWNER, action: 'allow', on: false })
@@ -131,12 +129,12 @@ try {
   ok((await bruna.recv({ type: 'draw', action: 'sync' })).targets[0].allowed === false,
      'resync devolve o alvo com o toggle desligado')
 
-  // clear do dono apaga tudo
+  // clear do dono espelha e o quadro segue efêmero no sync
   send(owner.ws, { type: 'draw', target: OWNER, action: 'clear' })
   await bruno.recv({ type: 'draw', action: 'clear', from: OWNER })
   send(bruno.ws, { type: 'draw', action: 'resync', target: OWNER })
   const cleared = await bruno.recv({ type: 'draw', action: 'sync' })
-  ok(cleared.targets[0].strokes.length === 0, 'clear do dono esvazia o quadro')
+  ok(cleared.targets[0].target === OWNER && cleared.targets[0].allowed === false, 'resync devolve só o toggle, sem traços')
   bruna.ws.close()
   bruno.ws.close()
   ana.ws.close()
