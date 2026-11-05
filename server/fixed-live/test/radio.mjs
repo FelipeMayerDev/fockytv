@@ -47,7 +47,7 @@ try {
   await ana.until(m => m.type === 'state' && m.queue.length === 0)
 
   ana.send({ type: 'listen', on: true })
-  await bia.until(m => m.type === 'state' && m.listeners.join() === 'Ana')
+  await bia.until(m => m.type === 'state' && m.listeners.join() === '22222222' && m.listenerNames.join() === 'Ana')
 
   ana.send(track('aaaaaaaaaaa'))
   let s = await bia.until(m => m.type === 'state' && m.ready)

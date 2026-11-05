@@ -28,6 +28,8 @@ export function createRadio ({ download, log = () => {}, emptyMs = EMPTY_MS }) {
 
   const send = (ws, obj) => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj)) }
   const broadcast = room => {
+    // IDs para o plugin casar a tag de música com o usuário do Discord; nomes para o painel exibir.
+    const ouvindo = [...room.clients.values()].filter(c => c.listening)
     const state = {
       type: "state",
       queue: room.queue.map(({ audio, ...track }) => track),
@@ -35,7 +37,8 @@ export function createRadio ({ download, log = () => {}, emptyMs = EMPTY_MS }) {
       playing: !room.paused,
       ready: room.ready,
       position: position(room),
-      listeners: [...new Set([...room.clients.values()].filter(c => c.listening).map(c => c.name))],
+      listeners: [...new Set(ouvindo.map(c => c.user))],
+      listenerNames: [...new Set(ouvindo.map(c => c.name))],
     }
     for (const ws of room.clients.keys()) send(ws, state)
   }
