@@ -17,6 +17,7 @@ import { logTrackPlayed, mediaHistory, addChatMsg, chatGet, chatPage, chatLatest
 import { recorder } from "./recorder.js"
 import { createRadio } from "./radio.js"
 import { jamYtState } from "./jam-yt.js"
+import { jamDraw } from "./jam-draw.js"
 import { pickLyrics } from "./lyrics.js"
 import { createPluginUpdates } from "./plugin-updates.js"
 
@@ -1167,6 +1168,7 @@ const jamWss = new WebSocketServer({ noServer: true })
 // sala -> Map(nick -> ws). Reuso de nick derruba o antigo (reconexão).
 const jamRooms = new Map()
 const watchStates = new Map()
+const drawStates = new Map()
 // sala -> 'music' | 'voice'. O primeiro join define (mode do cliente vai na
 // query como type); sala vazia esquece. É o que separa Estúdio de canal de
 // conversa no /api/fixed/jam e nos eventos de presença (campo `kind`) — sem
@@ -1190,6 +1192,7 @@ jamWss.on("connection", (ws, req) => {
   if (watch !== room.startsWith("watch:") || watch && !/^watch:\d{5,25}$/.test(room)) return ws.close(4001, "sala watch inválida")
   const type = u.searchParams.get("type") === "music" ? "music" : "voice"
 
+  let drawWindow = 0, drawBudget = 0
   const members = jamRooms.get(room) ?? new Map()
   if (!jamRooms.has(room)) jamRoomTypes.set(room, type)
   const old = members.get(nick)
@@ -1207,6 +1210,9 @@ jamWss.on("connection", (ws, req) => {
     if (!watchStates.has(room)) watchStates.set(room, jamYtState())
     jamSend(ws, watchStates.get(room).members())
     if (watchStates.get(room).snapshot()) jamSend(ws, watchStates.get(room).snapshot())
+    // Anotações já existentes na live e o estado do toggle "Permitir anotações".
+    if (!drawStates.has(room)) drawStates.set(room, jamDraw())
+    jamSend(ws, drawStates.get(room).sync())
   }
 
   ws.on("message", data => {
@@ -1233,6 +1239,19 @@ jamWss.on("connection", (ws, req) => {
       for (const ows of members.values()) if (ows !== ws) jamSend(ows, relay)
       return
     }
+    // Anotações da live: valida, aplica no estado da sala e espelha pros outros.
+    if (msg.type === "draw") {
+      if (!watch) return
+      const tick = Date.now()
+      if (tick - drawWindow >= 1000) { drawWindow = tick; drawBudget = 40 }
+      else if (drawBudget-- <= 0) return
+      if (!drawStates.has(room)) drawStates.set(room, jamDraw())
+      const draw = drawStates.get(room)
+      if (msg.action === "resync") return jamSend(ws, draw.resync(msg.target))
+      const relay = draw.apply(msg, nick)
+      if (relay) for (const [other, ows] of members) if (ows !== ws) jamSend(ows, relay)
+      return
+    }
     // offer/answer/ice vão endereçados; relay cego pro destino
     const dst = typeof msg.to === "string" ? members.get(msg.to) : null
     if (dst) jamSend(dst, { ...msg, from: nick })
@@ -1246,7 +1265,7 @@ jamWss.on("connection", (ws, req) => {
       for (const ows of members.values()) jamSend(ows, update)
     }
     if (members.size) jamRooms.set(room, members)
-    else { jamRooms.delete(room); jamRoomTypes.delete(room); watchStates.delete(room) }
+    else { jamRooms.delete(room); jamRoomTypes.delete(room); watchStates.delete(room); drawStates.delete(room) }
     for (const ows of members.values()) jamSend(ows, { type: "peer-left", nick })
     presenceBroadcast({ type: "member-left", room, nick, kind: jamRoomTypes.get(room) ?? type })
     log(`[jam] ${nick} saiu de "${room}" (${members.size})`)
